@@ -1,4 +1,4 @@
-# $Id: rdbms_common.py,v 1.27.2.9 2003-06-24 08:18:19 anthonybaxter Exp $
+# $Id: rdbms_common.py,v 1.27.2.10 2003-08-26 00:15:09 richard Exp $
 ''' Relational database (SQL) backend common code.
 
 Basics:
@@ -1124,7 +1124,17 @@ class Class(hyperdb.Class):
             if propname == 'id':
                 newid = value
                 continue
+            elif propname == 'is retired':
+                # is the item retired?
+                if int(value):
+                    retire = 1
+                continue
             elif value is None:
+                d[propname] = None
+                continue
+
+            prop = properties[propname]
+            if value is None:
                 # don't set Nones
                 continue
             elif isinstance(prop, hyperdb.Date):

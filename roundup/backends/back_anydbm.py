@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-#$Id: back_anydbm.py,v 1.96.2.3 2003-03-10 00:22:52 richard Exp $
+#$Id: back_anydbm.py,v 1.96.2.4 2003-08-26 00:15:09 richard Exp $
 '''
 This module defines a backend that saves the hyperdatabase in a database
 chosen by anydbm. It is guaranteed to always be available in python
@@ -942,7 +942,7 @@ class Class(hyperdb.Class):
                 newid = value
                 continue
             elif value is None:
-                # don't set Nones
+                d[propname] = None
                 continue
             elif isinstance(prop, hyperdb.Date):
                 value = date.Date(value)

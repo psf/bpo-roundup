@@ -1,3 +1,34 @@
+# $Id: back_metakit.py,v 1.30.2.3 2003-08-26 00:15:09 richard Exp $
+'''
+   Metakit backend for Roundup, originally by Gordon McMillan.
+
+   Notes by Richard:
+
+   This backend has some behaviour specific to metakit:
+
+    - there's no concept of an explicit "unset" in metakit, so all types
+      have some "unset" value:
+
+      ========= ===== ====================================================
+      Type      Value Action when fetching from mk
+      ========= ===== ====================================================
+      Strings   ''    convert to None
+      Date      0     (seconds since 1970-01-01.00:00:00) convert to None
+      Interval  ''    convert to None
+      Number    0     ambiguious :( - do nothing
+      Boolean   0     ambiguious :( - do nothing
+      Link      0     convert to None
+      Multilink []    actually, mk can handle this one ;)
+      Passowrd  ''    convert to None
+      ========= ===== ====================================================
+
+      The get/set routines handle these values accordingly by converting
+      to/from None where they can. The Number/Boolean types are not able
+      to handle an "unset" at all, so they default the "unset" to 0.
+
+    - probably a bunch of stuff that I'm not aware of yet because I haven't
+      fully read through the source. One of these days....
+'''
 from roundup import hyperdb, date, password, roundupdb, security
 import metakit
 from sessions import Sessions
@@ -1011,9 +1042,18 @@ class Class:
             propname = propnames[i]
             prop = properties[propname]
             if propname == 'id':
-                newid = value
-                value = int(value)
-            elif isinstance(prop, hyperdb.Date):
+                newid = value = int(value)
+            elif propname == 'is retired':
+                # is the item retired?
+                if int(value):
+                    d['_isdel'] = 1
+                continue
+            elif value is None:
+                d[propname] = None
+                continue
+
+            prop = properties[propname]
+            if isinstance(prop, hyperdb.Date):
                 value = int(calendar.timegm(value))
             elif isinstance(prop, hyperdb.Interval):
                 value = str(date.Interval(value))
