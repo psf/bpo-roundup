@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-#$Id: roundup_indexer.py,v 1.1.2.1 2002-04-03 11:55:57 rochecompaan Exp $
+#$Id: roundup_indexer.py,v 1.1.2.2 2002-04-19 19:54:42 rochecompaan Exp $
 '''
 This module provides an indexer class, RoundupIndexer, that stores text
 indices in a roundup instance.  This class makes searching the content of
@@ -43,5 +43,41 @@ class RoundupIndexer(SlicedZPickleIndexer):
             self.add_files(dir=files_path)
             self.save_index()
 
+    def search(self, search_terms, klass):
+        ''' display search results
+        '''
+        hits = self.find(search_terms)
+        links = []
+        nodeids = {}
+        designator_propname = {'msg': 'messages',
+                               'file': 'files'}
+        if hits:
+            hitcount = len(hits)
+            # build a dictionary of nodes and their associated messages
+            # and files
+            for hit in hits.keys():
+                filename = hits[hit].split('/')[-1]
+                for designator, propname in designator_propname.items():
+                    if filename.find(designator) == -1: continue
+                    nodeid = filename[len(designator):]
+                    result = apply(klass.find, (), {propname:nodeid})
+                    if not result: continue
+
+                    id = str(result[0])
+                    if not nodeids.has_key(id):
+                        nodeids[id] = {}
+
+                    node_dict = nodeids[id]
+                    if not node_dict.has_key(propname):
+                        node_dict[propname] = [nodeid]
+                    elif node_dict.has_key(propname):
+                        node_dict[propname].append(nodeid)
+
+        return nodeids
+
+
 #
 #$Log: not supported by cvs2svn $
+#Revision 1.1.2.1  2002/04/03 11:55:57  rochecompaan
+# . Added feature #526730 - search for messages capability
+#

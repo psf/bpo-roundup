@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: hyperdb.py,v 1.59 2002-03-12 22:52:26 richard Exp $
+# $Id: hyperdb.py,v 1.59.2.1 2002-04-19 19:54:42 rochecompaan Exp $
 
 __doc__ = """
 Hyperdatabase implementation, especially field types.
@@ -796,7 +796,8 @@ class Class:
         return l
 
     # XXX not in spec
-    def filter(self, filterspec, sort, group, num_re = re.compile('^\d+$')):
+    def filter(self, search_matches, filterspec, sort, group, 
+            num_re = re.compile('^\d+$')):
         ''' Return a list of the ids of the active nodes in this class that
             match the 'filter' spec, sorted by the group spec and then the
             sort spec
@@ -885,6 +886,14 @@ class Class:
             else:
                 l.append((nodeid, node))
         l.sort()
+
+        # filter based on full text search
+        if search_matches:
+            k = []
+            for v in l:
+                if search_matches.has_key(v[0]):
+                    k.append(v)
+            l = k
 
         # optimise sort
         m = []
@@ -1097,6 +1106,9 @@ def Choice(name, db, *options):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.59  2002/03/12 22:52:26  richard
+# more pychecker warnings removed
+#
 # Revision 1.58  2002/02/27 03:23:16  richard
 # Ran it through pychecker, made fixes
 #

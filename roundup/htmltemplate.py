@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: htmltemplate.py,v 1.84 2002-03-29 19:41:48 rochecompaan Exp $
+# $Id: htmltemplate.py,v 1.84.2.1 2002-04-19 19:54:42 rochecompaan Exp $
 
 __doc__ = """
 Template engine.
@@ -704,7 +704,8 @@ class IndexTemplateReplace:
     def go(self, text):
         return self.replace.sub(self, text)
 
-    def __call__(self, m, filter=None, columns=None, sort=None, group=None):
+    def __call__(self, m, search_text=None, filter=None, columns=None,
+            sort=None, group=None):
         if m.group('name'):
             if m.group('name') in self.props:
                 text = m.group('text')
@@ -733,8 +734,9 @@ class IndexTemplate(TemplateFunctions):
         self.properties = self.cl.getprops()
 
     col_re=re.compile(r'<property\s+name="([^>]+)">')
-    def render(self, filterspec={}, filter=[], columns=[], sort=[], group=[],
-            show_display_form=1, nodeids=None, show_customization=1):
+    def render(self, filterspec={}, search_text='', filter=[], columns=[], 
+            sort=[], group=[], show_display_form=1, nodeids=None,
+            show_customization=1):
         self.filterspec = filterspec
 
         w = self.client.write
@@ -807,8 +809,11 @@ class IndexTemplate(TemplateFunctions):
 
         # now actually loop through all the nodes we get from the filter and
         # apply the template
+        matches = None
         if nodeids is None:
-            nodeids = self.cl.filter(filterspec, sort, group)
+            matches = self.client.indexer.search(search_text.split(' '), 
+                self.cl)
+            nodeids = self.cl.filter(matches, filterspec, sort, group)
         for nodeid in nodeids:
             # check for a group heading
             if group_names:
@@ -849,6 +854,8 @@ class IndexTemplate(TemplateFunctions):
             replace = IndexTemplateReplace(self.globals, locals(), columns)
             self.nodeid = nodeid
             w(replace.go(template))
+            if matches:
+                self.node_matches(matches[nodeid], len(columns))
             self.nodeid = None
 
         w('</table>')
@@ -865,6 +872,35 @@ class IndexTemplate(TemplateFunctions):
                     ','.join(sort))
             w('</form>\n')
 
+    def node_matches(self, match, colspan):
+        ''' display the files and messages for a node that matched a
+            full text search
+        '''
+        w = self.client.write
+
+        message_links = []
+        file_links = []
+        if match.has_key('messages'):
+            for msgid in match['messages']:
+                k = self.db.msg.labelprop()
+                lab = self.db.msg.get(msgid, k)
+                msgpath = 'msg%s'%msgid
+                message_links.append('<a href="%(msgpath)s">%(lab)s</a>'
+                    %locals())
+            w(_('<tr class="row-hilite"><td colspan="%s">'
+                '&nbsp;&nbsp;Matched messages: %s</td></tr>')%(
+                    colspan, ', '.join(message_links)))
+
+        if match.has_key('files'):
+            for fileid in match['files']:
+                filename = self.db.file.get(fileid, 'name')
+                filepath = 'file%s/%s'%(fileid, filename)
+                file_links.append('<a href="%(filepath)s">%(filename)s</a>'
+                    %locals())
+            w(_('<tr class="row-hilite"><td colspan="%s">'
+                '&nbsp;&nbsp;Matched files: %s</td></tr>')%(
+                    colspan, ', '.join(file_links)))
+
 
     def filter_section(self, template, filter, columns, group, all_filters,
             all_columns, show_customization):
@@ -880,6 +916,10 @@ class IndexTemplate(TemplateFunctions):
             w('<table width=100% border=0 cellspacing=0 cellpadding=2>')
             w('<tr class="location-bar">')
             w(_(' <th align="left" colspan="2">Filter specification...</th>'))
+            w('</tr>')
+            w('<tr>')
+            w('<th class="location-bar">Search terms</th>')
+            w('<td><input name="search_text" size="50"></td>')
             w('</tr>')
             replace = IndexTemplateReplace(self.globals, locals(), filter)
             w(replace.go(template))
@@ -1012,6 +1052,7 @@ class IndexTemplate(TemplateFunctions):
         w(':sort=%s'%','.join(m[:2]))
         return '&'.join(l)
 
+
 #
 #   ITEM TEMPLATES
 #
@@ -1114,6 +1155,10 @@ class NewItemTemplate(TemplateFunctions):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.84  2002/03/29 19:41:48  rochecompaan
+#  . Fixed display of mutlilink properties when using the template
+#    functions, menu and plain.
+#
 # Revision 1.83  2002/02/27 04:14:31  richard
 # Ran it through pychecker, made fixes
 #

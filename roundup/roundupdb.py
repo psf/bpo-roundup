@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: roundupdb.py,v 1.49 2002-03-19 06:41:49 richard Exp $
+# $Id: roundupdb.py,v 1.49.2.1 2002-04-19 19:54:42 rochecompaan Exp $
 
 __doc__ = """
 Extending hyperdb with types specific to issue-tracking.
@@ -80,7 +80,7 @@ class Database:
         # try the user alternate addresses if possible
         props = self.user.getprops()
         if props.has_key('alternate_addresses'):
-            users = self.user.filter({'alternate_addresses': address},
+            users = self.user.filter(None, {'alternate_addresses': address},
                 [], [])
             user = extractUserFromList(self.user, users)
             if user is not None: return user
@@ -604,6 +604,9 @@ class IssueClass(Class):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.49  2002/03/19 06:41:49  richard
+# Faster, easier, less mess ;)
+#
 # Revision 1.48  2002/03/18 18:32:00  rochecompaan
 # All messages sent to the nosy list are now encoded as quoted-printable.
 #

@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: cgi_client.py,v 1.114.2.1 2002-04-03 11:55:57 rochecompaan Exp $
+# $Id: cgi_client.py,v 1.114.2.2 2002-04-19 19:54:42 rochecompaan Exp $
 
 __doc__ = """
 WWW request handler (also used in the stand-alone server).
@@ -211,9 +211,6 @@ function help_window(helpurl, width, height) {
             links.append(_('<a href="user">User List</a>'))
             links.append(_('<a href="newuser">Add User</a>'))
 
-        # add the search link
-        links.append(_('<a href="search">Search</a>'))
-        
         # now we have all the links, join 'em
         links = '\n | '.join(links)
 
@@ -395,11 +392,15 @@ function help_window(helpurl, width, height) {
         if filterspec is None: filterspec = self.index_filterspec(filter)
         if show_customization is None:
             show_customization = self.customization_widget()
+        if self.form.has_key('search_text'):
+            search_text = self.form['search_text'].value
+        else:
+            search_text = ''
 
         index = htmltemplate.IndexTemplate(self, self.instance.TEMPLATES, cn)
         try:
-            index.render(filterspec, filter, columns, sort, group,
-                show_customization=show_customization)
+            index.render(filterspec, search_text, filter, columns, sort, 
+                group, show_customization=show_customization)
         except htmltemplate.MissingTemplateError:
             self.basicClassEditPage()
         self.pagefoot()
@@ -562,129 +563,6 @@ function help_window(helpurl, width, height) {
         self.pagefoot()
     showissue = shownode
     showmsg = shownode
-
-    def search(self):
-        ''' display search form
-        '''
-        self.pagehead(_('Search'))
-        self.write(_('''
-<form action="searchresults" method="post">
-<table border=0 cellspacing=0 cellpadding=2>
-<tr>
-<th>Search terms</th>
-<td><input name="search_terms" size="50"></td>
-</tr>
-<tr>
-<td>&nbsp;</td>
-<td><input type="submit" value="  Search  "></td>
-</tr>
-</table>
-</form>
-'''))
-        self.pagefoot()
-
-    def searchresults(self):
-        ''' display search results
-        '''
-        search_terms = self.form['search_terms'].value
-        hits = self.indexer.find(search_terms.split(' '))
-        links = []
-        nodeids = {}
-        designator_propname = {'msg': 'messages',
-                               'file': 'files'}
-        if hits:
-            hitcount = len(hits)
-            instance_url = '%s/%s'%(self.env['SCRIPT_NAME'], 
-                self.instance_path_name)
-            # build a dictionary of nodes and their associated messages
-            # and files
-            for hit in hits.keys():
-                filename = hits[hit].split('/')[-1]
-                for designator, propname in designator_propname.items():
-                    if filename.find(designator) == -1: continue
-                    nodeid = filename[len(designator):]
-                    for classname in self.classes_to_search:
-                        if not classname in self.db.getclasses(): continue
-                        cl = self.db.getclass(classname)
-                        result = apply(cl.find, (), {propname:nodeid})
-                        if not result: continue
-
-                        if not nodeids.has_key(classname):
-                            nodeids[classname] = {}
-
-                        id = int(result[0])
-                        class_dict = nodeids[classname]
-                        if not class_dict.has_key(id):
-                            class_dict[id] = {}
-
-                        node_dict = class_dict[id]
-                        if not node_dict.has_key(propname):
-                            node_dict[propname] = [nodeid]
-                        elif class_dict.has_key(propname):
-                            node_dict[propname].append(nodeid)
-
-            for classname in self.classes_to_search:
-                if not nodeids.has_key(classname): continue
-                ids = nodeids[classname].keys()
-                # TODO: sort hits on relevance, not on ids
-                ids.sort()
-                # generate hyperlinks for nodes
-                for id in ids:
-                    nodepath = '%s/%s%s'%(instance_url, classname, id)
-                    title = self.db.issue.get(`id`, 'title')
-                    node_link = _(''' 
-<a href="%(nodepath)s">%(classname)s%(id)s: %(title)s</a>
-''')%locals()
-
-                    node_dict = nodeids[classname][id]
-                    # hyperlinks for messages
-                    message_links = []
-                    if node_dict.has_key('messages'):
-                        for msgid in node_dict['messages']:
-                            k = self.db.msg.labelprop()
-                            lab = self.db.msg.get(msgid, k)
-                            msgpath = '%s/msg%s'%(instance_url, msgid)
-                            message_links.append(_(''' 
-<a href="%(msgpath)s">%(lab)s</a>''')%locals())
-                        message_links = _('<li>Messages: %s</li>')%(
-                            ', '.join(message_links))
-                    else:
-                        message_links = ''
-
-                    # hyperlinks for files
-                    file_links = []
-                    if node_dict.has_key('files'):
-                        for fileid in node_dict['files']:
-                            filename = self.db.file.get(fileid, 'name')
-                            filepath = '%s/file%s/%s'%(instance_url, 
-                                fileid, filename)
-                            file_links.append(_(''' 
-<a href="%(filepath)s">%(filename)s</a>''')%locals())
-                        file_links = _('<li>Files: %s</li>')%(
-                            ', '.join(file_links))
-                    else:
-                        file_links = ''
-
-                    links.append(_('''%(node_link)s
-<ul>
-%(message_links)s
-%(file_links)s
-</ul>''')%locals())
-        else:
-            hitcount = 0
-
-        self.pagehead(_('Search Results'))
-        if links:
-            links = '<li>'.join(links)
-            self.write(_('''<p>Searching for "%(search_terms)s" returned
-%(hitcount)s results:</p>
-<ol>
-<li>%(links)s
-</ol>''')%locals())
-        else:
-            self.write(_('''<p>Searching for "%(search_terms)s" returned
-no results.</p>''')%locals())
-        self.pagefoot()
 
     def _add_assignedto_to_nosy(self, props):
         ''' add the assignedto value from the props to the nosy list
@@ -1493,6 +1371,9 @@ def parsePropsFromForm(db, cl, form, nodeid=0):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.114.2.1  2002/04/03 11:55:57  rochecompaan
+#  . Added feature #526730 - search for messages capability
+#
 # Revision 1.114  2002/03/17 23:06:05  richard
 # oops
 #
