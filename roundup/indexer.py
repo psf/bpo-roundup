@@ -98,6 +98,8 @@ Benchmarks:
     - grep search (xml|python):   20s (cached: <5s)
     - 'srch' utility (python):    12s
 """
+#$Id: indexer.py,v 1.1.2.2 2002-04-03 12:01:55 rochecompaan Exp $
+
 __shell_usage__ = """
 Shell Usage: [python] indexer.py [options] [search_words]
 
@@ -121,7 +123,7 @@ Shell Usage: [python] indexer.py [options] [search_words]
 Output/format options are ALL/EVERYTHING/VERBOSE, RATINGS/SCORES,
 FILENAMES/NAMES/FILES, SUMMARY/REPORT"""
 
-__version__ = "$Revision: 1.1.2.1 $"
+__version__ = "$Revision: 1.1.2.2 $"
 __author__=["David Mertz (mertz@gnosis.cx)",]
 __thanks_to__=["Pat Knight (p.knight@ktgroup.co.uk)",
                "Gregory Popovitch (greg@gpy.com)", ]
@@ -778,3 +780,5 @@ if __name__ == '__main__':
         sys.stderr.write('Processed in %.3f seconds (%s)'
                           % (time.time()-start, ndx.whoami()))
 
+#
+#$Log: not supported by cvs2svn $
