@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-#$Id: back_anydbm.py,v 1.30.2.1 2002-04-03 11:55:57 rochecompaan Exp $
+#$Id: back_anydbm.py,v 1.30.2.2 2002-05-02 13:09:08 rochecompaan Exp $
 '''
 This module defines a backend that saves the hyperdatabase in a database
 chosen by anydbm. It is guaranteed to always be available in python
@@ -27,6 +27,7 @@ import whichdb, anydbm, os, marshal
 from roundup import hyperdb, date
 from blobfiles import FileStorage
 from roundup.roundup_indexer import RoundupIndexer
+from locking import acquire_lock, release_lock
 
 #
 # Now the database
@@ -62,6 +63,8 @@ class Database(FileStorage, hyperdb.Database):
         self.newnodes = {}      # keep track of the new nodes by class
         self.transactions = []
         self.indexer = RoundupIndexer(self.dir)
+        # ensure files are group readable and writable
+        os.umask(0002)
 
     def __repr__(self):
         return '<back_anydbm instance at %x>'%id(self) 
@@ -132,6 +135,7 @@ class Database(FileStorage, hyperdb.Database):
         '''
         if hyperdb.DEBUG:
             print '_opendb', (self, name, mode)
+
         # determine which DB wrote the class file
         db_type = ''
         path = os.path.join(os.getcwd(), self.dir, name)
@@ -161,6 +165,31 @@ class Database(FileStorage, hyperdb.Database):
             print "_opendb %r.open(%r, %r)"%(db_type, path, mode)
         return dbm.open(path, mode)
 
+    def _lockdb(self, name):
+        ''' Lock a database file
+        '''
+        path = os.path.join(os.getcwd(), self.dir, '%s.lock'%name)
+        return acquire_lock(path)
+
+    #
+    # Node IDs
+    #
+    def newid(self, classname):
+        ''' Generate a new id for the given class
+        '''
+        # open the ids DB - create if if doesn't exist
+        lock = self._lockdb('_ids')
+        db = self._opendb('_ids', 'c')
+        if db.has_key(classname):
+            newid = db[classname] = str(int(db[classname]) + 1)
+        else:
+            # the count() bit is transitional - older dbs won't start at 1
+            newid = str(self.getclass(classname).count()+1)
+            db[classname] = newid
+        db.close()
+        release_lock(lock)
+        return newid
+
     #
     # Nodes
     #
@@ -179,6 +208,7 @@ class Database(FileStorage, hyperdb.Database):
         if hyperdb.DEBUG:
             print 'setnode', (self, classname, nodeid, node)
         self.dirtynodes.setdefault(classname, {})[nodeid] = 1
+
         # can't set without having already loaded the node
         self.cache[classname][nodeid] = node
         self.savenode(classname, nodeid, node)
@@ -206,9 +236,17 @@ class Database(FileStorage, hyperdb.Database):
             db = self.getclassdb(classname)
         if not db.has_key(nodeid):
             raise IndexError, "no such %s %s"%(classname, nodeid)
+
+        # decode
         res = marshal.loads(db[nodeid])
+
+        # reverse the serialisation
+        res = self.unserialise(classname, res)
+
+        # store off in the cache
         if cache:
             cache[nodeid] = res
+
         return res
 
     def hasnode(self, classname, nodeid, db=None):
@@ -382,11 +420,17 @@ class Database(FileStorage, hyperdb.Database):
             db = self.databases[db_name] = self.getclassdb(classname, 'c')
 
         # now save the marshalled data
-        db[nodeid] = marshal.dumps(node)
+        db[nodeid] = marshal.dumps(self.serialise(classname, node))
 
     def _doSaveJournal(self, classname, nodeid, action, params):
+        # serialise first
+        if action in ('set', 'create'):
+            params = self.serialise(classname, params)
+
+        # create the journal entry
         entry = (nodeid, date.Date().get_tuple(), self.journaltag, action,
             params)
+
         if hyperdb.DEBUG:
             print '_doSaveJournal', entry
 
@@ -399,11 +443,13 @@ class Database(FileStorage, hyperdb.Database):
 
         # now insert the journal entry
         if db.has_key(nodeid):
+            # append to existing
             s = db[nodeid]
             l = marshal.loads(s)
             l.append(entry)
         else:
             l = [entry]
+
         db[nodeid] = marshal.dumps(l)
 
     def _doStoreFile(self, name, **databases):
@@ -430,6 +476,26 @@ class Database(FileStorage, hyperdb.Database):
 
 #
 #$Log: not supported by cvs2svn $
+#Revision 1.33  2002/04/24 10:38:26  rochecompaan
+#All database files are now created group readable and writable.
+#
+#Revision 1.32  2002/04/15 23:25:15  richard
+#. node ids are now generated from a lockable store - no more race conditions
+#
+#We're using the portalocker code by Jonathan Feinberg that was contributed
+#to the ASPN Python cookbook. This gives us locking across Unix and Windows.
+#
+#Revision 1.31  2002/04/03 05:54:31  richard
+#Fixed serialisation problem by moving the serialisation step out of the
+#hyperdb.Class (get, set) into the hyperdb.Database.
+#
+#Also fixed htmltemplate after the showid changes I made yesterday.
+#
+#Unit tests for all of the above written.
+#
+#Revision 1.30.2.1  2002/04/03 11:55:57  rochecompaan
+# . Added feature #526730 - search for messages capability
+#
 #Revision 1.30  2002/02/27 03:40:59  richard
 #Ran it through pychecker, made fixes
 #

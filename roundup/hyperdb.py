@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: hyperdb.py,v 1.59.2.2 2002-04-20 13:23:33 rochecompaan Exp $
+# $Id: hyperdb.py,v 1.59.2.3 2002-05-02 13:09:08 rochecompaan Exp $
 
 __doc__ = """
 Hyperdatabase implementation, especially field types.
@@ -171,10 +171,65 @@ transaction.
         '''
         raise NotImplementedError
 
+    def serialise(self, classname, node):
+        '''Copy the node contents, converting non-marshallable data into
+           marshallable data.
+        '''
+        if DEBUG: print 'serialise', classname, node
+        properties = self.getclass(classname).getprops()
+        d = {}
+        for k, v in node.items():
+            # if the property doesn't exist, or is the "retired" flag then
+            # it won't be in the properties dict
+            if not properties.has_key(k):
+                d[k] = v
+                continue
+
+            # get the property spec
+            prop = properties[k]
+
+            if isinstance(prop, Password):
+                d[k] = str(v)
+            elif isinstance(prop, Date) and v is not None:
+                d[k] = v.get_tuple()
+            elif isinstance(prop, Interval) and v is not None:
+                d[k] = v.get_tuple()
+            else:
+                d[k] = v
+        return d
+
     def setnode(self, classname, nodeid, node):
         '''Change the specified node.
         '''
         raise NotImplementedError
+
+    def unserialise(self, classname, node):
+        '''Decode the marshalled node data
+        '''
+        if DEBUG: print 'unserialise', classname, node
+        properties = self.getclass(classname).getprops()
+        d = {}
+        for k, v in node.items():
+            # if the property doesn't exist, or is the "retired" flag then
+            # it won't be in the properties dict
+            if not properties.has_key(k):
+                d[k] = v
+                continue
+
+            # get the property spec
+            prop = properties[k]
+
+            if isinstance(prop, Date) and v is not None:
+                d[k] = date.Date(v)
+            elif isinstance(prop, Interval) and v is not None:
+                d[k] = date.Interval(v)
+            elif isinstance(prop, Password):
+                p = password.Password()
+                p.unpack(v)
+                d[k] = p
+            else:
+                d[k] = v
+        return d
 
     def getnode(self, classname, nodeid, db=None, cache=1):
         '''Get a node from the database.
@@ -298,7 +353,7 @@ class Class:
             raise DatabaseError, 'Database open read-only'
 
         # new node's id
-        newid = str(self.count() + 1)
+        newid = self.db.newid(self.classname)
 
         # validate propvalues
         num_re = re.compile('^\d+$')
@@ -396,17 +451,6 @@ class Class:
                 # TODO: None isn't right here, I think...
                 propvalues[key] = None
 
-        # convert all data to strings
-        for key, prop in self.properties.items():
-            if isinstance(prop, Date):
-                if propvalues[key] is not None:
-                    propvalues[key] = propvalues[key].get_tuple()
-            elif isinstance(prop, Interval):
-                if propvalues[key] is not None:
-                    propvalues[key] = propvalues[key].get_tuple()
-            elif isinstance(prop, Password):
-                propvalues[key] = str(propvalues[key])
-
         # done
         self.db.addnode(self.classname, newid, propvalues)
         self.db.addjournal(self.classname, newid, 'create', propvalues)
@@ -442,20 +486,6 @@ class Class:
                     return None
             else:
                 return default
-
-        # possibly convert the marshalled data to instances
-        if isinstance(prop, Date):
-            if d[propname] is None:
-                return None
-            return date.Date(d[propname])
-        elif isinstance(prop, Interval):
-            if d[propname] is None:
-                return None
-            return date.Interval(d[propname])
-        elif isinstance(prop, Password):
-            p = password.Password()
-            p.unpack(d[propname])
-            return p
 
         return d[propname]
 
@@ -605,17 +635,17 @@ class Class:
             elif isinstance(prop, Password):
                 if not isinstance(value, password.Password):
                     raise TypeError, 'new property "%s" not a Password'% key
-                propvalues[key] = value = str(value)
+                propvalues[key] = value
 
             elif value is not None and isinstance(prop, Date):
                 if not isinstance(value, date.Date):
                     raise TypeError, 'new property "%s" not a Date'% key
-                propvalues[key] = value = value.get_tuple()
+                propvalues[key] = value
 
             elif value is not None and isinstance(prop, Interval):
                 if not isinstance(value, date.Interval):
                     raise TypeError, 'new property "%s" not an Interval'% key
-                propvalues[key] = value = value.get_tuple()
+                propvalues[key] = value
 
             node[key] = value
 
@@ -1108,6 +1138,32 @@ def Choice(name, db, *options):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.63  2002/04/15 23:25:15  richard
+# . node ids are now generated from a lockable store - no more race conditions
+#
+# We're using the portalocker code by Jonathan Feinberg that was contributed
+# to the ASPN Python cookbook. This gives us locking across Unix and Windows.
+#
+# Revision 1.62  2002/04/03 07:05:50  richard
+# d'oh! killed retirement of nodes :(
+# all better now...
+#
+# Revision 1.61  2002/04/03 06:11:51  richard
+# Fix for old databases that contain properties that don't exist any more.
+#
+# Revision 1.60  2002/04/03 05:54:31  richard
+# Fixed serialisation problem by moving the serialisation step out of the
+# hyperdb.Class (get, set) into the hyperdb.Database.
+#
+# Also fixed htmltemplate after the showid changes I made yesterday.
+#
+# Unit tests for all of the above written.
+#
+# Revision 1.59.2.2  2002/04/20 13:23:33  rochecompaan
+# We now have a separate search page for nodes.  Search links for
+# different classes can be customized in instance_config similar to
+# index links.
+#
 # Revision 1.59.2.1  2002/04/19 19:54:42  rochecompaan
 # cgi_client.py
 #     removed search link for the time being

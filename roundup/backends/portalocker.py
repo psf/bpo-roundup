@@ -2,7 +2,7 @@
 #                  Requires python 1.5.2 or better.
 
 # ID line added by richard for Roundup file tracking
-# $Id: portalocker.py,v 1.1 2002-04-15 23:25:15 richard Exp $
+# $Id: portalocker.py,v 1.1.2.1 2002-05-02 13:09:08 rochecompaan Exp $
 
 """Cross-platform (posix/nt) API for flock-style file locking.
 

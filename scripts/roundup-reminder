@@ -19,7 +19,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# $Id: roundup-reminder,v 1.1 2002-04-15 06:37:31 richard Exp $
+# $Id: roundup-reminder,v 1.1.2.1 2002-05-02 13:09:10 rochecompaan Exp $
 
 '''
 Simple script that emails all users of a tracker with the issues that
@@ -138,5 +138,10 @@ for user_id in db.user.list():
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.1  2002/04/15 06:37:31  richard
+# Here's a cron-job reminder script that we're going to be using here at
+# ekit. Might be useful for other people. Could use some work making it more
+# general and easier to customise.
+#
 #
 #

@@ -1,5 +1,8 @@
+====================
 Implementation notes
 ====================
+
+:Version: $Revision: 1.1.4.1 $
 
 [see also the roundup package docstring]
 
@@ -42,4 +45,10 @@ In short:
  template - menu() and field() look awfully similar now .... ;)
 
  roundup.py - the command-line tool has a lot more commands at its disposal
+
+-----------------
+
+Back to `Table of Contents`_
+
+.. _`Table of Contents`: index.html
 

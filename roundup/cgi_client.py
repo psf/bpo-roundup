@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: cgi_client.py,v 1.114.2.4 2002-05-02 11:49:18 rochecompaan Exp $
+# $Id: cgi_client.py,v 1.114.2.5 2002-05-02 13:09:07 rochecompaan Exp $
 
 __doc__ = """
 WWW request handler (also used in the stand-alone server).
@@ -600,6 +600,25 @@ function help_window(helpurl, width, height) {
     showmsg = shownode
     searchissue = searchnode
 
+    def _add_author_to_nosy(self, props):
+        ''' add the author value from the props to the nosy list
+        '''
+        if not props.has_key('author'):
+            return
+        author_id = props['author']
+        if not props.has_key('nosy'):
+            # load current nosy
+            if self.nodeid:
+                cl = self.db.classes[self.classname]
+                l = cl.get(self.nodeid, 'nosy')
+                if author_id in l:
+                    return
+                props['nosy'] = l
+            else:
+                props['nosy'] = []
+        if author_id not in props['nosy']:
+            props['nosy'].append(author_id)
+
     def _add_assignedto_to_nosy(self, props):
         ''' add the assignedto value from the props to the nosy list
         '''
@@ -645,6 +664,10 @@ function help_window(helpurl, width, height) {
 
         self._add_assignedto_to_nosy(props)
 
+        # possibly add the author of the change to the nosy list
+        if self.db.config.ADD_AUTHOR_TO_NOSY == 'yes':
+            self._add_author_to_nosy(props)
+
         # create the message
         message, files = self._handle_message()
         if message:
@@ -672,6 +695,10 @@ function help_window(helpurl, width, height) {
                 props['status'] = unread_id
 
         self._add_assignedto_to_nosy(props)
+
+        # possibly add the author of the new node to the nosy list
+        if self.db.config.ADD_AUTHOR_TO_NOSY in ('new', 'yes'):
+            self._add_author_to_nosy(props)
 
         # check for messages and files
         message, files = self._handle_message()
@@ -706,7 +733,7 @@ function help_window(helpurl, width, height) {
         # in a nutshell, don't do anything if there's no note or there's no
         # NOSY
         if self.form.has_key('__note'):
-            note = self.form['__note'].value
+            note = self.form['__note'].value.strip()
         if not props.has_key('messages'):
             return None, files
         if not isinstance(props['messages'], hyperdb.Multilink):
@@ -1412,6 +1439,16 @@ def parsePropsFromForm(db, cl, form, nodeid=0):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.116  2002/05/02 08:07:49  richard
+# Added the ADD_AUTHOR_TO_NOSY handling to the CGI interface.
+#
+# Revision 1.115  2002/04/02 01:56:10  richard
+#  . stop sending blank (whitespace-only) notes
+#
+# Revision 1.114.2.4  2002/05/02 11:49:18  rochecompaan
+# Allow customization of the search filters that should be displayed
+# on the search page.
+#
 # Revision 1.114.2.3  2002/04/20 13:23:31  rochecompaan
 # We now have a separate search page for nodes.  Search links for
 # different classes can be customized in instance_config similar to

@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# $Id: test_locking.py,v 1.1 2002-04-15 23:25:15 richard Exp $
+# $Id: test_locking.py,v 1.1.2.1 2002-05-02 13:09:11 rochecompaan Exp $
 
 import os, unittest, tempfile
 
@@ -50,6 +50,12 @@ def suite():
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.1  2002/04/15 23:25:15  richard
+# . node ids are now generated from a lockable store - no more race conditions
+#
+# We're using the portalocker code by Jonathan Feinberg that was contributed
+# to the ASPN Python cookbook. This gives us locking across Unix and Windows.
+#
 #
 #
 # vim: set filetype=python ts=4 sw=4 et si

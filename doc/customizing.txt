@@ -1,5 +1,11 @@
+===================
 Customising Roundup
 ===================
+
+:Version: $Revision: 1.1.2.1 $
+
+.. contents::
+
 
 Instances have the following structure:
 
@@ -72,13 +78,44 @@ instance is attempted.::
   FILTER_POSITION = 'bottom'      # one of 'top', 'bottom', 'top and bottom'
 
   # Deny or allow anonymous access to the web interface
-  ANONYMOUS_ACCESS = 'deny'
+  ANONYMOUS_ACCESS = 'deny'       # either 'deny' or 'allow'
 
   # Deny or allow anonymous users to register through the web interface
-  ANONYMOUS_REGISTER = 'deny'
+  ANONYMOUS_REGISTER = 'deny'     # either 'deny' or 'allow'
+
+  # Deny or allow anonymous users to register through the mail interface
+  ANONYMOUS_REGISTER_MAIL = 'deny'    # either 'deny' or 'allow'
 
   # Send nosy messages to the author of the message
   MESSAGES_TO_AUTHOR = 'no'       # either 'yes' or 'no'
+
+  # Does the author of a message get placed on the nosy list automatically?
+  # If 'new' is used, then the author will only be added when a message
+  # creates a new issue. If 'yes', then the author will be added on followups
+  # too. If 'no', they're never added to the nosy.
+  ADD_AUTHOR_TO_NOSY = 'new'          # one of 'yes', 'no', 'new'
+
+  # Do the recipients (To:, Cc:) of a message get placed on the nosy list?
+  # If 'new' is used, then the recipients will only be added when a message
+  # creates a new issue. If 'yes', then the recipients will be added on
+  # followups
+  # too. If 'no', they're never added to the nosy.
+  ADD_RECIPIENTS_TO_NOSY = 'new'      # either 'yes', 'no', 'new'
+
+  # Where to place the email signature
+  EMAIL_SIGNATURE_POSITION = 'bottom' # one of 'top', 'bottom', 'none'
+
+  # Keep email citations
+  EMAIL_KEEP_QUOTED_TEXT = 'no'       # either 'yes' or 'no'
+
+  # Preserve the email body as is
+  EMAIL_LEAVE_BODY_UNCHANGED = 'no'   # either 'yes' or 'no'
+
+  # Default class to use in the mailgw if one isn't supplied in email
+  # subjects. To disable, comment out the variable below or leave it blank.
+  # Examples:
+  MAIL_DEFAULT_CLASS = 'issue'   # use "issue" class by default
+  #MAIL_DEFAULT_CLASS = ''        # disable (or just comment the var out)
 
 
 Instance Schema
@@ -242,6 +279,19 @@ create(information)
 Create a node in the database. This is generally used to create nodes in the
 "definitional" classes like "priority" and "status".
 
+
+Detectors - adding behaviour to your tracker
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Sample additional detectors that have been found useful will appear in the
+``detectors`` directory of the Roundup distribution:
+
+newissuecopy.py
+  This detector sends an email to a team address whenever a new issue is
+  created. The address is hard-coded into the detector, so edit it before you
+  use it (look for the text 'team@team.host') or you'll get email errors!
+
+
 Web Interface
 -------------
 
@@ -321,6 +371,8 @@ highly customized.
 |         |text.                                                              |
 |         |Options:                                                           |
 |         |property (property name) - the property to use in the second case. |
+|         |showid - use the linked node id as the link text (linked node      |
+|         |         "value" will be set as a tooltip)                         |
 +---------+-------------------------------------------------------------------+
 |count    |For a Multilink property, display a count of the number of links in|
 |         |the list.                                                          |
@@ -515,6 +567,21 @@ As shown in the example, the editor template can also request the display of a
 "note" field, which is a text area for entering a note to go along with a
 change.
 
+The <property> tag used in the index may also be used here - it checks to see
+if the nominated Multilink property has any entries. This can be used to
+eliminate sections of the editor section if the property has no entries::
+
+  <td class="form-text">
+    <display call="field('superseder', size=40, showid=1)">
+    <display call="classhelp('issue', 'id,title', label='list', width=500)">
+    <property name="superseder">
+      <br>View: <display call="link('superseder', showid=1)">
+    </property>
+  </td>
+
+The "View: " part with the links will only display if the superseder property
+has values.
+
 When a change is submitted, the system automatically generates a message
 describing the changed properties.
 
@@ -543,7 +610,7 @@ message nodes, and selecting a message takes you to its content.
 
 The <property> tag used in the index may also be used here - it checks to see
 if the nominated Multilink property has any entries. This can be used to
-eliminate sections of the spool section if the property has no entries.::
+eliminate sections of the spool section if the property has no entries::
 
      <property name="files">
       <tr class="strong-header">
@@ -555,4 +622,9 @@ eliminate sections of the spool section if the property has no entries.::
       </tr>
      </property>
 
+-----------------
+
+Back to `Table of Contents`_
+
+.. _`Table of Contents`: index.html
 

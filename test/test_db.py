@@ -15,14 +15,14 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: test_db.py,v 1.19 2002-02-25 14:34:31 grubert Exp $ 
+# $Id: test_db.py,v 1.19.2.1 2002-05-02 13:09:10 rochecompaan Exp $ 
 
 import unittest, os, shutil
 
 from roundup.hyperdb import String, Password, Link, Multilink, Date, \
     Interval, Class, DatabaseError
 from roundup.roundupdb import FileClass
-from roundup import date
+from roundup import date, password
 
 def setupSchema(db, create):
     status = Class(db, "status", name=String())
@@ -66,6 +66,8 @@ class anydbmDBTestCase(MyTestCase):
         os.makedirs(config.DATABASE + '/files')
         self.db = anydbm.Database(config, 'test')
         setupSchema(self.db, 1)
+        self.db2 = anydbm.Database(config, 'test')
+        setupSchema(self.db2, 0)
 
     def testChanges(self):
         self.db.issue.create(title="spam", status='1')
@@ -84,7 +86,11 @@ class anydbmDBTestCase(MyTestCase):
 
         a = self.db.issue.get('5', "deadline")
         self.db.issue.set('5', deadline=date.Date())
-        self.assertNotEqual(a, self.db.issue.get('5', "deadline"))
+        b = self.db.issue.get('5', "deadline")
+        self.db.commit()
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(b, date.Date('1970-1-1 00:00:00'))
+        self.db.issue.set('5', deadline=date.Date())
 
         a = self.db.issue.get('5', "foo")
         self.db.issue.set('5', foo=date.Interval('-1d'))
@@ -97,6 +103,17 @@ class anydbmDBTestCase(MyTestCase):
         self.db.issue.history('5')
         self.db.status.history('1')
         self.db.status.history('2')
+
+    def testSerialisation(self):
+        self.db.issue.create(title="spam", status='1',
+            deadline=date.Date(), foo=date.Interval('-1d'))
+        self.db.commit()
+        assert isinstance(self.db.issue.get('1', 'deadline'), date.Date)
+        assert isinstance(self.db.issue.get('1', 'foo'), date.Interval)
+        self.db.user.create(username="fozzy",
+            password=password.Password('t. bear'))
+        self.db.commit()
+        assert isinstance(self.db.user.get('1', 'password'), password.Password)
 
     def testTransactions(self):
         # remember the number of items we started
@@ -125,8 +142,6 @@ class anydbmDBTestCase(MyTestCase):
         self.db.rollback()
         self.assertNotEqual(num_files, self.db.numfiles())
         self.assertEqual(num_files2, self.db.numfiles())
-            
-
 
     def testExceptions(self):
         # this tests the exceptions that should be raised
@@ -177,17 +192,17 @@ class anydbmDBTestCase(MyTestCase):
         # set up a valid issue for me to work on
         self.db.issue.create(title="spam", status='1')
         # invalid link index
-        ar(IndexError, self.db.issue.set, '1', title='foo', status='bar')
+        ar(IndexError, self.db.issue.set, '6', title='foo', status='bar')
         # invalid link value
-        ar(ValueError, self.db.issue.set, '1', title='foo', status=1)
+        ar(ValueError, self.db.issue.set, '6', title='foo', status=1)
         # invalid multilink type
-        ar(TypeError, self.db.issue.set, '1', title='foo', status='1',
+        ar(TypeError, self.db.issue.set, '6', title='foo', status='1',
             nosy='hello')
         # invalid multilink index type
-        ar(ValueError, self.db.issue.set, '1', title='foo', status='1',
+        ar(ValueError, self.db.issue.set, '6', title='foo', status='1',
             nosy=[1])
         # invalid multilink index
-        ar(IndexError, self.db.issue.set, '1', title='foo', status='1',
+        ar(IndexError, self.db.issue.set, '6', title='foo', status='1',
             nosy=['10'])
 
     def testJournals(self):
@@ -254,6 +269,11 @@ class anydbmDBTestCase(MyTestCase):
     def testRetire(self):
         pass
 
+    def testIDGeneration(self):
+        id1 = self.db.issue.create(title="spam", status='1')
+        id2 = self.db2.issue.create(title="eggs", status='2')
+        self.assertNotEqual(id1, id2)
+
 
 class anydbmReadOnlyDBTestCase(MyTestCase):
     def setUp(self):
@@ -266,6 +286,8 @@ class anydbmReadOnlyDBTestCase(MyTestCase):
         setupSchema(db, 1)
         self.db = anydbm.Database(config)
         setupSchema(self.db, 0)
+        self.db2 = anydbm.Database(config, 'test')
+        setupSchema(self.db2, 0)
 
     def testExceptions(self):
         # this tests the exceptions that should be raised
@@ -286,6 +308,8 @@ class bsddbDBTestCase(anydbmDBTestCase):
         os.makedirs(config.DATABASE + '/files')
         self.db = bsddb.Database(config, 'test')
         setupSchema(self.db, 1)
+        self.db2 = bsddb.Database(config, 'test')
+        setupSchema(self.db2, 0)
 
 class bsddbReadOnlyDBTestCase(anydbmReadOnlyDBTestCase):
     def setUp(self):
@@ -298,6 +322,8 @@ class bsddbReadOnlyDBTestCase(anydbmReadOnlyDBTestCase):
         setupSchema(db, 1)
         self.db = bsddb.Database(config)
         setupSchema(self.db, 0)
+        self.db2 = bsddb.Database(config, 'test')
+        setupSchema(self.db2, 0)
 
 
 class bsddb3DBTestCase(anydbmDBTestCase):
@@ -309,6 +335,8 @@ class bsddb3DBTestCase(anydbmDBTestCase):
         os.makedirs(config.DATABASE + '/files')
         self.db = bsddb3.Database(config, 'test')
         setupSchema(self.db, 1)
+        self.db2 = bsddb3.Database(config, 'test')
+        setupSchema(self.db2, 0)
 
 class bsddb3ReadOnlyDBTestCase(anydbmReadOnlyDBTestCase):
     def setUp(self):
@@ -321,10 +349,13 @@ class bsddb3ReadOnlyDBTestCase(anydbmReadOnlyDBTestCase):
         setupSchema(db, 1)
         self.db = bsddb3.Database(config)
         setupSchema(self.db, 0)
+        self.db2 = bsddb3.Database(config, 'test')
+        setupSchema(self.db2, 0)
 
 
 def suite():
-    l = [unittest.makeSuite(anydbmDBTestCase, 'test'),
+    l = [
+         unittest.makeSuite(anydbmDBTestCase, 'test'),
          unittest.makeSuite(anydbmReadOnlyDBTestCase, 'test')
     ]
 
@@ -346,6 +377,25 @@ def suite():
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.21  2002/04/15 23:25:15  richard
+# . node ids are now generated from a lockable store - no more race conditions
+#
+# We're using the portalocker code by Jonathan Feinberg that was contributed
+# to the ASPN Python cookbook. This gives us locking across Unix and Windows.
+#
+# Revision 1.20  2002/04/03 05:54:31  richard
+# Fixed serialisation problem by moving the serialisation step out of the
+# hyperdb.Class (get, set) into the hyperdb.Database.
+#
+# Also fixed htmltemplate after the showid changes I made yesterday.
+#
+# Unit tests for all of the above written.
+#
+# Revision 1.19  2002/02/25 14:34:31  grubert
+#  . use blobfiles in back_anydbm which is used in back_bsddb.
+#    change test_db as dirlist does not work for subdirectories.
+#    ATTENTION: blobfiles now creates subdirectories for files.
+#
 # Revision 1.18  2002/01/22 07:21:13  richard
 # . fixed back_bsddb so it passed the journal tests
 #

@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: roundupdb.py,v 1.49.2.1 2002-04-19 19:54:42 rochecompaan Exp $
+# $Id: roundupdb.py,v 1.49.2.2 2002-05-02 13:09:08 rochecompaan Exp $
 
 __doc__ = """
 Extending hyperdb with types specific to issue-tracking.
@@ -297,7 +297,7 @@ class IssueClass(Class):
         appended to the "messages" field of the specified issue.
         """
 
-    def sendmessage(self, nodeid, msgid, change_note):
+    def nosymessage(self, nodeid, msgid, change_note):
         """Send a message to the members of an issue's nosy list.
 
         The message is sent only to users on the nosy list who are not
@@ -307,7 +307,6 @@ class IssueClass(Class):
         """
         users = self.db.user
         messages = self.db.msg
-        files = self.db.file
 
         # figure the recipient ids
         sendto = []
@@ -342,13 +341,33 @@ class IssueClass(Class):
                 sendto.append(nosyid)
                 recipients.append(nosyid)
 
-        # no new recipients
-        if not sendto:
-            return
+        # we have new recipients
+        if sendto:
+	    # map userids to addresses
+            sendto = [users.get(i, 'address') for i in sendto]
+
+            # update the message's recipients list
+            messages.set(msgid, recipients=recipients)
+
+            # send the message
+            self.send_message(nodeid, msgid, change_note, sendto)
+
+    # XXX backwards compatibility - don't remove
+    sendmessage = nosymessage
+
+    def send_message(self, nodeid, msgid, note, sendto):
+        '''Actually send the nominated message from this node to the sendto
+           recipients, with the note appended.
+        '''
+        users = self.db.user
+        messages = self.db.msg
+        files = self.db.file
 
         # determine the messageid and inreplyto of the message
         inreplyto = messages.get(msgid, 'inreplyto')
         messageid = messages.get(msgid, 'messageid')
+
+        # make up a messageid if there isn't one (web edit)
         if not messageid:
             # this is an old message that didn't get a messageid, so
             # create one
@@ -356,14 +375,11 @@ class IssueClass(Class):
                 self.classname, nodeid, self.db.config.MAIL_DOMAIN)
             messages.set(msgid, messageid=messageid)
 
-        # update the message's recipients list
-        messages.set(msgid, recipients=recipients)
-
         # send an email to the people who missed out
-        sendto = [users.get(i, 'address') for i in sendto]
         cn = self.classname
         title = self.get(nodeid, 'title') or '%s message copy'%cn
         # figure author information
+        authid = messages.get(msgid, 'author')
         authname = users.get(authid, 'realname')
         if not authname:
             authname = users.get(authid, 'username')
@@ -391,8 +407,8 @@ class IssueClass(Class):
         m.append(messages.get(msgid, 'content'))
 
         # add the change note
-        if change_note:
-            m.append(change_note)
+        if note:
+            m.append(note)
 
         # put in roundup's signature
         if self.db.config.EMAIL_SIGNATURE_POSITION == 'bottom':
@@ -604,6 +620,29 @@ class IssueClass(Class):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.51  2002/04/08 03:46:42  richard
+# make it work
+#
+# Revision 1.50  2002/04/08 03:40:31  richard
+#  . added a "detectors" directory for people to put their useful auditors and
+#    reactors in. Note - the roundupdb.IssueClass.sendmessage method has been
+#    split and renamed "nosymessage" specifically for things like the nosy
+#    reactor, and "send_message" which just sends the message.
+#
+# The initial detector is one that we'll be using here at ekit - it bounces new
+# issue messages to a team address.
+#
+# Revision 1.49.2.1  2002/04/19 19:54:42  rochecompaan
+# cgi_client.py
+#     removed search link for the time being
+#     moved rendering of matches to htmltemplate
+# hyperdb.py
+#     filtering of nodes on full text search incorporated in filter method
+# roundupdb.py
+#     added paramater to call of filter method
+# roundup_indexer.py
+#     added search method to RoundupIndexer class
+#
 # Revision 1.49  2002/03/19 06:41:49  richard
 # Faster, easier, less mess ;)
 #

@@ -15,13 +15,13 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: htmltemplate.py,v 1.84.2.2 2002-04-20 13:23:32 rochecompaan Exp $
+# $Id: htmltemplate.py,v 1.84.2.3 2002-05-02 13:09:08 rochecompaan Exp $
 
 __doc__ = """
 Template engine.
 """
 
-import os, re, StringIO, urllib, cgi, errno, types
+import os, re, StringIO, urllib, cgi, errno, types, urllib
 
 import hyperdb, date
 from i18n import _
@@ -223,9 +223,8 @@ class TemplateFunctions:
         elif isinstance(propclass, hyperdb.Multilink):
             sortfunc = self.make_sort_function(propclass.classname)
             linkcl = self.db.classes[propclass.classname]
-            list = linkcl.list()
-            list.sort(sortfunc)
-            l = []
+            if value:
+                value.sort(sortfunc)
             # map the id to the label property
             if not showid:
                 k = linkcl.labelprop()
@@ -331,7 +330,7 @@ class TemplateFunctions:
         return _('[Menu: not a link]')
 
     #XXX deviates from spec
-    def do_link(self, property=None, is_download=0):
+    def do_link(self, property=None, is_download=0, showid=0):
         '''For a Link or Multilink property, display the names of the linked
            nodes, hyperlinked to the item views on those nodes.
            For other properties, link to this node with the property as the
@@ -354,25 +353,39 @@ class TemplateFunctions:
             linkname = propclass.classname
             linkcl = self.db.classes[linkname]
             k = linkcl.labelprop()
-            linkvalue = cgi.escape(linkcl.get(value, k))
-            if is_download:
-                return '<a href="%s%s/%s">%s</a>'%(linkname, value,
-                    linkvalue, linkvalue)
+            linkvalue = cgi.escape(str(linkcl.get(value, k)))
+            if showid:
+                label = value
+                title = ' title="%s"'%linkvalue
+                # note ... this should be urllib.quote(linkcl.get(value, k))
             else:
-                return '<a href="%s%s">%s</a>'%(linkname, value, linkvalue)
+                label = linkvalue
+                title = ''
+            if is_download:
+                return '<a href="%s%s/%s"%s>%s</a>'%(linkname, value,
+                    linkvalue, title, label)
+            else:
+                return '<a href="%s%s"%s>%s</a>'%(linkname, value, title, label)
         if isinstance(propclass, hyperdb.Multilink):
             linkname = propclass.classname
             linkcl = self.db.classes[linkname]
             k = linkcl.labelprop()
             l = []
             for value in value:
-                linkvalue = cgi.escape(linkcl.get(value, k))
-                if is_download:
-                    l.append('<a href="%s%s/%s">%s</a>'%(linkname, value,
-                        linkvalue, linkvalue))
+                linkvalue = cgi.escape(str(linkcl.get(value, k)))
+                if showid:
+                    label = value
+                    title = ' title="%s"'%linkvalue
+                    # note ... this should be urllib.quote(linkcl.get(value, k))
                 else:
-                    l.append('<a href="%s%s">%s</a>'%(linkname, value,
-                        linkvalue))
+                    label = linkvalue
+                    title = ''
+                if is_download:
+                    l.append('<a href="%s%s/%s"%s>%s</a>'%(linkname, value,
+                        linkvalue, title, label))
+                else:
+                    l.append('<a href="%s%s"%s>%s</a>'%(linkname, value,
+                        title, label))
             return ', '.join(l)
         if is_download:
             return '<a href="%s%s/%s">%s</a>'%(self.classname, self.nodeid,
@@ -464,7 +477,7 @@ class TemplateFunctions:
         l = []
         k = linkcl.labelprop()
         for optionid in linkcl.list():
-            option = cgi.escape(linkcl.get(optionid, k))
+            option = cgi.escape(str(linkcl.get(optionid, k)))
             if optionid in value or option in value:
                 checked = 'checked'
             else:
@@ -1159,6 +1172,34 @@ class NewItemTemplate(TemplateFunctions):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.88  2002/04/24 08:34:35  rochecompaan
+# Sorting was applied to all nodes of the MultiLink class instead of
+# the nodes that are actually linked to in the "field" template
+# function.  This adds about 20+ seconds in the display of an issue if
+# your database has a 1000 or more issue in it.
+#
+# Revision 1.87  2002/04/03 06:12:46  richard
+# Fix for date properties as labels.
+#
+# Revision 1.86  2002/04/03 05:54:31  richard
+# Fixed serialisation problem by moving the serialisation step out of the
+# hyperdb.Class (get, set) into the hyperdb.Database.
+#
+# Also fixed htmltemplate after the showid changes I made yesterday.
+#
+# Unit tests for all of the above written.
+#
+# Revision 1.85  2002/04/02 01:40:58  richard
+#  . link() htmltemplate function now has a "showid" option for links and
+#    multilinks. When true, it only displays the linked node id as the anchor
+#    text. The link value is displayed as a tooltip using the title anchor
+#    attribute.
+#
+# Revision 1.84.2.2  2002/04/20 13:23:32  rochecompaan
+# We now have a separate search page for nodes.  Search links for
+# different classes can be customized in instance_config similar to
+# index links.
+#
 # Revision 1.84.2.1  2002/04/19 19:54:42  rochecompaan
 # cgi_client.py
 #     removed search link for the time being
