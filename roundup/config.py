@@ -6,13 +6,19 @@ import string
 class Error(Exception):
     pass
 
+class UnknownInstanceLocation(Error):
+    pass
+
+class NoInstanceConfigFile(Error):
+    pass
+
 def debug_mode():
     """
     Returns the basic debug mode/level.
     """
     return os.environ.get('ROUNDUP_DEBUG', 0)
 
-def load_base_config():
+def loadBaseConfig():
     """
     Loads the base configuration for Roundup.
     """
@@ -64,7 +70,7 @@ class BaseConfig:
     def get(self, group, attr):
         return self.conf.get(group, attr)
 
-    def load_instances_config(self):
+    def loadInstances(self):
         filename = string.strip(self.conf.get('base', 'instances'))
 
         # if it looks like an absolute path, leave it alone; otherwise,
@@ -106,20 +112,28 @@ class InstancesConfig:
         self.instance_dirs = instance_dirs
         self.instance_names = instance_names
 
-    def get_instance_names(self):
+    def getNames(self):
         return self.instance_dirs.keys()
 
-    def get_instance_name(self, dir):
-        return self.instance_names[dir]
+    def getNameFromDir(self, dir):
+        if self.instance_names.has_key(dir):
+            return self.instance_names[dir]
+        else:
+            raise UnknownInstanceLocation(dir)
 
-    def get_instance_dir(self, name):
+    def getDirFromName(self, name):
         return self.instance_dirs[name]
 
-    def load_instance_config(self, name):
-        instance_dir = self.get_instance_dir(name)
+    def loadConfig(self, name):
+        instance_dir = self.getDirFromName(name)
         
         defaults_file = self.conf.get(name, 'defaults')
+        if not os.path.exists(defaults_file):
+            raise NoInstanceConfigFile("defaults file %s does not exist"%(defaults_file,))
+        
         config_file = self.conf.get(name, 'config')
+        if not os.path.exists(config_file):
+            raise NoInstanceConfigFile("%s does not exist"%(config_file,))
 
         defaults_dictionary = { 'homedir' : instance_dir,
                                 'instance_name' : name,
@@ -153,8 +167,8 @@ class InstanceConfig:
         return self.conf.get(group, attr)
             
 if __name__ == '__main__':
-    base_config = load_base_config()
-    instances_config = base_config.load_instances_config()
+    base_config = loadBaseConfig()
+    instances = base_config.loadInstances()
     
-    for k in instances_config.get_instance_names():
-        print "%s:%s"%(k, instances_config.get_instance_dir(k),)
+    for k in instances.getNames():
+        print "%s:%s"%(k, instances.getDirFromName(k),)

@@ -16,7 +16,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: roundup.cgi,v 1.22.2.1 2002-01-03 02:12:05 titus Exp $
+# $Id: roundup.cgi,v 1.22.2.2 2002-01-03 08:28:15 titus Exp $
 
 # python version check
 import sys
@@ -41,18 +41,13 @@ from roundup import version_check
 # ROUNDUP_DEBUG is a debug level, currently only 0 (OFF) and 1 (ON) are
 # used in the code. Higher numbers means more debugging output. 
 
-# This indicates where the Roundup instance lives
-ROUNDUP_INSTANCE_HOMES = {
-#    'dev' : '/u/t/dev/roundup/instance'
-}
-
-### @CTB config file.
 import roundup.config
-base_config = roundup.config.load_base_config()
-instances_config = base_config.load_instances_config()
+base_config = roundup.config.loadBaseConfig()
+instances = base_config.loadInstances()
 
-for name in instances_config.get_instance_names():
-    ROUNDUP_INSTANCE_HOMES[name] = instances_config.get_instance_dir(name)
+ROUNDUP_INSTANCE_HOMES = {}
+for name in instances.getNames():
+    ROUNDUP_INSTANCE_HOMES[name] = instances.getDirFromName(name)
 
 # Where to log debugging information to. Use an instance of DevNull if you
 # don't want to log anywhere.
@@ -208,6 +203,11 @@ LOG.close()
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.22.2.1  2002/01/03 02:12:05  titus
+#
+#
+# Initial ConfigParser implementation.
+#
 # Revision 1.22  2001/12/13 00:20:01  richard
 #  . Centralised the python version check code, bumped version to 2.1.1 (really
 #    needs to be 2.1.2, but that isn't released yet :)

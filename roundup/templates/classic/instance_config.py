@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: instance_config.py,v 1.10.2.1 2002-01-03 02:12:05 titus Exp $
+# $Id: instance_config.py,v 1.10.2.2 2002-01-03 08:28:17 titus Exp $
 
 import os
 import roundup.config
@@ -23,12 +23,12 @@ import roundup.config
 # roundup home is this package's directory
 INSTANCE_HOME=os.path.dirname(__file__)
 
-base_config = roundup.config.load_base_config()
-instances_config = base_config.load_instances_config()
+base_config = roundup.config.loadBaseConfig()
+instances = base_config.loadInstances()
 
 try:
-    instance_name = instances_config.get_instance_name(INSTANCE_HOME)
-    instance_config = instances_config.load_instance_config(instance_name)
+    instance_name = instances.getNameFromDir(INSTANCE_HOME)
+    instance_config = instances.loadConfig(instance_name)
 
     # The SMTP mail host that roundup will use to send mail
     MAILHOST = instance_config.get('mail', 'host')
@@ -71,7 +71,7 @@ try:
 
     # Where to place the email signature
     EMAIL_SIGNATURE_POSITION = instance_config.get('base', 'email_signature_position')
-except:                                 # probably in init
+except roundup.config.UnknownInstanceLocation: # in 'init'
     DATABASE = None
     TEMPLATES = None
     ADMIN_EMAIL = ''
@@ -100,6 +100,11 @@ def get_default_admin_email():
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.10.2.1  2002/01/03 02:12:05  titus
+#
+#
+# Initial ConfigParser implementation.
+#
 # Revision 1.10  2001/11/26 22:55:56  richard
 # Feature:
 #  . Added INSTANCE_NAME to configuration - used in web and email to identify
