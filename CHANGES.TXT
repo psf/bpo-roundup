@@ -1,7 +1,11 @@
 This file contains the changes to the Roundup system over time. The entries
 are given with the most recent entry first.
 
-2002-03-?? - 0.4.1
+2002-04-?? - 0.4.2
+Feature:
+ . #526730 ] search for messages capability
+
+2002-03-24 - 0.4.1
 Feature:
  . use blobfiles in back_anydbm which is used in back_bsddb.
    change test_db as dirlist does not work for subdirectories.
