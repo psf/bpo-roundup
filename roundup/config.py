@@ -3,6 +3,9 @@ import os
 import ConfigParser
 import string
 
+class Error(Exception):
+    pass
+
 def debug_mode():
     """
     Returns the basic debug mode/level.
@@ -31,28 +34,25 @@ def load_base_config():
     if os.environ.has_key('ROUNDUP_CONF'):
         filenames_to_check.append(os.environ['ROUNDUP_CONF'])
         
-    filenames_to_check.append('%s/share/roundup/roundup.rc' % (sys.prefix,))
+    filenames_to_check.append('%s/share/roundup/roundup.rc'%(sys.prefix,))
 
-    found = 0
     for filename in filenames_to_check:
         if os.path.exists(filename):
-            found = 1
             c.read(filename)
             break
-
-    if not found:
-        assert 0, "could not find config file!"
+    else:
+        raise Error("could not find configuration file")
 
     if debug_mode():
-        print 'Loaded configuration from "%s".' % (filename,)
+        print 'Loaded configuration from "%s".'%(filename,)
 
     # we also want to give a base path for other config file names;
     # for the moment, make it the base path of the filename we chose.
     base_path = os.path.dirname(filename)
 
-    return RoundupBaseConfig(c, base_path)
+    return BaseConfig(c, base_path)
 
-class RoundupBaseConfig:
+class BaseConfig:
     """
     A container for the installation-wide roundup configuration.
     """
@@ -79,9 +79,9 @@ class RoundupBaseConfig:
         c = ConfigParser.ConfigParser(defaults_dictionary)
         c.read(filename)
 
-        return RoundupInstancesConfig(c, filename)
+        return InstancesConfig(c, filename)
 
-class RoundupInstancesConfig:
+class InstancesConfig:
     """
     A container for the installation-wide list of instances.
     """
@@ -97,9 +97,8 @@ class RoundupInstancesConfig:
             dir = c.get(name, 'homedir')
 
             if instance_names.has_key(dir) or instance_dirs.has_key(name):
-                sys.stderr.write('ERROR: dir/name correspondence is not unique (%s)' % (self.filename,))
-                assert 0, "%s:%s" % (dir, name,)
-
+                error_text = 'ERROR: dir/name correspondence is not unique (%s)'%(self.filename,)
+                raise ValueError(error_text)
             
             instance_dirs[name] = dir
             instance_names[dir] = name
@@ -158,4 +157,4 @@ if __name__ == '__main__':
     instances_config = base_config.load_instances_config()
     
     for k in instances_config.get_instance_names():
-        print "%s:%s" % (k, instances_config.get_instance_dir(k),)
+        print "%s:%s"%(k, instances_config.get_instance_dir(k),)
