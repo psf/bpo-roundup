@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-#$Id: roundup_indexer.py,v 1.1.2.2 2002-04-19 19:54:42 rochecompaan Exp $
+#$Id: roundup_indexer.py,v 1.1.2.3 2002-05-02 11:52:12 rochecompaan Exp $
 '''
 This module provides an indexer class, RoundupIndexer, that stores text
 indices in a roundup instance.  This class makes searching the content of
@@ -34,6 +34,7 @@ class RoundupIndexer(SlicedZPickleIndexer):
         if not os.path.exists(indexdb_path):
             os.makedirs(indexdb_path)
             os.chmod(indexdb_path, 0775)
+        else:
             index_exists = 1
         index_path = os.path.join(indexdb_path, 'index.db')
         SlicedZPickleIndexer.__init__(self, 
@@ -78,6 +79,17 @@ class RoundupIndexer(SlicedZPickleIndexer):
 
 #
 #$Log: not supported by cvs2svn $
+#Revision 1.1.2.2  2002/04/19 19:54:42  rochecompaan
+#cgi_client.py
+#    removed search link for the time being
+#    moved rendering of matches to htmltemplate
+#hyperdb.py
+#    filtering of nodes on full text search incorporated in filter method
+#roundupdb.py
+#    added paramater to call of filter method
+#roundup_indexer.py
+#    added search method to RoundupIndexer class
+#
 #Revision 1.1.2.1  2002/04/03 11:55:57  rochecompaan
 # . Added feature #526730 - search for messages capability
 #
