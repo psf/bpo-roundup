@@ -16,7 +16,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: roundup.cgi,v 1.22.2.3 2002-02-06 04:05:53 richard Exp $
+# $Id: roundup.cgi,v 1.22.2.4 2002-02-06 07:11:12 richard Exp $
 
 # python version check
 import sys
@@ -45,11 +45,10 @@ import sys
 
 import roundup.config
 base_config = roundup.config.loadBaseConfig()
-instances = base_config.loadInstances()
 
 ROUNDUP_INSTANCE_HOMES = {}
-for name in instances.getNames():
-    ROUNDUP_INSTANCE_HOMES[name] = instances.getDirFromName(name)
+for name in base_config.listInstanceNames():
+    ROUNDUP_INSTANCE_HOMES[name] = base_config.getInstanceHome(name)
 
 # Where to log debugging information to. Use an instance of DevNull if you
 # don't want to log anywhere.
@@ -205,6 +204,9 @@ LOG.close()
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.22.2.3  2002/02/06 04:05:53  richard
+# Brought the config branch up to date with HEAD
+#
 # Revision 1.24  2002/01/05 02:21:22  richard
 # fixes
 #

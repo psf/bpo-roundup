@@ -1,15 +1,46 @@
-[base]
-full_name=howdy
-email=issue_tracker@%(domain)s
-url=http://some.useful.url
+#
+# Instance-specific configuration file. Note that this file has the
+# following variables defined by default:
+#
+#   'instance_home': the home dir
+#   'http_port': '80',
+#   'database': '%(instance_home)s/db',
+#   'templates': '%(instance_home)s/html',
+#   'log': '%(instance_home)s/log',
+#   'filter_position': 'bottom',
+#   'anonymous_access': 'deny',
+#   'anonymous_register': 'deny',
+#   'messages_to_author': 'no',
+#   'email_signature_position': 'bottom',
+#
+# These vars are obtained from the roundup base config file, roundup.rc or
+# from the application defaults if not defined in roundup.rc.
+#
+# The values
+#  . instance_name
+#  . mailhost
+#  . mail_domain
+#  . issue_tracker_email
+#  . issue_tracker_web
+#  . admin_email
+# are REQUIRED for roundup operation. You must set these options to some
+# value.
+#
 
-# The email address that roundup will complain to if it runs into trouble
-admin_email=roundup-admin@%(domain)s
+[DEFAULT]
+#instance_name = My Test Instance
+#mailhost = mail.host
+#mail_domain = blah.dot.com
+#issue_tracker_email = tracker@%(mail_domain)s
+#issue_tracker_web = http://tracker.blah.dot.com/
+#admin_email = tracker-admin@ekit-inc.com
 
-[mail]
-host=localhost
-domain=fill.me.in
+# You may override the configuration settings for particular components of
+# roundup by putting values below. TODO: example
+[MAIL GATEWAY]
 
-[standalone_http]
-host=
-port=
+[HTTP SERVER]
+
+[CGI]
+
+[ADMIN]

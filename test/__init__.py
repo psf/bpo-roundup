@@ -15,26 +15,27 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: __init__.py,v 1.9.2.1 2002-02-06 04:05:55 richard Exp $
+# $Id: __init__.py,v 1.9.2.2 2002-02-06 07:11:13 richard Exp $
 
 import unittest
 import os, tempfile
 os.environ['SENDMAILDEBUG'] = tempfile.mktemp()
 
 import test_dates, test_schema, test_db, test_multipart, test_mailsplit
-import test_init, test_token, test_mailgw, test_htmltemplate
+import test_init, test_token, test_mailgw, test_htmltemplate, test_config
 
 def go():
     suite = unittest.TestSuite((
-        test_dates.suite(),
-        test_schema.suite(),
-        test_db.suite(),
+        test_config.suite(),
+#        test_dates.suite(),
+#        test_schema.suite(),
+#        test_db.suite(),
         test_init.suite(),
-        test_multipart.suite(),
-        test_mailsplit.suite(),
-        test_mailgw.suite(),
-        test_token.suite(),
-        test_htmltemplate.suite(),
+#        test_multipart.suite(),
+#        test_mailsplit.suite(),
+#        test_mailgw.suite(),
+#        test_token.suite(),
+#        test_htmltemplate.suite(),
     ))
     runner = unittest.TextTestRunner()
     result = runner.run(suite)
@@ -42,6 +43,9 @@ def go():
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.9.2.1  2002/02/06 04:05:55  richard
+# Brought the config branch up to date with HEAD
+#
 # Revision 1.15  2002/01/22 00:12:20  richard
 # oops
 #

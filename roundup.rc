@@ -1,3 +1,37 @@
-[base]
-instances=instances.rc
-admin_email=titus@caltech.edu
+[DEFAULT]
+http_port = 80
+
+# The name of the instance home subdirectory for storing the database
+database = %(instance_home)s/db
+
+# The name of the instance home subdirectory where the HTML templates are
+# kept
+templates = %(instance_home)s/html
+
+# Somewhere for roundup to log stuff internally sent to stdout or stderr
+log = %(instance_home)s/log
+
+# Where to place the web filtering HTML on the index page
+# one of 'top', 'bottom', 'top and bottom'
+filter_position = bottom
+
+# Deny or allow anonymous access to the web interface
+# either 'allow' or 'deny'
+anonymous_access = deny
+
+# Deny or allow anonymous users to register through the web interface
+anonymous_register = deny
+
+# Send nosy messages to the author of the message
+# either 'yes' or 'no'
+messages_to_author = no
+
+# Where to place the email signature
+# one of 'top', 'bottom', 'top and bottom'
+email_signature_position = bottom
+
+
+[/tmp/roundup/instance]
+
+[/tmp/test]
+

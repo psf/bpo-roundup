@@ -15,10 +15,9 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: __init__.py,v 1.5 2001-08-07 00:24:43 richard Exp $
+# $Id: __init__.py,v 1.5.2.1 2002-02-06 07:11:12 richard Exp $
 
 import sys
-from instance_config import *
 try:
     from dbinit import *
 except:
@@ -27,6 +26,9 @@ from interfaces import *
 
 # 
 # $Log: not supported by cvs2svn $
+# Revision 1.5  2001/08/07 00:24:43  richard
+# stupid typo
+#
 # Revision 1.4  2001/08/07 00:15:51  richard
 # Added the copyright/license notice to (nearly) all files at request of
 # Bizar Software.

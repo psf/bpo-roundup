@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: instance.py,v 1.5 2001-11-22 15:46:42 jhermann Exp $
+# $Id: instance.py,v 1.5.2.1 2002-02-06 07:11:12 richard Exp $
 
 __doc__ = '''
 Instance handling (open instance).
@@ -38,13 +38,26 @@ class Opener:
         '''
         if not os.path.exists(instance_home):
             raise ValueError, 'no such directory: "%s"'%instance_home
+
         if self.instances.has_key(instance_home):
-            return imp.load_package(self.instances[instance_home],
+            # already loaded
+            instance = imp.load_package(self.instances[instance_home],
                 instance_home)
+            return instance
+
+        # not loaded - make a module name for the instance
         self.number = self.number + 1
         modname = '_roundup_instance_%s'%self.number
         self.instances[instance_home] = modname
-        return imp.load_package(modname, instance_home)
+
+        # import the instance
+        instance = imp.load_package(modname, instance_home)
+
+        # load the config
+        instance.instance_config = config.loadInstanceConfig(instance_home)
+
+        # all done
+        return instance
 
 opener = Opener()
 open = opener.open
@@ -55,6 +68,9 @@ del opener
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.5  2001/11/22 15:46:42  jhermann
+# Added module docstrings to all modules.
+#
 # Revision 1.4  2001/11/12 22:01:06  richard
 # Fixed issues with nosy reaction and author copies.
 #

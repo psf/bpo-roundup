@@ -15,9 +15,8 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: interfaces.py,v 1.11.2.1 2002-02-06 04:05:54 richard Exp $
+# $Id: interfaces.py,v 1.11.2.2 2002-02-06 07:11:13 richard Exp $
 
-import instance_config
 from roundup import cgi_client, mailgw 
 
 class Client(cgi_client.Client): 
@@ -34,6 +33,9 @@ class MailGW(mailgw.MailGW):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.11.2.1  2002/02/06 04:05:54  richard
+# Brought the config branch up to date with HEAD
+#
 # Revision 1.12  2002/01/14 02:20:15  richard
 #  . changed all config accesses so they access either the instance or the
 #    config attriubute on the db. This means that all config is obtained from
