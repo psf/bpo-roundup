@@ -1,0 +1,27 @@
+#
+# Instance-specific configuration file. Note that this file has the
+# following variables defined by default:
+#
+#   'INSTANCE_NAME': the instance name
+#   'INSTANCE_HOME': the home dir
+#
+# These vars are obtained from the roundup base config file, roundup.rc.
+#
+#
+
+[DEFAULT]
+instance_name=My Test Instance
+mailhost=mail.host
+mail_domain=blah.dot.com
+issue_tracker_email=rjones@%(mail_domain)s
+issue_tracker_web=http://localhost:8080/
+admin_email=rjones@ekit-inc.com
+
+[MAIL GATEWAY]
+
+[HTTP SERVER]
+http_port = 8080
+
+[CGI]
+
+[ADMIN]
