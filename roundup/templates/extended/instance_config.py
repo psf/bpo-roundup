@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: instance_config.py,v 1.13.2.1 2002-04-20 13:23:34 rochecompaan Exp $
+# $Id: instance_config.py,v 1.13.2.2 2002-05-02 11:49:19 rochecompaan Exp $
 
 MAIL_DOMAIN=MAILHOST=HTTP_HOST=None
 HTTP_PORT=0
@@ -103,6 +103,8 @@ HEADER_ADD_LINKS = ['issue', 'support']
 # list the classes that users can search
 HEADER_SEARCH_LINKS = ['issue', 'support']
 
+SEARCH_FILTERS = ['ISSUE_FILTER', 'SUPPORT_FILTER']
+
 # Now the DEFAULT display specifications. TODO: describe format
 DEFAULT_INDEX = {
   'LABEL': 'All Issues',
@@ -182,8 +184,23 @@ MY_SUPPORT_INDEX = {
   },
 }
 
+ISSUE_FILTER = {
+  'CLASS': 'issue'
+  'FILTER': ['status', 'priority', 'assignedto', 'creator']
+}
+
+SUPPORT_FILTER = {
+  'CLASS': 'issue'
+  'FILTER': ['status', 'priority', 'assignedto', 'creator']
+}
+
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.13.2.1  2002/04/20 13:23:34  rochecompaan
+# We now have a separate search page for nodes.  Search links for
+# different classes can be customized in instance_config similar to
+# index links.
+#
 # Revision 1.13  2002/03/14 23:59:24  richard
 #  . #517734 ] web header customisation is obscure
 #

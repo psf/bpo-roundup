@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: cgi_client.py,v 1.114.2.3 2002-04-20 13:23:31 rochecompaan Exp $
+# $Id: cgi_client.py,v 1.114.2.4 2002-05-02 11:49:18 rochecompaan Exp $
 
 __doc__ = """
 WWW request handler (also used in the stand-alone server).
@@ -385,6 +385,13 @@ function help_window(helpurl, width, height) {
             self.get_customisation_info()
         show_nodes = 1
         if len(self.form.keys()) == 0:
+            # get the default search filters from instance_config
+            if hasattr(self.instance, 'SEARCH_FILTERS'):
+                for f in self.instance.SEARCH_FILTERS:
+                    spec = getattr(self.instance, f)
+                    if spec['CLASS'] == self.classname:
+                        filter = spec['FILTER']
+                
             show_nodes = 0
             show_customization = 1
         return self.list(columns=columns, filter=filter, group=group,
@@ -1405,6 +1412,11 @@ def parsePropsFromForm(db, cl, form, nodeid=0):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.114.2.3  2002/04/20 13:23:31  rochecompaan
+# We now have a separate search page for nodes.  Search links for
+# different classes can be customized in instance_config similar to
+# index links.
+#
 # Revision 1.114.2.2  2002/04/19 19:54:42  rochecompaan
 # cgi_client.py
 #     removed search link for the time being
