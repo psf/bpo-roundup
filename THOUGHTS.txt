@@ -1,0 +1,35 @@
+New Improved Structure
+======================
+
+instance_home:
+
+   config.rc
+      -- add in the database backend selection
+
+   schema.???   xml???
+      -- replaces dbinit.open()
+      -- TODO: what to do about dbinit.init()
+
+   database.py
+      -- defines any additional classes used in the schema
+
+   detectors
+      -- as it currently stands, but have the nosy reactor be a single call
+         to core nosy reactor code so upgrades aren't a pain
+
+   db
+      -- as it currently stands
+
+   html
+      -- keep, but be able to default back to the installation share dir
+         for missing files ... and then don't install any
+
+   dbinit.py, interfaces.py, __init__.py
+      -- go the way of the Dodo
+
+
+roundup.instance.open()
+   Would now return a class instance that handles all the icky instance
+   stuff.
+   ... like, oh, getting a handle to the damn config!
+
