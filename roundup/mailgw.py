@@ -73,7 +73,7 @@ are calling the create() method to create a new node). If an auditor raises
 an exception, the original message is bounced back to the sender with the
 explanatory message given in the exception. 
 
-$Id: mailgw.py,v 1.74.2.1 2002-07-22 22:03:01 richard Exp $
+$Id: mailgw.py,v 1.74.2.2 2002-09-25 05:13:00 richard Exp $
 '''
 
 
@@ -739,7 +739,7 @@ def parseContent(content, keep_citations, keep_body,
             # see if there's a response somewhere inside this section (ie.
             # no blank line between quoted message and response)
             for line in lines[1:]:
-                if line[0] not in '>|':
+                if line and line[0] not in '>|':
                     break
             else:
                 # we keep quoted bits if specified in the config
@@ -775,6 +775,9 @@ def parseContent(content, keep_citations, keep_body,
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.74.2.1  2002/07/22 22:03:01  richard
+# . #562686 ] email attachments from outlook express
+#
 # Revision 1.74  2002/05/29 01:16:17  richard
 # Sorry about this huge checkin! It's fixing a lot of related stuff in one go
 # though.

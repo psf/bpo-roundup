@@ -1,7 +1,12 @@
 This file contains the changes to the Roundup system over time. The entries
 are given with the most recent entry first.
 
-???? 0.4.4?
+????-??-?? 0.4.5?
+Fixed:
+ . #614188 ] Exception in mailgw.py
+
+
+2002-09-02 0.4.4
 Fixed:
  . #596155 ] bug with multilink
  . #600699 ] documentation in doc/getting_started.txt
