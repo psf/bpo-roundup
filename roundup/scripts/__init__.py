@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: __init__.py,v 1.1 2002-01-29 20:07:15 jhermann Exp $
+# $Id: __init__.py,v 1.1.2.1 2002-02-06 04:29:17 richard Exp $
 
 __doc__ = '''
 Subpackage containing the modules that implement the command line tools.
