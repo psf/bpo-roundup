@@ -73,7 +73,7 @@ are calling the create() method to create a new node). If an auditor raises
 an exception, the original message is bounced back to the sender with the
 explanatory message given in the exception. 
 
-$Id: mailgw.py,v 1.126.2.5 2004-05-20 00:10:10 richard Exp $
+$Id: mailgw.py,v 1.126.2.6 2004-05-20 00:16:37 richard Exp $
 """
 
 import string, re, os, mimetools, cStringIO, smtplib, socket, binascii, quopri
@@ -817,7 +817,7 @@ Subject was: "%s"
                     data = self.get_part_data_decoded(part) 
                     attachments.append((name, part.gettype(), data))
 
-        elif content_type in ('multipart/alternative', 'multipart/signed'):
+        elif content_type in ('multipart/related', 'multipart/alternative', 'multipart/signed'):
             message.getPart()
             content = None
             while 1:
