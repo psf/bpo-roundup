@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: hyperdb.py,v 1.59.2.1 2002-04-19 19:54:42 rochecompaan Exp $
+# $Id: hyperdb.py,v 1.59.2.2 2002-04-20 13:23:33 rochecompaan Exp $
 
 __doc__ = """
 Hyperdatabase implementation, especially field types.
@@ -888,9 +888,11 @@ class Class:
         l.sort()
 
         # filter based on full text search
-        if search_matches:
+        if search_matches is not None:
             k = []
+            l_debug = []
             for v in l:
+                l_debug.append(v[0])
                 if search_matches.has_key(v[0]):
                     k.append(v)
             l = k
@@ -1106,6 +1108,17 @@ def Choice(name, db, *options):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.59.2.1  2002/04/19 19:54:42  rochecompaan
+# cgi_client.py
+#     removed search link for the time being
+#     moved rendering of matches to htmltemplate
+# hyperdb.py
+#     filtering of nodes on full text search incorporated in filter method
+# roundupdb.py
+#     added paramater to call of filter method
+# roundup_indexer.py
+#     added search method to RoundupIndexer class
+#
 # Revision 1.59  2002/03/12 22:52:26  richard
 # more pychecker warnings removed
 #

@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: htmltemplate.py,v 1.84.2.1 2002-04-19 19:54:42 rochecompaan Exp $
+# $Id: htmltemplate.py,v 1.84.2.2 2002-04-20 13:23:32 rochecompaan Exp $
 
 __doc__ = """
 Template engine.
@@ -736,7 +736,7 @@ class IndexTemplate(TemplateFunctions):
     col_re=re.compile(r'<property\s+name="([^>]+)">')
     def render(self, filterspec={}, search_text='', filter=[], columns=[], 
             sort=[], group=[], show_display_form=1, nodeids=None,
-            show_customization=1):
+            show_customization=1, show_nodes=1):
         self.filterspec = filterspec
 
         w = self.client.write
@@ -809,54 +809,58 @@ class IndexTemplate(TemplateFunctions):
 
         # now actually loop through all the nodes we get from the filter and
         # apply the template
-        matches = None
-        if nodeids is None:
-            matches = self.client.indexer.search(search_text.split(' '), 
-                self.cl)
-            nodeids = self.cl.filter(matches, filterspec, sort, group)
-        for nodeid in nodeids:
-            # check for a group heading
-            if group_names:
-                this_group = [self.cl.get(nodeid, name, _('[no value]'))
-                    for name in group_names]
-                if this_group != old_group:
-                    l = []
-                    for name in group_names:
-                        prop = self.properties[name]
-                        if isinstance(prop, hyperdb.Link):
-                            group_cl = self.db.classes[prop.classname]
-                            key = group_cl.getkey()
-                            value = self.cl.get(nodeid, name)
-                            if value is None:
-                                l.append(_('[unselected %(classname)s]')%{
-                                    'classname': prop.classname})
+        if show_nodes:
+            matches = None
+            if nodeids is None:
+                if search_text != '':
+                    matches = self.client.indexer.search(
+                        search_text.split(' '), self.cl)
+                nodeids = self.cl.filter(matches, filterspec, sort, group)
+            for nodeid in nodeids:
+                # check for a group heading
+                if group_names:
+                    this_group = [self.cl.get(nodeid, name, _('[no value]'))
+                        for name in group_names]
+                    if this_group != old_group:
+                        l = []
+                        for name in group_names:
+                            prop = self.properties[name]
+                            if isinstance(prop, hyperdb.Link):
+                                group_cl = self.db.classes[prop.classname]
+                                key = group_cl.getkey()
+                                value = self.cl.get(nodeid, name)
+                                if value is None:
+                                    l.append(_('[unselected %(classname)s]')%{
+                                        'classname': prop.classname})
+                                else:
+                                    l.append(group_cl.get(self.cl.get(nodeid,
+                                        name), key))
+                            elif isinstance(prop, hyperdb.Multilink):
+                                group_cl = self.db.classes[prop.classname]
+                                key = group_cl.getkey()
+                                for value in self.cl.get(nodeid, name):
+                                    l.append(group_cl.get(value, key))
                             else:
-                                l.append(group_cl.get(self.cl.get(nodeid,
-                                    name), key))
-                        elif isinstance(prop, hyperdb.Multilink):
-                            group_cl = self.db.classes[prop.classname]
-                            key = group_cl.getkey()
-                            for value in self.cl.get(nodeid, name):
-                                l.append(group_cl.get(value, key))
-                        else:
-                            value = self.cl.get(nodeid, name, _('[no value]'))
-                            if value is None:
-                                value = _('[empty %(name)s]')%locals()
-                            else:
-                                value = str(value)
-                            l.append(value)
-                    w('<tr class="section-bar">'
-                      '<td align=middle colspan=%s><strong>%s</strong></td></tr>'%(
-                        len(columns), ', '.join(l)))
-                    old_group = this_group
+                                value = self.cl.get(nodeid, name, 
+                                    _('[no value]'))
+                                if value is None:
+                                    value = _('[empty %(name)s]')%locals()
+                                else:
+                                    value = str(value)
+                                l.append(value)
+                        w('<tr class="section-bar">'
+                        '<td align=middle colspan=%s>'
+                        '<strong>%s</strong></td></tr>'%(
+                            len(columns), ', '.join(l)))
+                        old_group = this_group
 
-            # display this node's row
-            replace = IndexTemplateReplace(self.globals, locals(), columns)
-            self.nodeid = nodeid
-            w(replace.go(template))
-            if matches:
-                self.node_matches(matches[nodeid], len(columns))
-            self.nodeid = None
+                # display this node's row
+                replace = IndexTemplateReplace(self.globals, locals(), columns)
+                self.nodeid = nodeid
+                w(replace.go(template))
+                if matches:
+                    self.node_matches(matches[nodeid], len(columns))
+                self.nodeid = None
 
         w('</table>')
 
@@ -1155,6 +1159,17 @@ class NewItemTemplate(TemplateFunctions):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.84.2.1  2002/04/19 19:54:42  rochecompaan
+# cgi_client.py
+#     removed search link for the time being
+#     moved rendering of matches to htmltemplate
+# hyperdb.py
+#     filtering of nodes on full text search incorporated in filter method
+# roundupdb.py
+#     added paramater to call of filter method
+# roundup_indexer.py
+#     added search method to RoundupIndexer class
+#
 # Revision 1.84  2002/03/29 19:41:48  rochecompaan
 #  . Fixed display of mutlilink properties when using the template
 #    functions, menu and plain.

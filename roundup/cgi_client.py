@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: cgi_client.py,v 1.114.2.2 2002-04-19 19:54:42 rochecompaan Exp $
+# $Id: cgi_client.py,v 1.114.2.3 2002-04-20 13:23:31 rochecompaan Exp $
 
 __doc__ = """
 WWW request handler (also used in the stand-alone server).
@@ -46,7 +46,6 @@ class Client:
     there is no cookie). This allows them to modify the database, and all
     modifications are attributed to the 'anonymous' user.
     '''
-    classes_to_search = ['issue']
 
     def __init__(self, instance, request, env, form=None):
         self.instance = instance
@@ -211,6 +210,17 @@ function help_window(helpurl, width, height) {
             links.append(_('<a href="user">User List</a>'))
             links.append(_('<a href="newuser">Add User</a>'))
 
+        # add the search links
+        if hasattr(self.instance, 'HEADER_SEARCH_LINKS'):
+            classes = self.instance.HEADER_SEARCH_LINKS
+        else:
+            classes = ['issue']
+        l = []
+        for class_name in classes:
+            cap_class = class_name.capitalize()
+            links.append(_('Search <a href="search%(class_name)s">'
+                '%(cap_class)s</a>')%locals())
+
         # now we have all the links, join 'em
         links = '\n | '.join(links)
 
@@ -330,9 +340,7 @@ function help_window(helpurl, width, height) {
     default_index_columns = ['id','activity','title','status','assignedto']
     default_index_filterspec = {'status': ['1', '2', '3', '4', '5', '6', '7']}
 
-    def index(self):
-        ''' put up an index - no class specified
-        '''
+    def get_customisation_info(self):
         # see if the web has supplied us with any customisation info
         defaults = 1
         for key in ':sort', ':group', ':filter', ':columns':
@@ -362,13 +370,32 @@ function help_window(helpurl, width, height) {
             # make list() extract the info from the CGI environ
             self.classname = 'issue'
             sort = group = filter = columns = filterspec = None
+        return columns, filter, group, sort, filterspec
+
+    def index(self):
+        ''' put up an index - no class specified
+        '''
+        columns, filter, group, sort, filterspec = \
+            self.get_customisation_info()
         return self.list(columns=columns, filter=filter, group=group,
             sort=sort, filterspec=filterspec)
+
+    def searchnode(self):
+        columns, filter, group, sort, filterspec = \
+            self.get_customisation_info()
+        show_nodes = 1
+        if len(self.form.keys()) == 0:
+            show_nodes = 0
+            show_customization = 1
+        return self.list(columns=columns, filter=filter, group=group,
+            sort=sort, filterspec=filterspec,
+            show_customization=show_customization, show_nodes=show_nodes)
+        
 
     # XXX deviates from spec - loses the '+' (that's a reserved character
     # in URLS
     def list(self, sort=None, group=None, filter=None, columns=None,
-            filterspec=None, show_customization=None):
+            filterspec=None, show_customization=None, show_nodes=1):
         ''' call the template index with the args
 
             :sort    - sort by prop name, optionally preceeded with '-'
@@ -400,7 +427,8 @@ function help_window(helpurl, width, height) {
         index = htmltemplate.IndexTemplate(self, self.instance.TEMPLATES, cn)
         try:
             index.render(filterspec, search_text, filter, columns, sort, 
-                group, show_customization=show_customization)
+                group, show_customization=show_customization, 
+                show_nodes=show_nodes)
         except htmltemplate.MissingTemplateError:
             self.basicClassEditPage()
         self.pagefoot()
@@ -563,6 +591,7 @@ function help_window(helpurl, width, height) {
         self.pagefoot()
     showissue = shownode
     showmsg = shownode
+    searchissue = searchnode
 
     def _add_assignedto_to_nosy(self, props):
         ''' add the assignedto value from the props to the nosy list
@@ -1208,7 +1237,7 @@ function help_window(helpurl, width, height) {
         self.db.commit()
 
     def do_action(self, action, dre=re.compile(r'([^\d]+)(\d+)'),
-            nre=re.compile(r'new(\w+)')):
+            nre=re.compile(r'new(\w+)'), sre=re.compile(r'search(\w+)')):
         '''Figure the user's action and do it.
         '''
         # here be the "normal" functionality
@@ -1226,12 +1255,6 @@ function help_window(helpurl, width, height) {
             return
         if action == 'logout':
             self.logout()
-            return
-        if action == 'search':
-            self.search()
-            return
-        if action == 'searchresults':
-            self.searchresults()
             return
 
         # see if we're to display an existing node
@@ -1265,6 +1288,17 @@ function help_window(helpurl, width, height) {
             func()
             return
 
+        # see if we're to put up the new node page
+        m = sre.match(action)
+        if m:
+            self.classname = m.group(1)
+            try:
+                func = getattr(self, 'search%s'%self.classname)
+            except AttributeError:
+                raise NotFound
+            func()
+            return
+
         # otherwise, display the named class
         self.classname = action
         try:
@@ -1282,7 +1316,7 @@ class ExtendedClient(Client):
     showtimelog = Client.shownode
     newsupport = Client.newnode
     newtimelog = Client.newnode
-    classes_to_search = ['issue', 'support']
+    searchsupport = Client.searchnode
 
     default_index_sort = ['-activity']
     default_index_group = ['priority']
@@ -1371,6 +1405,17 @@ def parsePropsFromForm(db, cl, form, nodeid=0):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.114.2.2  2002/04/19 19:54:42  rochecompaan
+# cgi_client.py
+#     removed search link for the time being
+#     moved rendering of matches to htmltemplate
+# hyperdb.py
+#     filtering of nodes on full text search incorporated in filter method
+# roundupdb.py
+#     added paramater to call of filter method
+# roundup_indexer.py
+#     added search method to RoundupIndexer class
+#
 # Revision 1.114.2.1  2002/04/03 11:55:57  rochecompaan
 #  . Added feature #526730 - search for messages capability
 #

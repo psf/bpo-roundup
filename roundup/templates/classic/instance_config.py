@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: instance_config.py,v 1.13 2002-03-14 23:59:24 richard Exp $
+# $Id: instance_config.py,v 1.13.2.1 2002-04-20 13:23:33 rochecompaan Exp $
 
 MAIL_DOMAIN=MAILHOST=HTTP_HOST=None
 HTTP_PORT=0
@@ -99,6 +99,9 @@ HEADER_INDEX_LINKS = ['DEFAULT', 'UNASSIGNED', 'USER']
 # list the classes that users are able to add nodes to
 HEADER_ADD_LINKS = ['issue']
 
+# list the classes that users can search
+HEADER_SEARCH_LINKS = ['issue']
+
 # Now the DEFAULT display specification. TODO: describe format
 DEFAULT_INDEX = {
   'LABEL': 'All Issues',
@@ -144,6 +147,9 @@ USER_INDEX = {
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.13  2002/03/14 23:59:24  richard
+#  . #517734 ] web header customisation is obscure
+#
 # Revision 1.12  2002/02/15 00:13:38  richard
 #  . #503204 ] mailgw needs a default class
 #     - partially done - the setting of additional properties can wait for a
