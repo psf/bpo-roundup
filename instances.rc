@@ -1,0 +1,6 @@
+[DEFAULT]
+defaults=%(roundup_conf_dir)s/instance_defaults.rc
+config=%(homedir)s/config.rc
+
+[My Development Instance]
+homedir=/tmp/roundup/instance

@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: init.py,v 1.18 2001-11-22 15:46:42 jhermann Exp $
+# $Id: init.py,v 1.18.2.1 2002-01-03 02:12:05 titus Exp $
 
 __doc__ = """
 Init (create) a roundup instance.
@@ -69,6 +69,9 @@ def init(instance_home, template, backend, adminpw):
         . instance_config.py
           - simple configuration of things like the email address for the
             mail gateway, the mail domain, the mail host, ...
+        . config.rc
+          - default configuration file used by instance_config to load
+            in the configuration.
         . dbinit.py and select_db.py
           - defines the schema for the hyperdatabase and indicates which
             backend to use.
@@ -108,6 +111,9 @@ from roundup.backends.back_%s import Database'''%backend
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.18  2001/11/22 15:46:42  jhermann
+# Added module docstrings to all modules.
+#
 # Revision 1.17  2001/11/12 23:17:38  jhermann
 # Code using copyDigestedFile() that passes unit tests
 #

@@ -15,73 +15,103 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: instance_config.py,v 1.10 2001-11-26 22:55:56 richard Exp $
-
-MAIL_DOMAIN=MAILHOST=HTTP_HOST=None
-HTTP_PORT=0
-
-try:
-    from localconfig import *
-except ImportError:
-    localconfig = None
+# $Id: instance_config.py,v 1.10.2.1 2002-01-03 02:12:05 titus Exp $
 
 import os
+import roundup.config
 
 # roundup home is this package's directory
-INSTANCE_HOME=os.path.split(__file__)[0]
+INSTANCE_HOME=os.path.dirname(__file__)
 
-# The SMTP mail host that roundup will use to send mail
-if not MAILHOST:
-    MAILHOST = 'localhost'
+base_config = roundup.config.load_base_config()
+instances_config = base_config.load_instances_config()
 
-# The domain name used for email addresses.
-if not MAIL_DOMAIN:
-    MAIL_DOMAIN = 'fill.me.in.'
+try:
+    instance_name = instances_config.get_instance_name(INSTANCE_HOME)
+    instance_config = instances_config.load_instance_config(instance_name)
 
-# the next two are only used for the standalone HTTP server.
-if not HTTP_HOST:
-    HTTP_HOST = ''
-if not HTTP_PORT:
-    HTTP_PORT = 9080
+    # The SMTP mail host that roundup will use to send mail
+    MAILHOST = instance_config.get('mail', 'host')
+    MAIL_DOMAIN = instance_config.get('mail', 'domain')
 
-# This is the directory that the database is going to be stored in
-DATABASE = os.path.join(INSTANCE_HOME, 'db')
+    HTTP_HOST = instance_config.get('standalone_http', 'host')
+    HTTP_PORT = instance_config.get('standalone_http', 'port')
 
-# This is the directory that the HTML templates reside in
-TEMPLATES = os.path.join(INSTANCE_HOME, 'html')
+    # This is the directory that the database is going to be stored in
+    DATABASE = instance_config.get('base', 'databasedir')
 
-# A descriptive name for your roundup instance
-INSTANCE_NAME = 'Roundup issue tracker'
+    # This is the directory that the HTML templates reside in
+    TEMPLATES = instance_config.get('base', 'templatedir')
 
-# The email address that mail to roundup should go to
-ISSUE_TRACKER_EMAIL = 'issue_tracker@%s'%MAIL_DOMAIN
+    # A descriptive name for your roundup instance
+    INSTANCE_NAME = instance_config.get_name()
 
-# The web address that the instance is viewable at
-ISSUE_TRACKER_WEB = 'http://some.useful.url/'
+    # The email address that mail to roundup should go to
+    ISSUE_TRACKER_EMAIL = instance_config.get('base', 'email')
 
-# The email address that roundup will complain to if it runs into trouble
-ADMIN_EMAIL = 'roundup-admin@%s'%MAIL_DOMAIN
+    # The web address that the instance is viewable at
+    ISSUE_TRACKER_WEB = instance_config.get('base', 'url')
 
-# Somewhere for roundup to log stuff internally sent to stdout or stderr
-LOG = os.path.join(INSTANCE_HOME, 'roundup.log')
+    ADMIN_EMAIL = instance_config.get('base', 'admin_email')
 
-# Where to place the web filtering HTML on the index page
-FILTER_POSITION = 'bottom'      # one of 'top', 'bottom', 'top and bottom'
+    # Somewhere for roundup to log stuff internally sent to stdout or stderr
+    LOG = instance_config.get('base', 'log')
 
-# Deny or allow anonymous access to the web interface
-ANONYMOUS_ACCESS = 'deny'       # either 'deny' or 'allow'
+    # Where to place the web filtering HTML on the index page
+    FILTER_POSITION = instance_config.get('base', 'filter_position')
 
-# Deny or allow anonymous users to register through the web interface
-ANONYMOUS_REGISTER = 'deny'     # either 'deny' or 'allow'
+    # Deny or allow anonymous access to the web interface
+    ANONYMOUS_ACCESS = instance_config.get('base', 'anonymous_access')
 
-# Send nosy messages to the author of the message
-MESSAGES_TO_AUTHOR = 'no'       # either 'yes' or 'no'
+    # Deny or allow anonymous users to register through the web interface
+    ANONYMOUS_REGISTER = instance_config.get('base', 'anonymous_register')
 
-# Where to place the email signature
-EMAIL_SIGNATURE_POSITION = 'bottom'
+    # Send nosy messages to the author of the message
+    MESSAGES_TO_AUTHOR = instance_config.get('base', 'messages_to_author')
+
+    # Where to place the email signature
+    EMAIL_SIGNATURE_POSITION = instance_config.get('base', 'email_signature_position')
+except:                                 # probably in init
+    DATABASE = None
+    TEMPLATES = None
+    ADMIN_EMAIL = ''
+    
+    MAILHOST = MAIL_DOMAIN = None
+    HTTP_HOST = HTTP_PORT = None
+
+    INSTANCE_NAME = None
+    ISSUE_TRACKER_EMAIL = None
+
+    ISSUE_TRACKER_WEB = None
+
+    LOG = None
+
+    FILTER_POSITION = None
+
+    ANONYMOUS_ACCESS = ANONYMOUS_REGISTER = MESSAGES_TO_AUTHOR = None
+
+    EMAIL_SIGNATURE_POSITION = None
+
+def get_default_database_dir():
+    return INSTANCE_HOME + '/db'
+
+def get_default_admin_email():
+    return base_config.get('base', 'admin_email')
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.10  2001/11/26 22:55:56  richard
+# Feature:
+#  . Added INSTANCE_NAME to configuration - used in web and email to identify
+#    the instance.
+#  . Added EMAIL_SIGNATURE_POSITION to indicate where to place the roundup
+#    signature info in e-mails.
+#  . Some more flexibility in the mail gateway and more error handling.
+#  . Login now takes you to the page you back to the were denied access to.
+#
+# Fixed:
+#  . Lots of bugs, thanks Roché and others on the devel mailing list!
+#
 # Revision 1.9  2001/10/30 00:54:45  richard
 # Features:
 #  . #467129 ] Lossage when username=e-mail-address
@@ -129,3 +159,4 @@ EMAIL_SIGNATURE_POSITION = 'bottom'
 #
 #
 # vim: set filetype=python ts=4 sw=4 et si
+#SHA: 8791edd89251ad1a57d549a52ac6eba591d6ddd1

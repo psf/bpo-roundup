@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/local/bin/python
 #
 # Copyright (c) 2001 Bizar Software Pty Ltd (http://www.bizarsoftware.com.au/)
 # This module is free software, and you may redistribute it and/or modify
@@ -16,9 +16,10 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: roundup.cgi,v 1.22 2001-12-13 00:20:01 richard Exp $
+# $Id: roundup.cgi,v 1.22.2.1 2002-01-03 02:12:05 titus Exp $
 
 # python version check
+import sys
 from roundup import version_check
 
 #
@@ -42,15 +43,23 @@ from roundup import version_check
 
 # This indicates where the Roundup instance lives
 ROUNDUP_INSTANCE_HOMES = {
-    'demo': '/var/roundup/instances/demo',
+#    'dev' : '/u/t/dev/roundup/instance'
 }
+
+### @CTB config file.
+import roundup.config
+base_config = roundup.config.load_base_config()
+instances_config = base_config.load_instances_config()
+
+for name in instances_config.get_instance_names():
+    ROUNDUP_INSTANCE_HOMES[name] = instances_config.get_instance_dir(name)
 
 # Where to log debugging information to. Use an instance of DevNull if you
 # don't want to log anywhere.
 class DevNull:
     def write(self, info):
         pass
-    def close():
+    def close(self):
         pass
 #LOG = open('/var/log/roundup.cgi.log', 'a')
 LOG = DevNull()
@@ -128,6 +137,7 @@ def main(out, err):
     os.environ['INSTANCE_NAME'] = instance
     os.environ['PATH_INFO'] = string.join(path[2:], '/')
     request = RequestWrapper(out)
+
     if ROUNDUP_INSTANCE_HOMES.has_key(instance):
         # redirect if we need a trailing '/'
         if len(path) == 2:
@@ -139,7 +149,9 @@ def main(out, err):
             out.write('Moved Permanently')
         else:
             instance_home = ROUNDUP_INSTANCE_HOMES[instance]
+            
             instance = roundup.instance.open(instance_home)
+            
             from roundup import cgi_client
             client = instance.Client(instance, request, os.environ)
             try:
@@ -196,6 +208,10 @@ LOG.close()
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.22  2001/12/13 00:20:01  richard
+#  . Centralised the python version check code, bumped version to 2.1.1 (really
+#    needs to be 2.1.2, but that isn't released yet :)
+#
 # Revision 1.21  2001/12/02 05:06:16  richard
 # . We now use weakrefs in the Classes to keep the database reference, so
 #   the close() method on the database is no longer needed.

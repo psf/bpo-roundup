@@ -1,0 +1,15 @@
+[base]
+full_name=howdy
+email=issue_tracker@%(domain)s
+url=http://some.useful.url
+
+# The email address that roundup will complain to if it runs into trouble
+admin_email=roundup-admin@%(domain)s
+
+[mail]
+host=localhost
+domain=fill.me.in
+
+[standalone_http]
+host=
+port=
