@@ -1,9 +1,5 @@
-This is a SECURITY FIX release 0.6.10 of Roundup. All users are encouraged
+0.6.11 is a SECURITY FIX release of Roundup. All users are encouraged
 to upgrade immediately.
-
-It also fixes a bug in the MySQL backend:
-
-- mysql backend wasn't locking tracker
 
 If you're upgrading from an older version of Roundup you *must* follow
 the "Software Upgrade" guidelines given in the maintenance documentation.

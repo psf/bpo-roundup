@@ -16,7 +16,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: setup.py,v 1.55.2.13 2004-05-27 21:56:14 richard Exp $
+# $Id: setup.py,v 1.55.2.14 2004-05-27 22:09:51 richard Exp $
 
 from distutils.core import setup, Extension
 from distutils.util import get_platform
@@ -188,12 +188,8 @@ def main():
 command-line, web and e-mail interfaces. It is based on the winning design
 from Ka-Ping Yee in the Software Carpentry "Track" design competition.
 
-This is a SECURITY FIX release 0.6.10 of Roundup. All users are encouraged
+0.6.11 is a SECURITY FIX release of Roundup. All users are encouraged
 to upgrade immediately.
-
-It also fixes a bug in the MySQL backend:
-
-- mysql backend wasn't locking tracker
 ''',
         author = "Richard Jones",
         author_email = "richard@users.sourceforge.net",
