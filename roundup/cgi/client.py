@@ -1,4 +1,4 @@
-# $Id: client.py,v 1.130.2.15 2004-03-24 20:31:43 richard Exp $
+# $Id: client.py,v 1.130.2.16 2004-05-27 21:53:44 richard Exp $
 
 __doc__ = """
 WWW request handler (also used in the stand-alone server).
@@ -508,7 +508,16 @@ class Client:
         elif self.env.has_key('HTTP_IF_MODIFIED_SINCE'):
             # cgi will put the header in the env var
             ims = self.env['HTTP_IF_MODIFIED_SINCE']
-        filename = os.path.join(self.instance.config.TEMPLATES, file)
+
+        # figure the filename - ensure the load doesn't try to poke
+        # outside of the static files dir
+        prefix = getattr(self.instance.config, 'STATIC_FILES',
+            self.instance.config.TEMPLATES)
+        filename = os.path.normpath(os.path.join(prefix, file))
+        if not filename.startswith(prefix):
+            raise NotFound, file
+
+        # check modification time
         lmt = os.stat(filename)[stat.ST_MTIME]
         if ims:
             ims = rfc822.parsedate(ims)[:6]
