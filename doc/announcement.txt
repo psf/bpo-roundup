@@ -1,5 +1,7 @@
-I'm pleased to announce Roundup 0.6.10, a maintenance release which fixes
-a single bug in the MySQL backend:
+This is a SECURITY FIX release 0.6.10 of Roundup. All users are encouraged
+to upgrade immediately.
+
+It also fixes a bug in the MySQL backend:
 
 - mysql backend wasn't locking tracker
 
