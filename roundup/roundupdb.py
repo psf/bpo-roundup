@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: roundupdb.py,v 1.36 2002-01-02 02:31:38 richard Exp $
+# $Id: roundupdb.py,v 1.36.2.1 2002-02-06 04:05:54 richard Exp $
 
 __doc__ = """
 Extending hyperdb with types specific to issue-tracking.
@@ -237,10 +237,6 @@ class DetectorError(RuntimeError):
 
 # XXX deviation from spec - was called ItemClass
 class IssueClass(Class):
-    # configuration
-    MESSAGES_TO_AUTHOR = 'no'
-    INSTANCE_NAME = 'Roundup issue tracker'
-    EMAIL_SIGNATURE_POSITION = 'bottom'
 
     # Overridden methods:
 
@@ -303,7 +299,7 @@ class IssueClass(Class):
 
         # possibly send the message to the author, as long as they aren't
         # anonymous
-        if (self.MESSAGES_TO_AUTHOR == 'yes' and
+        if (self.db.config.MESSAGES_TO_AUTHOR == 'yes' and
                 users.get(authid, 'username') != 'anonymous'):
             sendto.append(authid)
         r[authid] = 1
@@ -331,8 +327,8 @@ class IssueClass(Class):
         if not messageid:
             # this is an old message that didn't get a messageid, so
             # create one
-            messageid = "%s.%s.%s%s-%s"%(time.time(), random.random(),
-                self.classname, nodeid, self.MAIL_DOMAIN)
+            messageid = "<%s.%s.%s%s@%s>"%(time.time(), random.random(),
+                self.classname, nodeid, self.db.config.MAIL_DOMAIN)
             messages.set(msgid, messageid=messageid)
 
         # update the message's recipients list
@@ -356,7 +352,7 @@ class IssueClass(Class):
         m = ['']
 
         # put in roundup's signature
-        if self.EMAIL_SIGNATURE_POSITION == 'top':
+        if self.db.config.EMAIL_SIGNATURE_POSITION == 'top':
             m.append(self.email_signature(nodeid, msgid))
 
         # add author information
@@ -374,20 +370,21 @@ class IssueClass(Class):
             m.append(change_note)
 
         # put in roundup's signature
-        if self.EMAIL_SIGNATURE_POSITION == 'bottom':
+        if self.db.config.EMAIL_SIGNATURE_POSITION == 'bottom':
             m.append(self.email_signature(nodeid, msgid))
 
         # get the files for this message
-        files = messages.get(msgid, 'files')
+        message_files = messages.get(msgid, 'files')
 
         # create the message
         message = cStringIO.StringIO()
         writer = MimeWriter.MimeWriter(message)
         writer.addheader('Subject', '[%s%s] %s'%(cn, nodeid, title))
         writer.addheader('To', ', '.join(sendto))
-        writer.addheader('From', '%s <%s>'%(authname, self.ISSUE_TRACKER_EMAIL))
-        writer.addheader('Reply-To', '%s <%s>'%(self.INSTANCE_NAME,
-            self.ISSUE_TRACKER_EMAIL))
+        writer.addheader('From', '%s <%s>'%(authname,
+            self.db.config.ISSUE_TRACKER_EMAIL))
+        writer.addheader('Reply-To', '%s <%s>'%(self.db.config.INSTANCE_NAME,
+            self.db.config.ISSUE_TRACKER_EMAIL))
         writer.addheader('MIME-Version', '1.0')
         if messageid:
             writer.addheader('Message-Id', messageid)
@@ -395,12 +392,12 @@ class IssueClass(Class):
             writer.addheader('In-Reply-To', inreplyto)
 
         # attach files
-        if files:
+        if message_files:
             part = writer.startmultipartbody('mixed')
             part = writer.nextpart()
             body = part.startbody('text/plain')
             body.write('\n'.join(m))
-            for fileid in files:
+            for fileid in message_files:
                 name = files.get(fileid, 'name')
                 mime_type = files.get(fileid, 'type')
                 content = files.get(fileid, 'content')
@@ -431,13 +428,14 @@ class IssueClass(Class):
         # now try to send the message
         if SENDMAILDEBUG:
             open(SENDMAILDEBUG, 'w').write('FROM: %s\nTO: %s\n%s\n'%(
-                self.ADMIN_EMAIL, ', '.join(sendto), message.getvalue()))
+                self.db.config.ADMIN_EMAIL,', '.join(sendto),message.getvalue()))
         else:
             try:
                 # send the message as admin so bounces are sent there
                 # instead of to roundup
-                smtp = smtplib.SMTP(self.MAILHOST)
-                smtp.sendmail(self.ADMIN_EMAIL, sendto, message.getvalue())
+                smtp = smtplib.SMTP(self.db.config.MAILHOST)
+                smtp.sendmail(self.db.config.ADMIN_EMAIL, sendto,
+                    message.getvalue())
             except socket.error, value:
                 raise MessageSendError, \
                     "Couldn't send confirmation email: mailhost %s"%value
@@ -448,10 +446,48 @@ class IssueClass(Class):
     def email_signature(self, nodeid, msgid):
         ''' Add a signature to the e-mail with some useful information
         '''
-        web = self.ISSUE_TRACKER_WEB + 'issue'+ nodeid
-        email = '"%s" <%s>'%(self.INSTANCE_NAME, self.ISSUE_TRACKER_EMAIL)
+        web = self.db.config.ISSUE_TRACKER_WEB + 'issue'+ nodeid
+        email = '"%s" <%s>'%(self.db.config.INSTANCE_NAME,
+            self.db.config.ISSUE_TRACKER_EMAIL)
         line = '_' * max(len(web), len(email))
         return '%s\n%s\n%s\n%s'%(line, email, web, line)
+
+    def generateCreateNote(self, nodeid):
+        """Generate a create note that lists initial property values
+        """
+        cn = self.classname
+        cl = self.db.classes[cn]
+        props = cl.getprops(protected=0)
+
+        # list the values
+        m = []
+        l = props.items()
+        l.sort()
+        for propname, prop in l:
+            value = cl.get(nodeid, propname, None)
+            # skip boring entries
+            if not value:
+                continue
+            if isinstance(prop, hyperdb.Link):
+                link = self.db.classes[prop.classname]
+                if value:
+                    key = link.labelprop(default_to_id=1)
+                    if key:
+                        value = link.get(value, key)
+                else:
+                    value = ''
+            elif isinstance(prop, hyperdb.Multilink):
+                if value is None: value = []
+                l = []
+                link = self.db.classes[prop.classname]
+                key = link.labelprop(default_to_id=1)
+                if key:
+                    value = [link.get(entry, key) for entry in value]
+                value = ', '.join(value)
+            m.append('%s: %s'%(propname, value))
+        m.insert(0, '----------')
+        m.insert(0, '')
+        return '\n'.join(m)
 
     def generateChangeNote(self, nodeid, oldvalues):
         """Generate a change note that lists property changes
@@ -478,7 +514,9 @@ class IssueClass(Class):
 
         # list the changes
         m = []
-        for propname, oldvalue in changed.items():
+        l = changed.items()
+        l.sort()
+        for propname, oldvalue in l:
             prop = cl.properties[propname]
             value = cl.get(nodeid, propname, None)
             if isinstance(prop, hyperdb.Link):
@@ -530,6 +568,45 @@ class IssueClass(Class):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.42  2002/01/21 09:55:14  rochecompaan
+# Properties in change note are now sorted
+#
+# Revision 1.41  2002/01/15 00:12:40  richard
+# #503340 ] creating issue with [asignedto=p.ohly]
+#
+# Revision 1.40  2002/01/14 22:21:38  richard
+# #503353 ] setting properties in initial email
+#
+# Revision 1.39  2002/01/14 02:20:15  richard
+#  . changed all config accesses so they access either the instance or the
+#    config attriubute on the db. This means that all config is obtained from
+#    instance_config instead of the mish-mash of classes. This will make
+#    switching to a ConfigParser setup easier too, I hope.
+#
+# At a minimum, this makes migration a _little_ easier (a lot easier in the
+# 0.5.0 switch, I hope!)
+#
+# Revision 1.38  2002/01/10 05:57:45  richard
+# namespace clobberation
+#
+# Revision 1.37  2002/01/08 04:12:05  richard
+# Changed message-id format to "<%s.%s.%s%s@%s>" so it complies with RFC822
+#
+# Revision 1.36  2002/01/02 02:31:38  richard
+# Sorry for the huge checkin message - I was only intending to implement #496356
+# but I found a number of places where things had been broken by transactions:
+#  . modified ROUNDUPDBSENDMAILDEBUG to be SENDMAILDEBUG and hold a filename
+#    for _all_ roundup-generated smtp messages to be sent to.
+#  . the transaction cache had broken the roundupdb.Class set() reactors
+#  . newly-created author users in the mailgw weren't being committed to the db
+#
+# Stuff that made it into CHANGES.txt (ie. the stuff I was actually working
+# on when I found that stuff :):
+#  . #496356 ] Use threading in messages
+#  . detectors were being registered multiple times
+#  . added tests for mailgw
+#  . much better attaching of erroneous messages in the mail gateway
+#
 # Revision 1.35  2001/12/20 15:43:01  rochecompaan
 # Features added:
 #  .  Multilink properties are now displayed as comma separated values in

@@ -73,7 +73,7 @@ are calling the create() method to create a new node). If an auditor raises
 an exception, the original message is bounced back to the sender with the
 explanatory message given in the exception. 
 
-$Id: mailgw.py,v 1.47 2002-01-02 02:32:38 richard Exp $
+$Id: mailgw.py,v 1.47.2.1 2002-02-06 04:05:53 richard Exp $
 '''
 
 
@@ -88,6 +88,9 @@ class MailGWError(ValueError):
     pass
 
 class MailUsageError(ValueError):
+    pass
+
+class MailUsageHelp(Exception):
     pass
 
 class UnAuthorized(Exception):
@@ -116,7 +119,7 @@ class Message(mimetools.Message):
         s.seek(0)
         return Message(s)
 
-subject_re = re.compile(r'(?P<refwd>\s*\W?\s*(fwd|re)\s*\W?\s*)*'
+subject_re = re.compile(r'(?P<refwd>\s*\W?\s*(fwd|re|aw)\s*\W?\s*)*'
     r'\s*(\[(?P<classname>[^\d\s]+)(?P<nodeid>\d+)?\])'
     r'\s*(?P<title>[^[]+)?(\[(?P<args>.+?)\])?', re.I)
 
@@ -145,6 +148,15 @@ class MailGW:
         if sendto:
             try:
                 return self.handle_message(message)
+            except MailUsageHelp:
+                # bounce the message back to the sender with the usage message
+                fulldoc = '\n'.join(string.split(__doc__, '\n')[2:])
+                sendto = [sendto[0][1]]
+                m = ['']
+                m.append('\n\nMail Gateway Help\n=================')
+                m.append(fulldoc)
+                m = self.bounce_message(message, sendto, m,
+                    subject="Mail Gateway Help")
             except MailUsageError, value:
                 # bounce the message back to the sender with the usage message
                 fulldoc = '\n'.join(string.split(__doc__, '\n')[2:])
@@ -162,8 +174,11 @@ class MailGW:
                 m = self.bounce_message(message, sendto, m)
             except:
                 # bounce the message back to the sender with the error message
-                sendto = [sendto[0][1]]
+                sendto = [sendto[0][1], self.instance.ADMIN_EMAIL]
                 m = ['']
+                m.append('An unexpected error occurred during the processing')
+                m.append('of your message. The tracker administrator is being')
+                m.append('notified.\n')
                 m.append('----  traceback of failure  ----')
                 s = cStringIO.StringIO()
                 import traceback
@@ -172,7 +187,7 @@ class MailGW:
                 m = self.bounce_message(message, sendto, m)
         else:
             # very bad-looking message - we don't even know who sent it
-            sendto = [self.ADMIN_EMAIL]
+            sendto = [self.instance.ADMIN_EMAIL]
             m = ['Subject: badly formed message from mail gateway']
             m.append('')
             m.append('The mail gateway retrieved a message which has no From:')
@@ -185,11 +200,11 @@ class MailGW:
         # now send the message
         if SENDMAILDEBUG:
             open(SENDMAILDEBUG, 'w').write('From: %s\nTo: %s\n%s\n'%(
-                self.ADMIN_EMAIL, ', '.join(sendto), m.getvalue()))
+                self.instance.ADMIN_EMAIL, ', '.join(sendto), m.getvalue()))
         else:
             try:
-                smtp = smtplib.SMTP(self.MAILHOST)
-                smtp.sendmail(self.ADMIN_EMAIL, sendto, m.getvalue())
+                smtp = smtplib.SMTP(self.instance.MAILHOST)
+                smtp.sendmail(self.instance.ADMIN_EMAIL, sendto, m.getvalue())
             except socket.error, value:
                 raise MailGWError, "Couldn't send error email: "\
                     "mailhost %s"%value
@@ -206,7 +221,7 @@ class MailGW:
         writer = MimeWriter.MimeWriter(msg)
         writer.addheader('Subject', subject)
         writer.addheader('From', '%s <%s>'% (self.instance.INSTANCE_NAME,
-                                            self.ISSUE_TRACKER_EMAIL))
+                                            self.instance.ISSUE_TRACKER_EMAIL))
         writer.addheader('To', ','.join(sendto))
         writer.addheader('MIME-Version', '1.0')
         part = writer.startmultipartbody('mixed')
@@ -228,13 +243,17 @@ class MailGW:
                 w.addheader(header_name, message.getheader(header_name))
         # now attach the message body
         body = w.startbody(content_type)
-        message.rewindbody()
-        body.write(message.fp.read())
+        try:
+            message.rewindbody()
+        except IOError:
+            body.write("*** couldn't include message body: read from pipe ***")
+        else:
+            body.write(message.fp.read())
 
         # attach the original message to the returned message
         part = writer.nextpart()
         part.addheader('Content-Disposition','attachment')
-        part.addheader('Content-Description','Message that caused the error')
+        part.addheader('Content-Description','Message you sent')
         part.addheader('Content-Transfer-Encoding', '7bit')
         body = part.startbody('message/rfc822')
         body.write(m.getvalue())
@@ -249,6 +268,10 @@ class MailGW:
         '''
         # handle the subject line
         subject = message.getheader('subject', '')
+
+        if subject.strip() == 'help':
+            raise MailUsageHelp
+
         m = subject_re.match(subject)
         if not m:
             raise MailUsageError, '''
@@ -319,6 +342,7 @@ Subject was: "%s"
         args = m.group('args')
         if args:
             for prop in string.split(args, ';'):
+                # extract the property name and value
                 try:
                     key, value = prop.split('=')
                 except ValueError, message:
@@ -328,6 +352,8 @@ Subject argument list not of form [arg=value,value,...;arg=value,value...]
 
 Subject was: "%s"
 '''%(message, subject)
+
+                # ensure it's a valid property name
                 key = key.strip()
                 try:
                     proptype =  properties[key]
@@ -337,6 +363,8 @@ Subject argument list refers to an invalid property: "%s"
 
 Subject was: "%s"
 '''%(key, subject)
+
+                # convert the string value to a real property value
                 if isinstance(proptype, hyperdb.String):
                     props[key] = value.strip()
                 if isinstance(proptype, hyperdb.Password):
@@ -362,32 +390,43 @@ Error was: %s
 Subject was: "%s"
 '''%(key, message, subject)
                 elif isinstance(proptype, hyperdb.Link):
-                    link = self.db.classes[proptype.classname]
-                    propkey = link.labelprop(default_to_id=1)
+                    linkcl = self.db.classes[proptype.classname]
+                    propkey = linkcl.labelprop(default_to_id=1)
                     try:
-                        props[key] = link.get(value.strip(), propkey)
-                    except:
-                        props[key] = link.lookup(value.strip())
+                        props[key] = linkcl.lookup(value)
+                    except KeyError, message:
+                        raise MailUsageError, '''
+Subject argument list contains an invalid value for %s.
+
+Error was: %s
+Subject was: "%s"
+'''%(key, message, subject)
                 elif isinstance(proptype, hyperdb.Multilink):
-                    link = self.db.classes[proptype.classname]
-                    propkey = link.labelprop(default_to_id=1)
-                    l = [x.strip() for x in value.split(',')]
-                    for item in l:
+                    # get the linked class
+                    linkcl = self.db.classes[proptype.classname]
+                    propkey = linkcl.labelprop(default_to_id=1)
+                    for item in value.split(','):
+                        item = item.strip()
                         try:
-                            v = link.get(item, propkey)
-                        except:
-                            v = link.lookup(item)
+                            item = linkcl.lookup(item)
+                        except KeyError, message:
+                            raise MailUsageError, '''
+Subject argument list contains an invalid value for %s.
+
+Error was: %s
+Subject was: "%s"
+'''%(key, message, subject)
                         if props.has_key(key):
-                            props[key].append(v)
+                            props[key].append(item)
                         else:
-                            props[key] = [v]
+                            props[key] = [item]
 
         #
         # handle the users
         #
 
         # Don't create users if ANONYMOUS_REGISTER is denied
-        if self.ANONYMOUS_REGISTER == 'deny':
+        if self.instance.ANONYMOUS_REGISTER == 'deny':
             create = 0
         else:
             create = 1
@@ -413,7 +452,7 @@ Unknown address: %s
 
         # now update the recipients list
         recipients = []
-        tracker_email = self.ISSUE_TRACKER_EMAIL.lower()
+        tracker_email = self.instance.ISSUE_TRACKER_EMAIL.lower()
         for recipient in message.getaddrlist('to') + message.getaddrlist('cc'):
             r = recipient[1].strip().lower()
             if r == tracker_email or not r:
@@ -427,8 +466,8 @@ Unknown address: %s
         inreplyto = message.getheader('in-reply-to') or ''
         # generate a messageid if there isn't one
         if not messageid:
-            messageid = "%s.%s.%s%s-%s"%(time.time(), random.random(),
-                classname, nodeid, self.MAIL_DOMAIN)
+            messageid = "<%s.%s.%s%s@%s>"%(time.time(), random.random(),
+                classname, nodeid, self.instance.MAIL_DOMAIN)
 
         #
         # now handle the body - find the message
@@ -448,8 +487,28 @@ Unknown address: %s
                 subtype = part.gettype()
                 if subtype == 'text/plain' and not content:
                     # add all text/plain parts to the message content
+                    # BUG (in code or comment) only add the first one. 
                     if content is None:
-                        content = part.fp.read()
+                        # try name on Content-Type
+                        # maybe add name to non text content ?
+                        name = part.getparam('name')
+                        # assume first part is the mail
+                        encoding = part.getencoding()
+                        if encoding == 'base64':
+                            # BUG: is base64 really used for text encoding or
+                            # are we inserting zip files here. 
+                            data = binascii.a2b_base64(part.fp.read())
+                        elif encoding == 'quoted-printable':
+                            # the quopri module wants to work with files
+                            decoded = cStringIO.StringIO()
+                            quopri.decode(part.fp, decoded)
+                            data = decoded.getvalue()
+                        elif encoding == 'uuencoded':
+                            data = binascii.a2b_uu(part.fp.read())
+                        else:
+                            # take it as text
+                            data = part.fp.read()
+                        content = data
                     else:
                         content = content + part.fp.read()
 
@@ -477,7 +536,6 @@ Unknown address: %s
                     elif encoding == 'uuencoded':
                         data = binascii.a2b_uu(part.fp.read())
                     attachments.append((name, part.gettype(), data))
-
             if content is None:
                 raise MailUsageError, '''
 Roundup requires the submission to be plain text. The message parser could
@@ -510,8 +568,23 @@ not find a text/plain part to use.
 '''
 
         else:
-            content = message.fp.read()
-
+            encoding = message.getencoding()
+            if encoding == 'base64':
+                # BUG: is base64 really used for text encoding or
+                # are we inserting zip files here. 
+                data = binascii.a2b_base64(message.fp.read())
+            elif encoding == 'quoted-printable':
+                # the quopri module wants to work with files
+                decoded = cStringIO.StringIO()
+                quopri.decode(message.fp, decoded)
+                data = decoded.getvalue()
+            elif encoding == 'uuencoded':
+                data = binascii.a2b_uu(message.fp.read())
+            else:
+                # take it as text
+                data = message.fp.read()
+            content = data
+ 
         summary, content = parseContent(content)
 
         # 
@@ -519,6 +592,8 @@ not find a text/plain part to use.
         #
         files = []
         for (name, mime_type, data) in attachments:
+            if not name:
+                name = "unnamed"
             files.append(self.db.file.create(type=mime_type, name=name,
                 content=data))
 
@@ -542,9 +617,10 @@ not find a text/plain part to use.
                 except KeyError:
                     pass
                 else:
+                    current_status = cl.get(nodeid, 'status')
                     if (not props.has_key('status') and
-                            properties['status'] == unread_id or
-                            properties['status'] == resolved_id):
+                            current_status == unread_id or
+                            current_status == resolved_id):
                         props['status'] = chatting_id
 
             # add nosy in arguments to issue's nosy list
@@ -561,12 +637,10 @@ not find a text/plain part to use.
                 n[nid] = 1
             props['nosy'] = n.keys()
             # add assignedto to the nosy list
-            try:
-                assignedto = self.db.user.lookup(props['assignedto'])
+            if props.has_key('assignedto'):
+                assignedto = props['assignedto']
                 if assignedto not in props['nosy']:
                     props['nosy'].append(assignedto)
-            except:
-                pass
 
             message_id = self.db.msg.create(author=author,
                 recipients=recipients, date=date.Date('.'), summary=summary,
@@ -625,10 +699,7 @@ There was a problem with the message you sent:
             nosy = props.get('nosy', [])
             n = {}
             for value in nosy:
-                if self.db.hasnode('user', value):
-                    nid = value
-                else:
-                    continue
+                nid = value
                 if n.has_key(nid): continue
                 n[nid] = 1
             props['nosy'] = n.keys()
@@ -645,13 +716,7 @@ There was a problem with the message you sent:
 
             # add assignedto to the nosy list
             if properties.has_key('assignedto') and props.has_key('assignedto'):
-                try:
-                    assignedto = self.db.user.lookup(props['assignedto'])
-                except KeyError:
-                    raise MailUsageError, '''
-There was a problem with the message you sent:
-   Assignedto user '%s' doesn't exist
-'''%props['assignedto']
+                assignedto = props['assignedto']
                 if not n.has_key(assignedto):
                     props['nosy'].append(assignedto)
                     n[assignedto] = 1
@@ -693,21 +758,100 @@ def parseContent(content, blank_line=re.compile(r'[\r\n]+\s*[\r\n]+'),
         if not section:
             continue
         lines = eol.split(section)
-        if lines[0] and lines[0][0] in '>|':
-            continue
-        if len(lines) > 1 and lines[1] and lines[1][0] in '>|':
-            continue
+        if (lines[0] and lines[0][0] in '>|') or (len(lines) > 1 and
+                lines[1] and lines[1][0] in '>|'):
+            # see if there's a response somewhere inside this section (ie.
+            # no blank line between quoted message and response)
+            for line in lines[1:]:
+                if line[0] not in '>|':
+                    break
+            else:
+                # TODO: people who want to keep quoted bits will want the
+                # next line...
+                # l.append(section)
+                continue
+            # keep this section - it has reponse stuff in it
+            if not summary:
+                # and while we're at it, use the first non-quoted bit as
+                # our summary
+                summary = line
+            lines = lines[lines.index(line):]
+            section = '\n'.join(lines)
+
         if not summary:
+            # if we don't have our summary yet use the first line of this
+            # section
             summary = lines[0]
-            l.append(section)
-            continue
-        if signature.match(lines[0]):
+        elif signature.match(lines[0]):
             break
+
+        # and add the section to the output
         l.append(section)
     return summary, '\n\n'.join(l)
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.62  2002/02/05 14:15:29  grubert
+#  . respect encodings in non multipart messages.
+#
+# Revision 1.61  2002/02/04 09:40:21  grubert
+#  . add test for multipart messages with first part being encoded.
+#
+# Revision 1.60  2002/02/01 07:43:12  grubert
+#  . mailgw checks encoding on first part too.
+#
+# Revision 1.59  2002/01/23 21:43:23  richard
+# tabnuke
+#
+# Revision 1.58  2002/01/23 21:41:56  richard
+#  . mailgw failures (unexpected ones) are forwarded to the roundup admin
+#
+# Revision 1.57  2002/01/22 22:27:43  richard
+#  . handle stripping of "AW:" from subject line
+#
+# Revision 1.56  2002/01/22 11:54:45  rochecompaan
+# Fixed status change in mail gateway.
+#
+# Revision 1.55  2002/01/21 10:05:47  rochecompaan
+# Feature:
+#  . the mail gateway now responds with an error message when invalid
+#    values for arguments are specified for link or multilink properties
+#  . modified unit test to check nosy and assignedto when specified as
+#    arguments
+#
+# Fixed:
+#  . fixed setting nosy as argument in subject line
+#
+# Revision 1.54  2002/01/16 09:14:45  grubert
+#  . if the attachment has no name, name it unnamed, happens with tnefs.
+#
+# Revision 1.53  2002/01/16 07:20:54  richard
+# simple help command for mailgw
+#
+# Revision 1.52  2002/01/15 00:12:40  richard
+# #503340 ] creating issue with [asignedto=p.ohly]
+#
+# Revision 1.51  2002/01/14 02:20:15  richard
+#  . changed all config accesses so they access either the instance or the
+#    config attriubute on the db. This means that all config is obtained from
+#    instance_config instead of the mish-mash of classes. This will make
+#    switching to a ConfigParser setup easier too, I hope.
+#
+# At a minimum, this makes migration a _little_ easier (a lot easier in the
+# 0.5.0 switch, I hope!)
+#
+# Revision 1.50  2002/01/11 22:59:01  richard
+#  . #502342 ] pipe interface
+#
+# Revision 1.49  2002/01/10 06:19:18  richard
+# followup lines directly after a quoted section were being eaten.
+#
+# Revision 1.48  2002/01/08 04:12:05  richard
+# Changed message-id format to "<%s.%s.%s%s@%s>" so it complies with RFC822
+#
+# Revision 1.47  2002/01/02 02:32:38  richard
+# ANONYMOUS_ACCESS -> ANONYMOUS_REGISTER
+#
 # Revision 1.46  2002/01/02 02:31:38  richard
 # Sorry for the huge checkin message - I was only intending to implement #496356
 # but I found a number of places where things had been broken by transactions:

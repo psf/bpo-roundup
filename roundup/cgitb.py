@@ -1,13 +1,15 @@
 #
 # This module was written by Ka-Ping Yee, <ping@lfw.org>.
 # 
-# $Id: cgitb.py,v 1.7 2001-11-22 15:46:42 jhermann Exp $
+# $Id: cgitb.py,v 1.7.2.1 2002-02-06 04:05:53 richard Exp $
 
 __doc__ = """
 Extended CGI traceback handler by Ka-Ping Yee, <ping@lfw.org>.
 """
 
 import sys, os, types, string, keyword, linecache, tokenize, inspect, pydoc
+
+from i18n import _
 
 def breaker():
     return ('<body bgcolor="#f0f0ff">' +
@@ -23,10 +25,10 @@ def html(context=5):
         '<font size=+1><strong>%s</strong>: %s</font>'%(str(etype), str(evalue)),
         '#ffffff', '#aa55cc', pyver)
 
-    head = head + ('<p>A problem occurred while running a Python script. '
+    head = head + (_('<p>A problem occurred while running a Python script. '
                    'Here is the sequence of function calls leading up to '
                    'the error, with the most recent (innermost) call first. '
-                   'The exception attributes are:')
+                   'The exception attributes are:'))
 
     indent = '<tt><small>%s</small>&nbsp;</tt>' % ('&nbsp;' * 5)
     traceback = []
@@ -48,7 +50,7 @@ def html(context=5):
 <table width="100%%" bgcolor="#d8bbff" cellspacing=0 cellpadding=2 border=0>
 <tr><td>%s %s</td></tr></table>''' % (link, call)
 
-        if file is None:
+        if index is None or file is None:
             traceback.append('<p>' + level)
             continue
 
@@ -73,13 +75,13 @@ def html(context=5):
                 if locals.has_key(name):
                     value = pydoc.html.repr(locals[name])
                 else:
-                    value = '<em>undefined</em>'
+                    value = _('<em>undefined</em>')
                 name = '<strong>%s</strong>' % name
             else:
                 if frame.f_globals.has_key(name):
                     value = pydoc.html.repr(frame.f_globals[name])
                 else:
-                    value = '<em>undefined</em>'
+                    value = _('<em>undefined</em>')
                 name = '<em>global</em> <strong>%s</strong>' % name
             lvals.append('%s&nbsp;= %s' % (name, value))
         if lvals:
@@ -122,6 +124,19 @@ def handler():
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.10  2002/01/16 04:49:45  richard
+# Handle a special case that the CGI interface tickles. I need to check if
+# this needs fixing in python's core.
+#
+# Revision 1.9  2002/01/08 11:56:24  richard
+# missed an import _
+#
+# Revision 1.8  2002/01/05 02:22:32  richard
+# i18n'ification
+#
+# Revision 1.7  2001/11/22 15:46:42  jhermann
+# Added module docstrings to all modules.
+#
 # Revision 1.6  2001/09/29 13:27:00  richard
 # CGI interfaces now spit up a top-level index of all the instances they can
 # serve.

@@ -1,7 +1,75 @@
 This file contains the changes to the Roundup system over time. The entries
 are given with the most recent entry first.
 
-2001-12-?? - 0.4.0b1
+2002-02-?? - ?????
+Fixed:
+ . respect encodings in non multipart messages.
+ . makeHtmlBase: re.sub under python 2.2 did not replace '.', string.replace
+   does it.
+ . preamble in tepmlateBuilder mentioned htmldata
+ . mailgw checks encoding on first part too.
+ . #511586 ] unittest FAIL: testReldate_date
+
+
+2002-01-24 - 0.4.0
+Feature:
+ . much nicer history display (actualy real handling of property types etc)
+ . journal entries for link and mutlilink properties can be switched on or 
+   off
+ . properties in change note are now sorted
+ . you can now use the roundup-admin tool pack the database
+
+Fixed:
+ . the mail gateway now responds with an error message when invalid values 
+   for arguments are specified for link or mutlilink properties
+ . modified unit test to check nosy and assignedto when specified as arguments
+ . handle attachments with no name (eg tnef)
+ . fixed setting nosy as argument in subject line
+ . fixed back_bsddb so it passed the journal tests
+ . fixed status changes in mail gateway (eg. unread -> chatting)
+ . we'll actually distribute the frontends directory now, as advertised...
+ . handle stripping of "AW:" from subject line
+ . htmltemplate list() wasn't sorting...
+ . unit tests for html templating (and re-enabled the listbox field for
+   multilinks)
+ . allow abbreviation of "help" in admin tool too.
+ . run_tests testReldate_date failed if LANG is 'german'
+ . mailgw failures (unexpected ones) are forwarded to the roundup admin
+
+
+2002-01-16 - 0.4.0b2
+Fixed:
+ . #495392 ] empty nosy -patch
+ . #500574 ] messageid must have format <part1@part2>
+ . fixed some problems with web editing and change detection
+ . mail splitting wasn't detecting responses in the same "section" as quoted
+   text
+ . missed a "from i18n import _" in date.py
+ . #501690 ] MIGRATION.txt incomplete
+ . #502342 ] pipe interface
+ . #502437 ] rogue reactor and unittest
+ . re-enabled dumbdbm when using python >2.1.1 (ie 2.1.2, 2.2)
+ . changed all config accesses so they access either the instance or the
+   config attriubute on the db. This means that all config is obtained from
+   instance_config instead of the mish-mash of classes. This will make
+   switching to a ConfigParser setup easier too, I hope.
+ . #502951 ] adding new properties to old database
+ . #502953 ] nosy-like treatment of other multilinks
+ . #503164 ] create and passwords
+ . plain rendering of links in the htmltemplate now generate a hyperlink to
+   the linked node's page.
+ . #503330 ] ANONYMOUS_REGISTER now applies to mail
+ . #503353 ] setting properties in initial email
+ . #502956 ] filtering by multilink not supported
+ . #503340 ] creating issue with [asignedto=p.ohly]
+ . #502949 ] index view for non-issues and redisplay
+ . #503793 ] changing assignedto resets nosy list
+ . lots of date/interval related changes:
+   - more relaxed date format for input
+   - handle None for date/interval properties
+
+
+2002-01-08 - 0.4.0b1
 Feature:
  . Added INSTANCE_NAME to configuration - used in web and email to identify
    the instance.

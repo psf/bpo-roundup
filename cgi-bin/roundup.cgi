@@ -16,11 +16,13 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: roundup.cgi,v 1.22.2.2 2002-01-03 08:28:15 titus Exp $
+# $Id: roundup.cgi,v 1.22.2.3 2002-02-06 04:05:53 richard Exp $
 
 # python version check
 import sys
 from roundup import version_check
+from roundup.i18n import _
+import sys
 
 #
 ##  Configuration
@@ -72,7 +74,7 @@ try:
     from roundup import cgitb
 except:
     print "Content-Type: text/html\n"
-    print "Failed to import cgitb.<pre>"
+    print _("Failed to import cgitb.<pre>")
     s = StringIO.StringIO()
     traceback.print_exc(None, s)
     print cgi.escape(s.getvalue()), "</pre>"
@@ -168,15 +170,15 @@ def main(out, err):
         request.send_header('Content-Type', 'text/html')
         request.end_headers()
         w = request.write
-        w('<html><head><title>Roundup instances index</title></head>\n')
-        w('<body><h1>Roundup instances index</h1><ol>\n')
+        w(_('<html><head><title>Roundup instances index</title></head>\n'))
+        w(_('<body><h1>Roundup instances index</h1><ol>\n'))
         homes = ROUNDUP_INSTANCE_HOMES.keys()
         homes.sort()
         for instance in homes:
-            w('<li><a href="%s/%s/index">%s</a>\n'%(
-                os.environ['SCRIPT_NAME'], urllib.quote(instance),
-                cgi.escape(instance)))
-        w('</ol></body></html>')
+            w(_('<li><a href="%(instance_url)s/index">%(instance_name)s</a>\n')%{
+                'instance_url': os.environ['SCRIPT_NAME']+'/'+urllib.quote(instance),
+                'instance_name': cgi.escape(instance)})
+        w(_('</ol></body></html>'))
 
 #
 # Now do the actual CGI handling
@@ -203,8 +205,26 @@ LOG.close()
 
 #
 # $Log: not supported by cvs2svn $
-# Revision 1.22.2.1  2002/01/03 02:12:05  titus
+# Revision 1.24  2002/01/05 02:21:22  richard
+# fixes
 #
+# Revision 1.23  2002/01/05 02:19:03  richard
+# i18n'ification
+#
+# Revision 1.22.2.2  2002/01/03 08:28:15  titus
+# * Altered function names in roundup.config to bE NeAtEr rather_than_ugly;
+#
+# * Created some extra roundup.config exceptions to let people know what's
+# 	going on;
+#
+# * Modified instance_config.py to use those exceptions, so that syntax errors
+# 	or other exceptions did *not* trigger the same behavior as import
+# 	while in the templates/ directory.
+#
+# * Modified roundup.cgi to use the same neater function names, plus did some
+# 	minor cleanup.
+#
+# Revision 1.22.2.1  2002/01/03 02:12:05  titus
 #
 # Initial ConfigParser implementation.
 #

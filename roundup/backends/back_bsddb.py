@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-#$Id: back_bsddb.py,v 1.13 2001-12-10 22:20:01 richard Exp $
+#$Id: back_bsddb.py,v 1.13.2.1 2002-02-06 04:05:54 richard Exp $
 '''
 This module defines a backend that saves the hyperdatabase in BSDDB.
 '''
@@ -50,6 +50,24 @@ class Database(back_anydbm.Database):
             return bsddb.btopen(path, mode)
         else:
             return bsddb.btopen(path, 'n')
+
+    def _opendb(self, name, mode):
+        '''Low-level database opener that gets around anydbm/dbm
+           eccentricities.
+        '''
+        if hyperdb.DEBUG:
+            print self, '_opendb', (self, name, mode)
+        # determine which DB wrote the class file
+        path = os.path.join(os.getcwd(), self.dir, name)
+        if not os.path.exists(path):
+            if hyperdb.DEBUG:
+                print "_opendb bsddb.open(%r, 'n')"%path
+            return bsddb.btopen(path, 'n')
+
+        # open the database with the correct module
+        if hyperdb.DEBUG:
+            print "_opendb bsddb.open(%r, %r)"%(path, mode)
+        return bsddb.btopen(path, mode)
 
     #
     # Journal
@@ -91,6 +109,21 @@ class Database(back_anydbm.Database):
 
 #
 #$Log: not supported by cvs2svn $
+#Revision 1.14  2002/01/22 07:21:13  richard
+#. fixed back_bsddb so it passed the journal tests
+#
+#... it didn't seem happy using the back_anydbm _open method, which is odd.
+#Yet another occurrance of whichdb not being able to recognise older bsddb
+#databases. Yadda yadda. Made the HYPERDBDEBUG stuff more sane in the
+#process.
+#
+#Revision 1.13  2001/12/10 22:20:01  richard
+#Enabled transaction support in the bsddb backend. It uses the anydbm code
+#where possible, only replacing methods where the db is opened (it uses the
+#btree opener specifically.)
+#Also cleaned up some change note generation.
+#Made the backends package work with pydoc too.
+#
 #Revision 1.12  2001/11/21 02:34:18  richard
 #Added a target version field to the extended issue schema
 #

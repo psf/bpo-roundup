@@ -15,18 +15,19 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: hyperdb.py,v 1.45 2002-01-02 04:18:17 richard Exp $
+# $Id: hyperdb.py,v 1.45.2.1 2002-02-06 04:05:53 richard Exp $
 
 __doc__ = """
 Hyperdatabase implementation, especially field types.
 """
 
 # standard python modules
-import cPickle, re, string, weakref
+import cPickle, re, string, weakref, os
 
 # roundup modules
 import date, password
 
+DEBUG = os.environ.get('HYPERDBDEBUG', '')
 
 #
 # Types
@@ -54,17 +55,24 @@ class Interval:
 class Link:
     """An object designating a Link property that links to a
        node in a specified class."""
-    def __init__(self, classname):
+    def __init__(self, classname, do_journal='no'):
         self.classname = classname
+        self.do_journal = do_journal == 'yes'
     def __repr__(self):
         return '<%s to "%s">'%(self.__class__, self.classname)
 
 class Multilink:
     """An object designating a Multilink property that links
        to nodes in a specified class.
+
+       "classname" indicates the class to link to
+
+       "do_journal" indicates whether the linked-to nodes should have
+                    'link' and 'unlink' events placed in their journal
     """
-    def __init__(self, classname):
+    def __init__(self, classname, do_journal='no'):
         self.classname = classname
+        self.do_journal = do_journal == 'yes'
     def __repr__(self):
         return '<%s to "%s">'%(self.__class__, self.classname)
 
@@ -98,9 +106,11 @@ transaction.
     # flag to set on retired entries
     RETIRED_FLAG = '__hyperdb_retired'
 
-    def __init__(self, storagelocator, journaltag=None):
+    # XXX deviates from spec: storagelocator is obtained from the config
+    def __init__(self, config, journaltag=None):
         """Open a hyperdatabase given a specifier to some storage.
 
+        The 'storagelocator' is obtained from config.DATABASE.
         The meaning of 'storagelocator' depends on the particular
         implementation of the hyperdatabase.  It could be a file name,
         a directory path, a socket descriptor for a connection to a
@@ -199,6 +209,11 @@ transaction.
 
     def getjournal(self, classname, nodeid):
         ''' get the journal for id
+        '''
+        raise NotImplementedError
+
+    def pack(self, pack_before):
+        ''' pack the database
         '''
         raise NotImplementedError
 
@@ -307,8 +322,9 @@ class Class:
                 propvalues[key] = value
 
                 # register the link with the newly linked node
-                self.db.addjournal(link_class, value, 'link',
-                    (self.classname, newid, key))
+                if self.properties[key].do_journal:
+                    self.db.addjournal(link_class, value, 'link',
+                        (self.classname, newid, key))
 
             elif isinstance(prop, Multilink):
                 if type(value) != type([]):
@@ -334,8 +350,9 @@ class Class:
                     if not self.db.hasnode(link_class, id):
                         raise IndexError, '%s has no node %s'%(link_class, id)
                     # register the link with the newly linked node
-                    self.db.addjournal(link_class, id, 'link',
-                        (self.classname, newid, key))
+                    if self.properties[key].do_journal:
+                        self.db.addjournal(link_class, id, 'link',
+                            (self.classname, newid, key))
 
             elif isinstance(prop, String):
                 if type(value) != type(''):
@@ -346,11 +363,11 @@ class Class:
                     raise TypeError, 'new property "%s" not a Password'%key
 
             elif isinstance(prop, Date):
-                if not isinstance(value, date.Date):
+                if value is not None and not isinstance(value, date.Date):
                     raise TypeError, 'new property "%s" not a Date'%key
 
             elif isinstance(prop, Interval):
-                if not isinstance(value, date.Interval):
+                if value is not None and not isinstance(value, date.Interval):
                     raise TypeError, 'new property "%s" not an Interval'%key
 
         # make sure there's data where there needs to be
@@ -362,14 +379,17 @@ class Class:
             if isinstance(prop, Multilink):
                 propvalues[key] = []
             else:
+                # TODO: None isn't right here, I think...
                 propvalues[key] = None
 
         # convert all data to strings
         for key, prop in self.properties.items():
             if isinstance(prop, Date):
-                propvalues[key] = propvalues[key].get_tuple()
+                if propvalues[key] is not None:
+                    propvalues[key] = propvalues[key].get_tuple()
             elif isinstance(prop, Interval):
-                propvalues[key] = propvalues[key].get_tuple()
+                if propvalues[key] is not None:
+                    propvalues[key] = propvalues[key].get_tuple()
             elif isinstance(prop, Password):
                 propvalues[key] = str(propvalues[key])
 
@@ -393,18 +413,30 @@ class Class:
         if propname == 'id':
             return nodeid
 
+        # get the property (raises KeyErorr if invalid)
+        prop = self.properties[propname]
+
         # get the node's dict
         d = self.db.getnode(self.classname, nodeid, cache=cache)
-        if not d.has_key(propname) and default is not _marker:
-            return default
 
-        # get the value
-        prop = self.properties[propname]
+        if not d.has_key(propname):
+            if default is _marker:
+                if isinstance(prop, Multilink):
+                    return []
+                else:
+                    # TODO: None isn't right here, I think...
+                    return None
+            else:
+                return default
 
         # possibly convert the marshalled data to instances
         if isinstance(prop, Date):
+            if d[propname] is None:
+                return None
             return date.Date(d[propname])
         elif isinstance(prop, Interval):
+            if d[propname] is None:
+                return None
             return date.Interval(d[propname])
         elif isinstance(prop, Password):
             p = password.Password()
@@ -488,15 +520,16 @@ class Class:
                 if not self.db.hasnode(link_class, value):
                     raise IndexError, '%s has no node %s'%(link_class, value)
 
-                # register the unlink with the old linked node
-                if node[key] is not None:
-                    self.db.addjournal(link_class, node[key], 'unlink',
-                        (self.classname, nodeid, key))
+                if self.properties[key].do_journal:
+                    # register the unlink with the old linked node
+                    if node[key] is not None:
+                        self.db.addjournal(link_class, node[key], 'unlink',
+                            (self.classname, nodeid, key))
 
-                # register the link with the newly linked node
-                if value is not None:
-                    self.db.addjournal(link_class, value, 'link',
-                        (self.classname, nodeid, key))
+                    # register the link with the newly linked node
+                    if value is not None:
+                        self.db.addjournal(link_class, value, 'link',
+                            (self.classname, nodeid, key))
 
             elif isinstance(prop, Multilink):
                 if type(value) != type([]):
@@ -517,25 +550,31 @@ class Class:
                 value = l
                 propvalues[key] = value
 
-                #handle removals
-                l = node[key]
+                # handle removals
+                if node.has_key(key):
+                    l = node[key]
+                else:
+                    l = []
                 for id in l[:]:
                     if id in value:
                         continue
                     # register the unlink with the old linked node
-                    self.db.addjournal(link_class, id, 'unlink',
-                        (self.classname, nodeid, key))
+                    if self.properties[key].do_journal:
+                        self.db.addjournal(link_class, id, 'unlink',
+                            (self.classname, nodeid, key))
                     l.remove(id)
 
                 # handle additions
                 for id in value:
                     if not self.db.hasnode(link_class, id):
-                        raise IndexError, '%s has no node %s'%(link_class, id)
+                        raise IndexError, '%s has no node %s'%(
+                            link_class, id)
                     if id in l:
                         continue
                     # register the link with the newly linked node
-                    self.db.addjournal(link_class, id, 'link',
-                        (self.classname, nodeid, key))
+                    if self.properties[key].do_journal:
+                        self.db.addjournal(link_class, id, 'link',
+                            (self.classname, nodeid, key))
                     l.append(id)
 
             elif isinstance(prop, String):
@@ -547,12 +586,12 @@ class Class:
                     raise TypeError, 'new property "%s" not a Password'% key
                 propvalues[key] = value = str(value)
 
-            elif isinstance(prop, Date):
+            elif value is not None and isinstance(prop, Date):
                 if not isinstance(value, date.Date):
                     raise TypeError, 'new property "%s" not a Date'% key
                 propvalues[key] = value = value.get_tuple()
 
-            elif isinstance(prop, Interval):
+            elif value is not None and isinstance(prop, Interval):
                 if not isinstance(value, date.Interval):
                     raise TypeError, 'new property "%s" not an Interval'% key
                 propvalues[key] = value = value.get_tuple()
@@ -978,7 +1017,7 @@ class Node:
     def __init__(self, cl, nodeid, cache=1):
         self.__dict__['cl'] = cl
         self.__dict__['nodeid'] = nodeid
-        self.cache = cache
+        self.__dict__['cache'] = cache
     def keys(self, protected=1):
         return self.cl.getprops(protected=protected).keys()
     def values(self, protected=1):
@@ -1027,6 +1066,46 @@ def Choice(name, *options):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.53  2002/01/22 07:21:13  richard
+# . fixed back_bsddb so it passed the journal tests
+#
+# ... it didn't seem happy using the back_anydbm _open method, which is odd.
+# Yet another occurrance of whichdb not being able to recognise older bsddb
+# databases. Yadda yadda. Made the HYPERDBDEBUG stuff more sane in the
+# process.
+#
+# Revision 1.52  2002/01/21 16:33:19  rochecompaan
+# You can now use the roundup-admin tool to pack the database
+#
+# Revision 1.51  2002/01/21 03:01:29  richard
+# brief docco on the do_journal argument
+#
+# Revision 1.50  2002/01/19 13:16:04  rochecompaan
+# Journal entries for link and multilink properties can now be switched on
+# or off.
+#
+# Revision 1.49  2002/01/16 07:02:57  richard
+#  . lots of date/interval related changes:
+#    - more relaxed date format for input
+#
+# Revision 1.48  2002/01/14 06:32:34  richard
+#  . #502951 ] adding new properties to old database
+#
+# Revision 1.47  2002/01/14 02:20:15  richard
+#  . changed all config accesses so they access either the instance or the
+#    config attriubute on the db. This means that all config is obtained from
+#    instance_config instead of the mish-mash of classes. This will make
+#    switching to a ConfigParser setup easier too, I hope.
+#
+# At a minimum, this makes migration a _little_ easier (a lot easier in the
+# 0.5.0 switch, I hope!)
+#
+# Revision 1.46  2002/01/07 10:42:23  richard
+# oops
+#
+# Revision 1.45  2002/01/02 04:18:17  richard
+# hyperdb docstrings
+#
 # Revision 1.44  2002/01/02 02:31:38  richard
 # Sorry for the huge checkin message - I was only intending to implement #496356
 # but I found a number of places where things had been broken by transactions:

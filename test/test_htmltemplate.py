@@ -8,7 +8,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 #
-# $Id: test_htmltemplate.py,v 1.8 2002-02-06 03:47:16 richard Exp $ 
+# $Id: test_htmltemplate.py,v 1.8.2.1 2002-02-06 04:05:55 richard Exp $ 
 
 import unittest, cgi, time
 
@@ -314,6 +314,9 @@ def suite():
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.8  2002/02/06 03:47:16  richard
+#  . #511586 ] unittest FAIL: testReldate_date
+#
 # Revision 1.7  2002/01/23 20:09:41  jhermann
 # Proper fix for failing test
 #

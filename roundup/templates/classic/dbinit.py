@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: dbinit.py,v 1.13.2.1 2002-01-03 02:12:05 titus Exp $
+# $Id: dbinit.py,v 1.13.2.2 2002-02-06 04:05:54 richard Exp $
 
 import os
 
@@ -35,13 +35,7 @@ class Database(roundupdb.Database, select_db.Database):
 class IssueClass(roundupdb.IssueClass):
     ''' issues need the email information
     '''
-    INSTANCE_NAME = instance_config.INSTANCE_NAME
-    ISSUE_TRACKER_WEB = instance_config.ISSUE_TRACKER_WEB
-    ISSUE_TRACKER_EMAIL = instance_config.ISSUE_TRACKER_EMAIL
-    ADMIN_EMAIL = instance_config.ADMIN_EMAIL
-    MAILHOST = instance_config.MAILHOST
-    MESSAGES_TO_AUTHOR = instance_config.MESSAGES_TO_AUTHOR
-    EMAIL_SIGNATURE_POSITION = instance_config.EMAIL_SIGNATURE_POSITION
+    pass
 
  
 def open(name=None):
@@ -51,7 +45,7 @@ def open(name=None):
     from roundup.hyperdb import String, Password, Date, Link, Multilink
 
     # open the database
-    db = Database(instance_config.get_default_database_dir(), name)
+    db = Database(instance_config, name)
 
     # Now initialise the schema. Must do this each time.
     pri = Class(db, "priority", 
@@ -128,6 +122,21 @@ def init(adminpw):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.14  2002/01/14 02:20:15  richard
+#  . changed all config accesses so they access either the instance or the
+#    config attriubute on the db. This means that all config is obtained from
+#    instance_config instead of the mish-mash of classes. This will make
+#    switching to a ConfigParser setup easier too, I hope.
+#
+# At a minimum, this makes migration a _little_ easier (a lot easier in the
+# 0.5.0 switch, I hope!)
+#
+#
+# Revision 1.13.2.1  2002/01/03 02:12:05  titus
+#
+# Initial ConfigParser implementation.
+#
+#
 # Revision 1.13  2002/01/02 02:31:38  richard
 # Sorry for the huge checkin message - I was only intending to implement #496356
 # but I found a number of places where things had been broken by transactions:

@@ -15,13 +15,14 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: date.py,v 1.14 2001-11-22 15:46:42 jhermann Exp $
+# $Id: date.py,v 1.14.2.1 2002-02-06 04:05:53 richard Exp $
 
 __doc__ = """
 Date, time and time interval handling.
 """
 
 import time, re, calendar
+from i18n import _
 
 class Date:
     '''
@@ -152,6 +153,8 @@ class Date:
 
     def __cmp__(self, other):
         """Compare this date to another date."""
+        if other is None:
+            return 1
         for attr in ('year', 'month', 'day', 'hour', 'minute', 'second'):
             r = cmp(getattr(self, attr), getattr(other, attr))
             if r: return r
@@ -165,11 +168,13 @@ class Date:
     def pretty(self):
         ''' print up the date date using a pretty format...
         '''
-        return time.strftime('%e %B %Y', (self.year, self.month,
+        str = time.strftime('%d %B %Y', (self.year, self.month,
             self.day, self.hour, self.minute, self.second, 0, 0, 0))
+        if str[0] == '0': return ' ' + str[1:]
+        return str
 
     def set(self, spec, offset=0, date_re=re.compile(r'''
-              (((?P<y>\d\d\d\d)-)?((?P<m>\d\d)-(?P<d>\d\d))?)? # yyyy-mm-dd
+              (((?P<y>\d\d\d\d)-)?((?P<m>\d\d?)-(?P<d>\d\d?))?)? # yyyy-mm-dd
               (?P<n>\.)?                                       # .
               (((?P<H>\d?\d):(?P<M>\d\d))?(:(?P<S>\d\d))?)?    # hh:mm:ss
               (?P<o>.+)?                                       # offset
@@ -178,7 +183,8 @@ class Date:
         '''
         m = date_re.match(spec)
         if not m:
-            raise ValueError, 'Not a date spec: [[yyyy-]mm-dd].[[h]h:mm[:ss]] [offset]'
+            raise ValueError, _('Not a date spec: [[yyyy-]mm-dd].[[h]h:mm[:ss]]'
+                '[offset]')
         info = m.groupdict()
 
         # get the current date/time using the offset
@@ -252,6 +258,8 @@ class Interval:
 
     def __cmp__(self, other):
         """Compare this interval to another interval."""
+        if other is None:
+            return 1
         for attr in ('year', 'month', 'day', 'hour', 'minute', 'second'):
             r = cmp(getattr(self, attr), getattr(other, attr))
             if r: return r
@@ -292,7 +300,8 @@ class Interval:
         self.sign = 1
         m = interval_re.match(spec)
         if not m:
-            raise ValueError, 'Not an interval spec: [+-] [#y] [#m] [#w] [#d] [[[H]H:MM]:SS]'
+            raise ValueError, _('Not an interval spec: [+-] [#y] [#m] [#w] '
+                '[#d] [[[H]H:MM]:SS]')
 
         info = m.groupdict()
         for group, attr in {'y':'year', 'm':'month', 'w':'week', 'd':'day',
@@ -309,15 +318,8 @@ class Interval:
     def __repr__(self):
         return '<Interval %s>'%self.__str__()
 
-    def pretty(self, threshold=('d', 5)):
+    def pretty(self):
         ''' print up the date date using one of these nice formats..
-            < 1 minute
-            < 15 minutes
-            < 30 minutes
-            < 1 hour
-            < 12 hours
-            < 1 day
-            otherwise, return None (so a full date may be displayed)
         '''
         if self.year or self.month > 2:
             return None
@@ -325,36 +327,36 @@ class Interval:
             days = (self.month * 30) + self.day
             if days > 28:
                 if int(days/30) > 1:
-                    return '%s months'%int(days/30)
+                    return _('%(number)s months')%{'number': int(days/30)}
                 else:
-                    return '1 month'
+                    return _('1 month')
             else:
-                return '%s weeks'%int(days/7)
+                return _('%(number)s weeks')%{'number': int(days/7)}
         if self.day > 7:
-            return '1 week'
+            return _('1 week')
         if self.day > 1:
-            return '%s days'%self.day
+            return _('%(number)s days')%{'number': self.day}
         if self.day == 1 or self.hour > 12:
-            return 'yesterday'
+            return _('yesterday')
         if self.hour > 1:
-            return '%s hours'%self.hour
+            return _('%(number)s hours')%{'number': self.hour}
         if self.hour == 1:
             if self.minute < 15:
-                return 'an hour'
+                return _('an hour')
             quart = self.minute/15
             if quart == 2:
-                return '1 1/2 hours'
-            return '1 %s/4 hours'%quart
+                return _('1 1/2 hours')
+            return _('1 %(number)s/4 hours')%{'number': quart}
         if self.minute < 1:
-            return 'just now'
+            return _('just now')
         if self.minute == 1:
-            return '1 minute'
+            return _('1 minute')
         if self.minute < 15:
-            return '%s minutes'%self.minute
+            return _('%(number)s minutes')%{'number': self.minute}
         quart = int(self.minute/15)
         if quart == 2:
-            return '1/2 an hour'
-        return '%s/4 hour'%quart
+            return _('1/2 an hour')
+        return _('%(number)s/4 hour')%{'number': quart}
 
     def get_tuple(self):
         return (self.year, self.month, self.day, self.hour, self.minute,
@@ -383,6 +385,22 @@ if __name__ == '__main__':
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.18  2002/01/23 20:00:50  jhermann
+# %e is a UNIXism and not documented for Python
+#
+# Revision 1.17  2002/01/16 07:02:57  richard
+#  . lots of date/interval related changes:
+#    - more relaxed date format for input
+#
+# Revision 1.16  2002/01/08 11:56:24  richard
+# missed an import _
+#
+# Revision 1.15  2002/01/05 02:27:00  richard
+# I18N'ification
+#
+# Revision 1.14  2001/11/22 15:46:42  jhermann
+# Added module docstrings to all modules.
+#
 # Revision 1.13  2001/09/18 22:58:37  richard
 #
 # Added some more help to roundu-admin

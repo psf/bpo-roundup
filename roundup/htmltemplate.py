@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: htmltemplate.py,v 1.49 2001-12-20 15:43:01 rochecompaan Exp $
+# $Id: htmltemplate.py,v 1.49.2.1 2002-02-06 04:05:53 richard Exp $
 
 __doc__ = """
 Template engine.
@@ -24,6 +24,7 @@ Template engine.
 import os, re, StringIO, urllib, cgi, errno
 
 import hyperdb, date, password
+from i18n import _
 
 # This imports the StructureText functionality for the do_stext function
 # get it from http://dev.zope.org/Members/jim/StructuredTextWiki/NGReleases
@@ -52,7 +53,7 @@ class TemplateFunctions:
             linked nodes (or the ids if the linked class has no key property)
         '''
         if not self.nodeid and self.form is None:
-            return '[Field: not called from item]'
+            return _('[Field: not called from item]')
         propclass = self.properties[property]
         if self.nodeid:
             # make sure the property is a valid one
@@ -76,20 +77,23 @@ class TemplateFunctions:
             else: value = str(value)
         elif isinstance(propclass, hyperdb.Password):
             if value is None: value = ''
-            else: value = '*encrypted*'
+            else: value = _('*encrypted*')
         elif isinstance(propclass, hyperdb.Date):
+            # this gives "2002-01-17.06:54:39", maybe replace the "." by a " ".
             value = str(value)
         elif isinstance(propclass, hyperdb.Interval):
             value = str(value)
         elif isinstance(propclass, hyperdb.Link):
             linkcl = self.db.classes[propclass.classname]
             k = linkcl.labelprop()
-            if value: value = str(linkcl.get(value, k))
-            else: value = '[unselected]'
+            if value:
+                value = linkcl.get(value, k)
+            else:
+                value = _('[unselected]')
         elif isinstance(propclass, hyperdb.Multilink):
             linkcl = self.db.classes[propclass.classname]
             k = linkcl.labelprop()
-            value = ', '.join([linkcl.get(i, k) for i in value])
+            value = ', '.join(value)
         else:
             s = _('Plain: bad propclass "%(propclass)s"')%locals()
         if escape:
@@ -105,60 +109,141 @@ class TemplateFunctions:
             return s
         return StructuredText(s,level=1,header=0)
 
-    def do_field(self, property, size=None, height=None, showid=0):
+    def determine_value(self, property):
+        '''determine the value of a property using the node, form or
+           filterspec
+        '''
+        propclass = self.properties[property]
+        if self.nodeid:
+            value = self.cl.get(self.nodeid, property, None)
+            if isinstance(propclass, hyperdb.Multilink) and value is None:
+                return []
+            return value
+        elif self.filterspec is not None:
+            if isinstance(propclass, hyperdb.Multilink):
+                return self.filterspec.get(property, [])
+            else:
+                return self.filterspec.get(property, '')
+        # TODO: pull the value from the form
+        if isinstance(propclass, hyperdb.Multilink):
+            return []
+        else:
+            return ''
+
+    def make_sort_function(self, classname):
+        '''Make a sort function for a given class
+        '''
+        linkcl = self.db.classes[classname]
+        if linkcl.getprops().has_key('order'):
+            sort_on = 'order'
+        else:
+            sort_on = linkcl.labelprop()
+        def sortfunc(a, b, linkcl=linkcl, sort_on=sort_on):
+            return cmp(linkcl.get(a, sort_on), linkcl.get(b, sort_on))
+        return sortfunc
+
+    def do_field(self, property, size=None, showid=0):
         ''' display a property like the plain displayer, but in a text field
             to be edited
+
+            Note: if you would prefer an option list style display for
+            link or multilink editing, use menu().
         '''
         if not self.nodeid and self.form is None and self.filterspec is None:
             return _('[Field: not called from item]')
+
+        if size is None:
+            size = 30
+
         propclass = self.properties[property]
-        if (isinstance(propclass, hyperdb.Link) or
-            isinstance(propclass, hyperdb.Multilink)):
-            linkcl = self.db.classes[propclass.classname]
-            def sortfunc(a, b, cl=linkcl):
-                if cl.getprops().has_key('order'):
-                    sort_on = 'order'
-                else:
-                    sort_on = cl.labelprop()
-                r = cmp(cl.get(a, sort_on), cl.get(b, sort_on))
-                return r
-        if self.nodeid:
-            value = self.cl.get(self.nodeid, property, None)
-            # TODO: remove this from the code ... it's only here for
-            # handling schema changes, and they should be handled outside
-            # of this code...
-            if isinstance(propclass, hyperdb.Multilink) and value is None:
-                value = []
-        elif self.filterspec is not None:
-            if isinstance(propclass, hyperdb.Multilink):
-                value = self.filterspec.get(property, [])
-            else:
-                value = self.filterspec.get(property, '')
-        else:
-            # TODO: pull the value from the form
-            if isinstance(propclass, hyperdb.Multilink): value = []
-            else: value = ''
+
+        # get the value
+        value = self.determine_value(property)
+
+        # now display
         if (isinstance(propclass, hyperdb.String) or
                 isinstance(propclass, hyperdb.Date) or
                 isinstance(propclass, hyperdb.Interval)):
-            size = size or 30
             if value is None:
                 value = ''
             else:
-                value = cgi.escape(value)
+                value = cgi.escape(str(value))
                 value = '&quot;'.join(value.split('"'))
             s = '<input name="%s" value="%s" size="%s">'%(property, value, size)
         elif isinstance(propclass, hyperdb.Password):
-            size = size or 30
             s = '<input type="password" name="%s" size="%s">'%(property, size)
         elif isinstance(propclass, hyperdb.Link):
+            sortfunc = self.make_sort_function(propclass.classname)
+            linkcl = self.db.classes[propclass.classname]
+            options = linkcl.list()
+            options.sort(sortfunc)
+            # TODO: make this a field display, not a menu one!
             l = ['<select name="%s">'%property]
             k = linkcl.labelprop()
             if value is None:
                 s = 'selected '
             else:
                 s = ''
-            l.append('<option %svalue="-1">- no selection -</option>'%s)
+            l.append(_('<option %svalue="-1">- no selection -</option>')%s)
+            for optionid in options:
+                option = linkcl.get(optionid, k)
+                s = ''
+                if optionid == value:
+                    s = 'selected '
+                if showid:
+                    lab = '%s%s: %s'%(propclass.classname, optionid, option)
+                else:
+                    lab = option
+                if size is not None and len(lab) > size:
+                    lab = lab[:size-3] + '...'
+                lab = cgi.escape(lab)
+                l.append('<option %svalue="%s">%s</option>'%(s, optionid, lab))
+            l.append('</select>')
+            s = '\n'.join(l)
+        elif isinstance(propclass, hyperdb.Multilink):
+            sortfunc = self.make_sort_function(propclass.classname)
+            linkcl = self.db.classes[propclass.classname]
+            list = linkcl.list()
+            list.sort(sortfunc)
+            l = []
+            # map the id to the label property
+            if not showid:
+                k = linkcl.labelprop()
+                value = [linkcl.get(v, k) for v in value]
+            value = cgi.escape(','.join(value))
+            s = '<input name="%s" size="%s" value="%s">'%(property, size, value)
+        else:
+            s = _('Plain: bad propclass "%(propclass)s"')%locals()
+        return s
+
+    def do_menu(self, property, size=None, height=None, showid=0):
+        ''' for a Link property, display a menu of the available choices
+        '''
+        if not self.nodeid and self.form is None and self.filterspec is None:
+            return _('[Field: not called from item]')
+
+        propclass = self.properties[property]
+
+        # make sure this is a link property
+        if not (isinstance(propclass, hyperdb.Link) or
+                isinstance(propclass, hyperdb.Multilink)):
+            return _('[Menu: not a link]')
+
+        # sort function
+        sortfunc = self.make_sort_function(propclass.classname)
+
+        # get the value
+        value = self.determine_value(property)
+
+        # display
+        if isinstance(propclass, hyperdb.Link):
+            linkcl = self.db.classes[propclass.classname]
+            l = ['<select name="%s">'%property]
+            k = linkcl.labelprop()
+            s = ''
+            if value is None:
+                s = 'selected '
+            l.append(_('<option %svalue="-1">- no selection -</option>')%s)
             options = linkcl.list()
             options.sort(sortfunc)
             for optionid in options:
@@ -172,67 +257,18 @@ class TemplateFunctions:
                     lab = option
                 if size is not None and len(lab) > size:
                     lab = lab[:size-3] + '...'
+                lab = cgi.escape(lab)
                 l.append('<option %svalue="%s">%s</option>'%(s, optionid, lab))
-            l.append('</select>')
-            s = '\n'.join(l)
-        elif isinstance(propclass, hyperdb.Multilink):
-            list = linkcl.list()
-            list.sort(sortfunc)
-            k = linkcl.labelprop()
-            l = []
-            # special treatment for nosy list
-            if property == 'nosy':
-                input_value = []
-            else:
-                input_value = value
-            for v in value:
-                lab = linkcl.get(v, k)
-                if property != 'nosy':
-                    l.append('<a href="issue%s">%s: %s</a>'%(v,v,lab))
-                else:
-                    input_value.append(lab)
-            if size is None:
-                size = '10'
-            l.insert(0,'<input name="%s" size="%s" value="%s">'%(property, 
-                size, ','.join(input_value)))
-            s = "<br>\n".join(l)
-        else:
-            s = 'Plain: bad propclass "%s"'%propclass
-        return s
-
-    def do_menu(self, property, size=None, height=None, showid=0):
-        ''' for a Link property, display a menu of the available choices
-        '''
-        propclass = self.properties[property]
-        if self.nodeid:
-            value = self.cl.get(self.nodeid, property)
-        else:
-            # TODO: pull the value from the form
-            if isinstance(propclass, hyperdb.Multilink): value = []
-            else: value = None
-        if isinstance(propclass, hyperdb.Link):
-            linkcl = self.db.classes[propclass.classname]
-            l = ['<select name="%s">'%property]
-            k = linkcl.labelprop()
-            s = ''
-            if value is None:
-                s = 'selected '
-            l.append('<option %svalue="-1">- no selection -</option>'%s)
-            for optionid in linkcl.list():
-                option = linkcl.get(optionid, k)
-                s = ''
-                if optionid == value:
-                    s = 'selected '
-                l.append('<option %svalue="%s">%s</option>'%(s, optionid, option))
             l.append('</select>')
             return '\n'.join(l)
         if isinstance(propclass, hyperdb.Multilink):
             linkcl = self.db.classes[propclass.classname]
-            list = linkcl.list()
-            height = height or min(len(list), 7)
+            options = linkcl.list()
+            options.sort(sortfunc)
+            height = height or min(len(options), 7)
             l = ['<select multiple name="%s" size="%s">'%(property, height)]
             k = linkcl.labelprop()
-            for optionid in list:
+            for optionid in options:
                 option = linkcl.get(optionid, k)
                 s = ''
                 if optionid in value:
@@ -243,10 +279,12 @@ class TemplateFunctions:
                     lab = option
                 if size is not None and len(lab) > size:
                     lab = lab[:size-3] + '...'
-                l.append('<option %svalue="%s">%s</option>'%(s, optionid, option))
+                lab = cgi.escape(lab)
+                l.append('<option %svalue="%s">%s</option>'%(s, optionid,
+                    lab))
             l.append('</select>')
             return '\n'.join(l)
-        return '[Menu: not a link]'
+        return _('[Menu: not a link]')
 
     #XXX deviates from spec
     def do_link(self, property=None, is_download=0):
@@ -260,20 +298,19 @@ class TemplateFunctions:
            downloaded file name is correct.
         '''
         if not self.nodeid and self.form is None:
-            return '[Link: not called from item]'
+            return _('[Link: not called from item]')
+
+        # get the value
+        value = self.determine_value(property)
+        if not value:
+            return _('[no %(propname)s]')%{'propname':property.capitalize()}
+
         propclass = self.properties[property]
-        if self.nodeid:
-            value = self.cl.get(self.nodeid, property)
-        else:
-            if isinstance(propclass, hyperdb.Multilink): value = []
-            elif isinstance(propclass, hyperdb.Link): value = None
-            else: value = ''
         if isinstance(propclass, hyperdb.Link):
             linkname = propclass.classname
-            if value is None: return '[no %s]'%property.capitalize()
             linkcl = self.db.classes[linkname]
             k = linkcl.labelprop()
-            linkvalue = linkcl.get(value, k)
+            linkvalue = cgi.escape(linkcl.get(value, k))
             if is_download:
                 return '<a href="%s%s/%s">%s</a>'%(linkname, value,
                     linkvalue, linkvalue)
@@ -283,10 +320,9 @@ class TemplateFunctions:
             linkname = propclass.classname
             linkcl = self.db.classes[linkname]
             k = linkcl.labelprop()
-            if not value : return '[no %s]'%property.capitalize()
             l = []
             for value in value:
-                linkvalue = linkcl.get(value, k)
+                linkvalue = cgi.escape(linkcl.get(value, k))
                 if is_download:
                     l.append('<a href="%s%s/%s">%s</a>'%(linkname, value,
                         linkvalue, linkvalue))
@@ -294,8 +330,6 @@ class TemplateFunctions:
                     l.append('<a href="%s%s">%s</a>'%(linkname, value,
                         linkvalue))
             return ', '.join(l)
-        if isinstance(propclass, hyperdb.String):
-            if value == '': value = '[no %s]'%property.capitalize()
         if is_download:
             return '<a href="%s%s/%s">%s</a>'%(self.classname, self.nodeid,
                 value, value)
@@ -307,12 +341,15 @@ class TemplateFunctions:
             the list
         '''
         if not self.nodeid:
-            return '[Count: not called from item]'
+            return _('[Count: not called from item]')
+
         propclass = self.properties[property]
+        if not isinstance(propclass, hyperdb.Multilink):
+            return _('[Count: not a Multilink]')
+
+        # figure the length then...
         value = self.cl.get(self.nodeid, property)
-        if isinstance(propclass, hyperdb.Multilink):
-            return str(len(value))
-        return '[Count: not a Multilink]'
+        return str(len(value))
 
     # XXX pretty is definitely new ;)
     def do_reldate(self, property, pretty=0):
@@ -322,18 +359,24 @@ class TemplateFunctions:
             with the 'pretty' flag, make it pretty
         '''
         if not self.nodeid and self.form is None:
-            return '[Reldate: not called from item]'
+            return _('[Reldate: not called from item]')
+
         propclass = self.properties[property]
-        if isinstance(not propclass, hyperdb.Date):
-            return '[Reldate: not a Date]'
+        if not isinstance(propclass, hyperdb.Date):
+            return _('[Reldate: not a Date]')
+
         if self.nodeid:
             value = self.cl.get(self.nodeid, property)
         else:
-            value = date.Date('.')
+            return ''
+        if not value:
+            return ''
+
+        # figure the interval
         interval = value - date.Date('.')
         if pretty:
             if not self.nodeid:
-                return 'now'
+                return _('now')
             pretty = interval.pretty()
             if pretty is None:
                 pretty = value.pretty()
@@ -345,21 +388,8 @@ class TemplateFunctions:
             allow you to download files
         '''
         if not self.nodeid:
-            return '[Download: not called from item]'
-        propclass = self.properties[property]
-        value = self.cl.get(self.nodeid, property)
-        if isinstance(propclass, hyperdb.Link):
-            linkcl = self.db.classes[propclass.classname]
-            linkvalue = linkcl.get(value, k)
-            return '<a href="%s%s">%s</a>'%(linkcl, value, linkvalue)
-        if isinstance(propclass, hyperdb.Multilink):
-            linkcl = self.db.classes[propclass.classname]
-            l = []
-            for value in value:
-                linkvalue = linkcl.get(value, k)
-                l.append('<a href="%s%s">%s</a>'%(linkcl, value, linkvalue))
-            return ', '.join(l)
-        return '[Download: not a link]'
+            return _('[Download: not called from item]')
+	return self.do_link(property, is_download=1)
 
 
     def do_checklist(self, property, **args):
@@ -369,7 +399,7 @@ class TemplateFunctions:
         propclass = self.properties[property]
         if (not isinstance(propclass, hyperdb.Link) and not
                 isinstance(propclass, hyperdb.Multilink)):
-            return '[Checklist: not a link]'
+            return _('[Checklist: not a link]')
 
         # get our current checkbox state
         if self.nodeid:
@@ -390,7 +420,7 @@ class TemplateFunctions:
         l = []
         k = linkcl.labelprop()
         for optionid in linkcl.list():
-            option = linkcl.get(optionid, k)
+            option = cgi.escape(linkcl.get(optionid, k))
             if optionid in value or option in value:
                 checked = 'checked'
             else:
@@ -404,8 +434,8 @@ class TemplateFunctions:
                 checked = 'checked'
             else:
                 checked = ''
-            l.append('[unselected]:<input type="checkbox" %s name="%s" '
-                'value="-1">'%(checked, property))
+            l.append(_('[unselected]:<input type="checkbox" %s name="%s" '
+                'value="-1">')%(checked, property))
         return '\n'.join(l)
 
     def do_note(self, rows=5, cols=80):
@@ -423,10 +453,18 @@ class TemplateFunctions:
         '''
         propcl = self.properties[property]
         if not isinstance(propcl, hyperdb.Multilink):
-            return '[List: not a Multilink]'
-        value = self.cl.get(self.nodeid, property)
+            return _('[List: not a Multilink]')
+
+        value = self.determine_value(property)
+        if not value:
+            return ''
+
+        # sort, possibly revers and then re-stringify
+        value = map(int, value)
+        value.sort()
         if reverse:
             value.reverse()
+        value = map(str, value)
 
         # render the sub-index into a string
         fp = StringIO.StringIO()
@@ -441,22 +479,141 @@ class TemplateFunctions:
         return fp.getvalue()
 
     # XXX new function
-    def do_history(self, **args):
+    def do_history(self, direction='descending'):
         ''' list the history of the item
+
+            If "direction" is 'descending' then the most recent event will
+            be displayed first. If it is 'ascending' then the oldest event
+            will be displayed first.
         '''
         if self.nodeid is None:
-            return "[History: node doesn't exist]"
+            return _("[History: node doesn't exist]")
 
         l = ['<table width=100% border=0 cellspacing=0 cellpadding=2>',
             '<tr class="list-header">',
-            '<td><span class="list-item"><strong>Date</strong></span></td>',
-            '<td><span class="list-item"><strong>User</strong></span></td>',
-            '<td><span class="list-item"><strong>Action</strong></span></td>',
-            '<td><span class="list-item"><strong>Args</strong></span></td>']
+            _('<th align=left><span class="list-item">Date</span></th>'),
+            _('<th align=left><span class="list-item">User</span></th>'),
+            _('<th align=left><span class="list-item">Action</span></th>'),
+            _('<th align=left><span class="list-item">Args</span></th>'),
+            '</tr>']
 
-        for id, date, user, action, args in self.cl.history(self.nodeid):
-            l.append('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>'%(
-               date, user, action, args))
+        comments = {}
+        history = self.cl.history(self.nodeid)
+        history.sort()
+        if direction == 'descending':
+            history.reverse()
+        for id, evt_date, user, action, args in history:
+            date_s = str(evt_date).replace("."," ")
+            arg_s = ''
+            if action == 'link' and type(args) == type(()):
+                if len(args) == 3:
+                    linkcl, linkid, key = args
+                    arg_s += '<a href="%s%s">%s%s %s</a>'%(linkcl, linkid,
+                        linkcl, linkid, key)
+                else:
+                    arg_s = str(arg)
+
+            elif action == 'unlink' and type(args) == type(()):
+                if len(args) == 3:
+                    linkcl, linkid, key = args
+                    arg_s += '<a href="%s%s">%s%s %s</a>'%(linkcl, linkid,
+                        linkcl, linkid, key)
+                else:
+                    arg_s = str(arg)
+
+            elif type(args) == type({}):
+                cell = []
+                for k in args.keys():
+                    # try to get the relevant property and treat it
+                    # specially
+                    try:
+                        prop = self.properties[k]
+                    except:
+                        prop = None
+                    if prop is not None:
+                        if args[k] and (isinstance(prop, hyperdb.Multilink) or
+                                isinstance(prop, hyperdb.Link)):
+                            # figure what the link class is
+                            classname = prop.classname
+                            try:
+                                linkcl = self.db.classes[classname]
+                            except KeyError, message:
+                                labelprop = None
+                                comments[classname] = _('''The linked class
+                                    %(classname)s no longer exists''')%locals()
+                            labelprop = linkcl.labelprop()
+
+                        if isinstance(prop, hyperdb.Multilink) and \
+                                len(args[k]) > 0:
+                            ml = []
+                            for linkid in args[k]:
+                                label = classname + linkid
+                                # if we have a label property, try to use it
+                                # TODO: test for node existence even when
+                                # there's no labelprop!
+                                try:
+                                    if labelprop is not None:
+                                        label = linkcl.get(linkid, labelprop)
+                                except IndexError:
+                                    comments['no_link'] = _('''<strike>The
+                                        linked node no longer
+                                        exists</strike>''')
+                                    ml.append('<strike>%s</strike>'%label)
+                                else:
+                                    ml.append('<a href="%s%s">%s</a>'%(
+                                        classname, linkid, label))
+                            cell.append('%s:\n  %s'%(k, ',\n  '.join(ml)))
+                        elif isinstance(prop, hyperdb.Link) and args[k]:
+                            label = classname + args[k]
+                            # if we have a label property, try to use it
+                            # TODO: test for node existence even when
+                            # there's no labelprop!
+                            if labelprop is not None:
+                                try:
+                                    label = linkcl.get(args[k], labelprop)
+                                except IndexError:
+                                    comments['no_link'] = _('''<strike>The
+                                        linked node no longer
+                                        exists</strike>''')
+                                    cell.append(' <strike>%s</strike>,\n'%label)
+                                    # "flag" this is done .... euwww
+                                    label = None
+                            if label is not None:
+                                cell.append('%s: <a href="%s%s">%s</a>\n'%(k,
+                                    classname, args[k], label))
+
+                        elif isinstance(prop, hyperdb.Date) and args[k]:
+                            d = date.Date(args[k])
+                            cell.append('%s: %s'%(k, str(d)))
+
+                        elif isinstance(prop, hyperdb.Interval) and args[k]:
+                            d = date.Interval(args[k])
+                            cell.append('%s: %s'%(k, str(d)))
+
+                        elif not args[k]:
+                            cell.append('%s: (no value)\n'%k)
+
+                        else:
+                            cell.append('%s: %s\n'%(k, str(args[k])))
+                    else:
+                        # property no longer exists
+                        comments['no_exist'] = _('''<em>The indicated property
+                            no longer exists</em>''')
+                        cell.append('<em>%s: %s</em>\n'%(k, str(args[k])))
+                arg_s = '<br />'.join(cell)
+            else:
+                # unkown event!!
+                comments['unknown'] = _('''<strong><em>This event is not
+                    handled by the history display!</em></strong>''')
+                arg_s = '<strong><em>' + str(args) + '</em></strong>'
+            date_s = date_s.replace(' ', '&nbsp;')
+            l.append('<tr><td nowrap valign=top>%s</td><td valign=top>%s</td>'
+                '<td valign=top>%s</td><td valign=top>%s</td></tr>'%(date_s,
+                user, action, arg_s))
+        if comments:
+            l.append(_('<tr><td colspan=4><strong>Note:</strong></td></tr>'))
+        for entry in comments.values():
+            l.append('<tr><td colspan=4>%s</td></tr>'%entry)
         l.append('</table>')
         return '\n'.join(l)
 
@@ -465,11 +622,11 @@ class TemplateFunctions:
         ''' add a submit button for the item
         '''
         if self.nodeid:
-            return '<input type="submit" value="Submit Changes">'
+            return _('<input type="submit" name="submit" value="Submit Changes">')
         elif self.form is not None:
-            return '<input type="submit" value="Submit New Entry">'
+            return _('<input type="submit" name="submit" value="Submit New Entry">')
         else:
-            return '[Submit: not called from item]'
+            return _('[Submit: not called from item]')
 
 
 #
@@ -503,6 +660,7 @@ class IndexTemplateReplace:
 class IndexTemplate(TemplateFunctions):
     def __init__(self, client, templates, classname):
         self.client = client
+        self.instance = client.instance
         self.templates = templates
         self.classname = classname
 
@@ -548,9 +706,9 @@ class IndexTemplate(TemplateFunctions):
             columns = l
 
         # display the filter section
-        if (show_display_form and hasattr(self.client, 'FILTER_POSITION') and
-                self.client.FILTER_POSITION in ('top and bottom', 'top')):
-            w('<form action="index">\n')
+        if (show_display_form and 
+                self.instance.FILTER_POSITION in ('top and bottom', 'top')):
+            w('<form action="%s">\n'%self.classname)
             self.filter_section(filter_template, filter, columns, group,
                 all_filters, all_columns, show_customization)
             # make sure that the sorting doesn't get lost either
@@ -589,7 +747,7 @@ class IndexTemplate(TemplateFunctions):
         for nodeid in nodeids:
             # check for a group heading
             if group_names:
-                this_group = [self.cl.get(nodeid, name, '[no value]') for name in group_names]
+                this_group = [self.cl.get(nodeid, name, _('[no value]')) for name in group_names]
                 if this_group != old_group:
                     l = []
                     for name in group_names:
@@ -599,7 +757,8 @@ class IndexTemplate(TemplateFunctions):
                             key = group_cl.getkey()
                             value = self.cl.get(nodeid, name)
                             if value is None:
-                                l.append('[unselected %s]'%prop.classname)
+                                l.append(_('[unselected %(classname)s]')%{
+                                    'classname': prop.classname})
                             else:
                                 l.append(group_cl.get(self.cl.get(nodeid,
                                     name), key))
@@ -609,9 +768,9 @@ class IndexTemplate(TemplateFunctions):
                             for value in self.cl.get(nodeid, name):
                                 l.append(group_cl.get(value, key))
                         else:
-                            value = self.cl.get(nodeid, name, '[no value]')
+                            value = self.cl.get(nodeid, name, _('[no value]'))
                             if value is None:
-                                value = '[empty %s]'%name
+                                value = _('[empty %(name)s]')%locals()
                             else:
                                 value = str(value)
                             l.append(value)
@@ -629,9 +788,9 @@ class IndexTemplate(TemplateFunctions):
         w('</table>')
 
         # display the filter section
-        if (show_display_form and hasattr(self.client, 'FILTER_POSITION') and
-                self.client.FILTER_POSITION in ('top and bottom', 'bottom')):
-            w('<form action="index">\n')
+        if (show_display_form and hasattr(self.instance, 'FILTER_POSITION') and
+                self.instance.FILTER_POSITION in ('top and bottom', 'bottom')):
+            w('<form action="%s">\n'%self.classname)
             self.filter_section(filter_template, filter, columns, group,
                 all_filters, all_columns, show_customization)
             # make sure that the sorting doesn't get lost either
@@ -654,12 +813,12 @@ class IndexTemplate(TemplateFunctions):
             # display the filter section
             w('<table width=100% border=0 cellspacing=0 cellpadding=2>')
             w('<tr class="location-bar">')
-            w(' <th align="left" colspan="2">Filter specification...</th>')
+            w(_(' <th align="left" colspan="2">Filter specification...</th>'))
             w('</tr>')
             replace = IndexTemplateReplace(self.globals, locals(), filter)
             w(replace.go(template))
             w('<tr class="location-bar"><td width="1%%">&nbsp;</td>')
-            w('<td><input type="submit" name="action" value="Redisplay"></td></tr>')
+            w(_('<td><input type="submit" name="action" value="Redisplay"></td></tr>'))
             w('</table>')
 
         # now add in the filter/columns/group/etc config table form
@@ -685,9 +844,9 @@ class IndexTemplate(TemplateFunctions):
                     w('<input type="hidden" name=":group" value="%s">' % name)
 
         # TODO: The widget style can go into the stylesheet
-        w('<th align="left" colspan=%s>'
+        w(_('<th align="left" colspan=%s>'
           '<input style="height : 1em; width : 1em; font-size: 12pt" type="submit" name="action" value="%s">&nbsp;View '
-          'customisation...</th></tr>\n'%(len(names)+1, action))
+          'customisation...</th></tr>\n')%(len(names)+1, action))
 
         if not show_customization:
             w('</table>\n')
@@ -700,8 +859,7 @@ class IndexTemplate(TemplateFunctions):
 
         # Filter
         if all_filters:
-            w('<tr><th width="1%" align=right class="location-bar">'
-              'Filters</th>\n')
+            w(_('<tr><th width="1%" align=right class="location-bar">Filters</th>\n'))
             for name in names:
                 if name not in all_filters:
                     w('<td>&nbsp;</td>')
@@ -715,8 +873,7 @@ class IndexTemplate(TemplateFunctions):
 
         # Columns
         if all_columns:
-            w('<tr><th width="1%" align=right class="location-bar">'
-              'Columns</th>\n')
+            w(_('<tr><th width="1%" align=right class="location-bar">Columns</th>\n'))
             for name in names:
                 if name not in all_columns:
                     w('<td>&nbsp;</td>')
@@ -729,8 +886,7 @@ class IndexTemplate(TemplateFunctions):
             w('</tr>\n')
 
             # Grouping
-            w('<tr><th width="1%" align=right class="location-bar">'
-              'Grouping</th>\n')
+            w(_('<tr><th width="1%" align=right class="location-bar">Grouping</th>\n'))
             for name in names:
                 prop = self.properties[name]
                 if name not in all_columns:
@@ -745,7 +901,7 @@ class IndexTemplate(TemplateFunctions):
 
         w('<tr class="location-bar"><td width="1%">&nbsp;</td>')
         w('<td colspan="%s">'%len(names))
-        w('<input type="submit" name="action" value="Redisplay"></td>')
+        w(_('<input type="submit" name="action" value="Redisplay"></td>'))
         w('</tr>\n')
         w('</table>\n')
 
@@ -822,6 +978,7 @@ class ItemTemplateReplace:
 class ItemTemplate(TemplateFunctions):
     def __init__(self, client, templates, classname):
         self.client = client
+        self.instance = client.instance
         self.templates = templates
         self.classname = classname
 
@@ -854,6 +1011,7 @@ class ItemTemplate(TemplateFunctions):
 class NewItemTemplate(TemplateFunctions):
     def __init__(self, client, templates, classname):
         self.client = client
+        self.instance = client.instance
         self.templates = templates
         self.classname = classname
 
@@ -885,6 +1043,98 @@ class NewItemTemplate(TemplateFunctions):
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.71  2002/01/23 06:15:24  richard
+# real (non-string, duh) sorting of lists by node id
+#
+# Revision 1.70  2002/01/23 05:47:57  richard
+# more HTML template cleanup and unit tests
+#
+# Revision 1.69  2002/01/23 05:10:27  richard
+# More HTML template cleanup and unit tests.
+#  - download() now implemented correctly, replacing link(is_download=1) [fixed in the
+#    templates, but link(is_download=1) will still work for existing templates]
+#
+# Revision 1.68  2002/01/22 22:55:28  richard
+#  . htmltemplate list() wasn't sorting...
+#
+# Revision 1.67  2002/01/22 22:46:22  richard
+# more htmltemplate cleanups and unit tests
+#
+# Revision 1.66  2002/01/22 06:35:40  richard
+# more htmltemplate tests and cleanup
+#
+# Revision 1.65  2002/01/22 00:12:06  richard
+# Wrote more unit tests for htmltemplate, and while I was at it, I polished
+# off the implementation of some of the functions so they behave sanely.
+#
+# Revision 1.64  2002/01/21 03:25:59  richard
+# oops
+#
+# Revision 1.63  2002/01/21 02:59:10  richard
+# Fixed up the HTML display of history so valid links are actually displayed.
+# Oh for some unit tests! :(
+#
+# Revision 1.62  2002/01/18 08:36:12  grubert
+#  . add nowrap to history table date cell i.e. <td nowrap ...
+#
+# Revision 1.61  2002/01/17 23:04:53  richard
+#  . much nicer history display (actualy real handling of property types etc)
+#
+# Revision 1.60  2002/01/17 08:48:19  grubert
+#  . display superseder as html link in history.
+#
+# Revision 1.59  2002/01/17 07:58:24  grubert
+#  . display links a html link in history.
+#
+# Revision 1.58  2002/01/15 00:50:03  richard
+# #502949 ] index view for non-issues and redisplay
+#
+# Revision 1.57  2002/01/14 23:31:21  richard
+# reverted the change that had plain() hyperlinking the link displays -
+# that's what link() is for!
+#
+# Revision 1.56  2002/01/14 07:04:36  richard
+#  . plain rendering of links in the htmltemplate now generate a hyperlink to
+#    the linked node's page.
+#    ... this allows a display very similar to bugzilla's where you can actually
+#    find out information about the linked node.
+#
+# Revision 1.55  2002/01/14 06:45:03  richard
+#  . #502953 ] nosy-like treatment of other multilinks
+#    ... had to revert most of the previous change to the multilink field
+#    display... not good.
+#
+# Revision 1.54  2002/01/14 05:16:51  richard
+# The submit buttons need a name attribute or mozilla won't submit without a
+# file upload. Yeah, that's bloody obscure. Grr.
+#
+# Revision 1.53  2002/01/14 04:03:32  richard
+# How about that ... date fields have never worked ...
+#
+# Revision 1.52  2002/01/14 02:20:14  richard
+#  . changed all config accesses so they access either the instance or the
+#    config attriubute on the db. This means that all config is obtained from
+#    instance_config instead of the mish-mash of classes. This will make
+#    switching to a ConfigParser setup easier too, I hope.
+#
+# At a minimum, this makes migration a _little_ easier (a lot easier in the
+# 0.5.0 switch, I hope!)
+#
+# Revision 1.51  2002/01/10 10:02:15  grubert
+# In do_history: replace "." in date by " " so html wraps more sensible.
+# Should this be done in date's string converter ?
+#
+# Revision 1.50  2002/01/05 02:35:10  richard
+# I18N'ification
+#
+# Revision 1.49  2001/12/20 15:43:01  rochecompaan
+# Features added:
+#  .  Multilink properties are now displayed as comma separated values in
+#     a textbox
+#  .  The add user link is now only visible to the admin user
+#  .  Modified the mail gateway to reject submissions from unknown
+#     addresses if ANONYMOUS_ACCESS is denied
+#
 # Revision 1.48  2001/12/20 06:13:24  rochecompaan
 # Bugs fixed:
 #   . Exception handling in hyperdb for strings-that-look-like numbers got

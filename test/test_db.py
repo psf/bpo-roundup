@@ -15,13 +15,14 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: test_db.py,v 1.12 2001-12-17 03:52:48 richard Exp $ 
+# $Id: test_db.py,v 1.12.2.1 2002-02-06 04:05:55 richard Exp $ 
 
 import unittest, os, shutil
 
 from roundup.hyperdb import String, Password, Link, Multilink, Date, \
     Interval, Class, DatabaseError
 from roundup.roundupdb import FileClass
+from roundup import date
 
 def setupSchema(db, create):
     status = Class(db, "status", name=String())
@@ -33,7 +34,7 @@ def setupSchema(db, create):
         status.create(name="resolved")
     Class(db, "user", username=String(), password=Password())
     Class(db, "issue", title=String(), status=Link("status"),
-        nosy=Multilink("user"))
+        nosy=Multilink("user"), deadline=Date(), foo=Interval())
     FileClass(db, "file", name=String(), type=String())
     db.commit()
 
@@ -41,15 +42,29 @@ class MyTestCase(unittest.TestCase):
     def tearDown(self):
         if os.path.exists('_test_dir'):
             shutil.rmtree('_test_dir')
-    
+
+class config:
+    DATABASE='_test_dir'
+    MAILHOST = 'localhost'
+    MAIL_DOMAIN = 'fill.me.in.'
+    INSTANCE_NAME = 'Roundup issue tracker'
+    ISSUE_TRACKER_EMAIL = 'issue_tracker@%s'%MAIL_DOMAIN
+    ISSUE_TRACKER_WEB = 'http://some.useful.url/'
+    ADMIN_EMAIL = 'roundup-admin@%s'%MAIL_DOMAIN
+    FILTER_POSITION = 'bottom'      # one of 'top', 'bottom', 'top and bottom'
+    ANONYMOUS_ACCESS = 'deny'       # either 'deny' or 'allow'
+    ANONYMOUS_REGISTER = 'deny'     # either 'deny' or 'allow'
+    MESSAGES_TO_AUTHOR = 'no'       # either 'yes' or 'no'
+    EMAIL_SIGNATURE_POSITION = 'bottom'
+
 class anydbmDBTestCase(MyTestCase):
     def setUp(self):
         from roundup.backends import anydbm
         # remove previous test, ignore errors
-        if os.path.exists('_test_dir'):
-            shutil.rmtree('_test_dir')
-        os.makedirs('_test_dir/files')
-        self.db = anydbm.Database('_test_dir', 'test')
+        if os.path.exists(config.DATABASE):
+            shutil.rmtree(config.DATABASE)
+        os.makedirs(config.DATABASE + '/files')
+        self.db = anydbm.Database(config, 'test')
         setupSchema(self.db, 1)
 
     def testChanges(self):
@@ -62,9 +77,19 @@ class anydbmDBTestCase(MyTestCase):
         props = self.db.issue.getprops()
         keys = props.keys()
         keys.sort()
-        self.assertEqual(keys, ['fixer', 'id', 'nosy', 'status', 'title'])
+        self.assertEqual(keys, ['deadline', 'fixer', 'foo', 'id', 'nosy',
+            'status', 'title'])
         self.db.issue.set('5', status='2')
         self.db.issue.get('5', "status")
+
+        a = self.db.issue.get('5', "deadline")
+        self.db.issue.set('5', deadline=date.Date())
+        self.assertNotEqual(a, self.db.issue.get('5', "deadline"))
+
+        a = self.db.issue.get('5', "foo")
+        self.db.issue.set('5', foo=date.Interval('-1d'))
+        self.assertNotEqual(a, self.db.issue.get('5', "foo"))
+
         self.db.status.get('2', "name")
         self.db.issue.get('5', "title")
         self.db.issue.find(status = self.db.status.lookup("in-progress"))
@@ -165,6 +190,67 @@ class anydbmDBTestCase(MyTestCase):
         ar(IndexError, self.db.issue.set, '1', title='foo', status='1',
             nosy=['10'])
 
+    def testJournals(self):
+        self.db.issue.addprop(fixer=Link("user", do_journal='yes'))
+        self.db.user.create(username="mary")
+        self.db.user.create(username="pete")
+        self.db.issue.create(title="spam", status='1')
+        self.db.commit()
+
+        # journal entry for issue create
+        journal = self.db.getjournal('issue', '1')
+        self.assertEqual(1, len(journal))
+        (nodeid, date_stamp, journaltag, action, params) = journal[0]
+        self.assertEqual(nodeid, '1')
+        self.assertEqual(journaltag, 'test')
+        self.assertEqual(action, 'create')
+        keys = params.keys()
+        keys.sort()
+        self.assertEqual(keys, ['deadline', 'fixer', 'foo', 'nosy', 
+            'status', 'title'])
+        self.assertEqual(None,params['deadline'])
+        self.assertEqual(None,params['fixer'])
+        self.assertEqual(None,params['foo'])
+        self.assertEqual([],params['nosy'])
+        self.assertEqual('1',params['status'])
+        self.assertEqual('spam',params['title'])
+
+        # journal entry for link
+        journal = self.db.getjournal('user', '1')
+        self.assertEqual(1, len(journal))
+        self.db.issue.set('1', fixer='1')
+        self.db.commit()
+        journal = self.db.getjournal('user', '1')
+        self.assertEqual(2, len(journal))
+        (nodeid, date_stamp, journaltag, action, params) = journal[1]
+        self.assertEqual('1', nodeid)
+        self.assertEqual('test', journaltag)
+        self.assertEqual('link', action)
+        self.assertEqual(('issue', '1', 'fixer'), params)
+
+        # journal entry for unlink
+        self.db.issue.set('1', fixer='2')
+        self.db.commit()
+        journal = self.db.getjournal('user', '1')
+        self.assertEqual(3, len(journal))
+        (nodeid, date_stamp, journaltag, action, params) = journal[2]
+        self.assertEqual('1', nodeid)
+        self.assertEqual('test', journaltag)
+        self.assertEqual('unlink', action)
+        self.assertEqual(('issue', '1', 'fixer'), params)
+
+    def testPack(self):
+        self.db.issue.create(title="spam", status='1')
+        self.db.commit()
+        self.db.issue.set('1', status='2')
+        self.db.commit()
+        self.db.issue.set('1', status='3')
+        self.db.commit()
+        pack_before = date.Date(". + 1d")
+        self.db.pack(pack_before)
+        journal = self.db.getjournal('issue', '1')
+        self.assertEqual(2, len(journal))
+
     def testRetire(self):
         pass
 
@@ -173,12 +259,12 @@ class anydbmReadOnlyDBTestCase(MyTestCase):
     def setUp(self):
         from roundup.backends import anydbm
         # remove previous test, ignore errors
-        if os.path.exists('_test_dir'):
-            shutil.rmtree('_test_dir')
-        os.makedirs('_test_dir/files')
-        db = anydbm.Database('_test_dir', 'test')
+        if os.path.exists(config.DATABASE):
+            shutil.rmtree(config.DATABASE)
+        os.makedirs(config.DATABASE + '/files')
+        db = anydbm.Database(config, 'test')
         setupSchema(db, 1)
-        self.db = anydbm.Database('_test_dir')
+        self.db = anydbm.Database(config)
         setupSchema(self.db, 0)
 
     def testExceptions(self):
@@ -195,22 +281,22 @@ class bsddbDBTestCase(anydbmDBTestCase):
     def setUp(self):
         from roundup.backends import bsddb
         # remove previous test, ignore errors
-        if os.path.exists('_test_dir'):
-            shutil.rmtree('_test_dir')
-        os.makedirs('_test_dir/files')
-        self.db = bsddb.Database('_test_dir', 'test')
+        if os.path.exists(config.DATABASE):
+            shutil.rmtree(config.DATABASE)
+        os.makedirs(config.DATABASE + '/files')
+        self.db = bsddb.Database(config, 'test')
         setupSchema(self.db, 1)
 
 class bsddbReadOnlyDBTestCase(anydbmReadOnlyDBTestCase):
     def setUp(self):
         from roundup.backends import bsddb
         # remove previous test, ignore errors
-        if os.path.exists('_test_dir'):
-            shutil.rmtree('_test_dir')
-        os.makedirs('_test_dir/files')
-        db = bsddb.Database('_test_dir', 'test')
+        if os.path.exists(config.DATABASE):
+            shutil.rmtree(config.DATABASE)
+        os.makedirs(config.DATABASE + '/files')
+        db = bsddb.Database(config, 'test')
         setupSchema(db, 1)
-        self.db = bsddb.Database('_test_dir')
+        self.db = bsddb.Database(config)
         setupSchema(self.db, 0)
 
 
@@ -218,22 +304,22 @@ class bsddb3DBTestCase(anydbmDBTestCase):
     def setUp(self):
         from roundup.backends import bsddb3
         # remove previous test, ignore errors
-        if os.path.exists('_test_dir'):
-            shutil.rmtree('_test_dir')
-        os.makedirs('_test_dir/files')
-        self.db = bsddb3.Database('_test_dir', 'test')
+        if os.path.exists(config.DATABASE):
+            shutil.rmtree(config.DATABASE)
+        os.makedirs(config.DATABASE + '/files')
+        self.db = bsddb3.Database(config, 'test')
         setupSchema(self.db, 1)
 
 class bsddb3ReadOnlyDBTestCase(anydbmReadOnlyDBTestCase):
     def setUp(self):
         from roundup.backends import bsddb3
         # remove previous test, ignore errors
-        if os.path.exists('_test_dir'):
-            shutil.rmtree('_test_dir')
-        os.makedirs('_test_dir/files')
-        db = bsddb3.Database('_test_dir', 'test')
+        if os.path.exists(config.DATABASE):
+            shutil.rmtree(config.DATABASE)
+        os.makedirs(config.DATABASE + '/files')
+        db = bsddb3.Database(config, 'test')
         setupSchema(db, 1)
-        self.db = bsddb3.Database('_test_dir')
+        self.db = bsddb3.Database(config)
         setupSchema(self.db, 0)
 
 
@@ -260,6 +346,45 @@ def suite():
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.18  2002/01/22 07:21:13  richard
+# . fixed back_bsddb so it passed the journal tests
+#
+# ... it didn't seem happy using the back_anydbm _open method, which is odd.
+# Yet another occurrance of whichdb not being able to recognise older bsddb
+# databases. Yadda yadda. Made the HYPERDBDEBUG stuff more sane in the
+# process.
+#
+# Revision 1.17  2002/01/22 05:06:09  rochecompaan
+# We need to keep the last 'set' entry in the journal to preserve
+# information on 'activity' for nodes.
+#
+# Revision 1.16  2002/01/21 16:33:20  rochecompaan
+# You can now use the roundup-admin tool to pack the database
+#
+# Revision 1.15  2002/01/19 13:16:04  rochecompaan
+# Journal entries for link and multilink properties can now be switched on
+# or off.
+#
+# Revision 1.14  2002/01/16 07:02:57  richard
+#  . lots of date/interval related changes:
+#    - more relaxed date format for input
+#
+# Revision 1.13  2002/01/14 02:20:15  richard
+#  . changed all config accesses so they access either the instance or the
+#    config attriubute on the db. This means that all config is obtained from
+#    instance_config instead of the mish-mash of classes. This will make
+#    switching to a ConfigParser setup easier too, I hope.
+#
+# At a minimum, this makes migration a _little_ easier (a lot easier in the
+# 0.5.0 switch, I hope!)
+#
+# Revision 1.12  2001/12/17 03:52:48  richard
+# Implemented file store rollback. As a bonus, the hyperdb is now capable of
+# storing more than one file per node - if a property name is supplied,
+# the file is called designator.property.
+# I decided not to migrate the existing files stored over to the new naming
+# scheme - the FileClass just doesn't specify the property name.
+#
 # Revision 1.11  2001/12/10 23:17:20  richard
 # Added transaction tests to test_db
 #

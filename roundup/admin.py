@@ -16,7 +16,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: admin.py,v 1.6 2002-01-23 07:27:19 grubert Exp $
+# $Id: admin.py,v 1.6.2.1 2002-02-06 04:05:53 richard Exp $
 
 import sys, os, getpass, getopt, re, UserDict, shlex
 try:
@@ -1039,6 +1039,9 @@ if __name__ == '__main__':
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.6  2002/01/23 07:27:19  grubert
+#  . allow abbreviation of "help" in admin tool too.
+#
 # Revision 1.5  2002/01/21 16:33:19  rochecompaan
 # You can now use the roundup-admin tool to pack the database
 #

@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: cgi_client.py,v 1.88 2002-01-02 02:31:38 richard Exp $
+# $Id: cgi_client.py,v 1.88.2.1 2002-02-06 04:05:53 richard Exp $
 
 __doc__ = """
 WWW request handler (also used in the stand-alone server).
@@ -44,21 +44,7 @@ class Client:
     'anonymous' user exists, the user is logged in using that user (though
     there is no cookie). This allows them to modify the database, and all
     modifications are attributed to the 'anonymous' user.
-
-
-    Customisation
-    -------------
-      FILTER_POSITION - one of 'top', 'bottom', 'top and bottom'
-      ANONYMOUS_ACCESS - one of 'deny', 'allow'
-      ANONYMOUS_REGISTER - one of 'deny', 'allow'
-
-    from the roundup class:
-      INSTANCE_NAME - defaults to 'Roundup issue tracker'
-
     '''
-    FILTER_POSITION = 'bottom'       # one of 'top', 'bottom', 'top and bottom'
-    ANONYMOUS_ACCESS = 'deny'        # one of 'deny', 'allow'
-    ANONYMOUS_REGISTER = 'deny'      # one of 'deny', 'allow'
 
     def __init__(self, instance, request, env, form=None):
         self.instance = instance
@@ -104,7 +90,7 @@ class Client:
             message = _('<div class="system-msg">%(message)s</div>')%locals()
         else:
             message = ''
-        style = open(os.path.join(self.TEMPLATES, 'style.css')).read()
+        style = open(os.path.join(self.instance.TEMPLATES, 'style.css')).read()
         user_name = self.user or ''
         if self.user == 'admin':
             admin_links = _(' | <a href="list_classes">Class List</a>' \
@@ -286,7 +272,7 @@ class Client:
         cn = self.classname
         cl = self.db.classes[cn]
         self.pagehead(_('%(instancename)s: Index of %(classname)s')%{
-            'classname': cn, 'instancename': self.INSTANCE_NAME})
+            'classname': cn, 'instancename': self.instance.INSTANCE_NAME})
         if sort is None: sort = self.index_arg(':sort')
         if group is None: group = self.index_arg(':group')
         if filter is None: filter = self.index_arg(':filter')
@@ -295,7 +281,7 @@ class Client:
         if show_customization is None:
             show_customization = self.customization_widget()
 
-        index = htmltemplate.IndexTemplate(self, self.TEMPLATES, cn)
+        index = htmltemplate.IndexTemplate(self, self.instance.TEMPLATES, cn)
         index.render(filterspec, filter, columns, sort, group,
             show_customization=show_customization)
         self.pagefoot()
@@ -312,19 +298,19 @@ class Client:
         # don't try to set properties if the user has just logged in
         if keys and not self.form.has_key('__login_name'):
             try:
-                props, changed = parsePropsFromForm(self.db, cl, self.form,
-                    self.nodeid)
+                props = parsePropsFromForm(self.db, cl, self.form, self.nodeid)
                 # make changes to the node
                 self._changenode(props)
                 # handle linked nodes 
                 self._post_editnode(self.nodeid)
                 # and some nice feedback for the user
-                if changed:
+                if props:
                     message = _('%(changes)s edited ok')%{'changes':
-                        ', '.join(changed.keys())}
+                        ', '.join(props.keys())}
                 elif self.form.has_key('__note') and self.form['__note'].value:
                     message = _('note added')
-                elif self.form.has_key('__file'):
+                elif (self.form.has_key('__file') and
+                        self.form['__file'].filename):
                     message = _('file added')
                 else:
                     message = _('nothing changed')
@@ -343,12 +329,32 @@ class Client:
         nodeid = self.nodeid
 
         # use the template to display the item
-        item = htmltemplate.ItemTemplate(self, self.TEMPLATES, self.classname)
+        item = htmltemplate.ItemTemplate(self, self.instance.TEMPLATES,
+            self.classname)
         item.render(nodeid)
 
         self.pagefoot()
     showissue = shownode
     showmsg = shownode
+
+    def _add_assignedto_to_nosy(self, props):
+        ''' add the assignedto value from the props to the nosy list
+        '''
+        if not props.has_key('assignedto'):
+            return
+        assignedto_id = props['assignedto']
+        if not props.has_key('nosy'):
+            # load current nosy
+            if self.nodeid:
+                cl = self.db.classes[self.classname]
+                l = cl.get(self.nodeid, 'nosy')
+		if assignedto_id in l:
+		    return
+		props['nosy'] = l
+            else:
+                props['nosy'] = []
+        if assignedto_id not in props['nosy']:
+            props['nosy'].append(assignedto_id)
 
     def _changenode(self, props):
         ''' change the node based on the contents of the form
@@ -361,22 +367,28 @@ class Client:
             resolved_id = self.db.status.lookup('resolved')
             chatting_id = self.db.status.lookup('chatting')
             current_status = cl.get(self.nodeid, 'status')
+            if props.has_key('status'):
+                new_status = props['status']
+            else:
+                # apparently there's a chance that some browsers don't
+                # send status...
+                new_status = current_status
         except KeyError:
             pass
         else:
-            if (props['status'] == unread_id or props['status'] == resolved_id and current_status == resolved_id):
+            if new_status == unread_id or (new_status == resolved_id
+                    and current_status == resolved_id):
                 props['status'] = chatting_id
-        # add assignedto to the nosy list
-        if props.has_key('assignedto'):
-            assignedto_id = props['assignedto']
-            if assignedto_id not in props['nosy']:
-                props['nosy'].append(assignedto_id)
+
+        self._add_assignedto_to_nosy(props)
+
         # create the message
         message, files = self._handle_message()
         if message:
             props['messages'] = cl.get(self.nodeid, 'messages') + [message]
         if files:
             props['files'] = cl.get(self.nodeid, 'files') + files
+
         # make the changes
         cl.set(self.nodeid, **props)
 
@@ -384,7 +396,7 @@ class Client:
         ''' create a node based on the contents of the form
         '''
         cl = self.db.classes[self.classname]
-        props, dummy = parsePropsFromForm(self.db, cl, self.form)
+        props = parsePropsFromForm(self.db, cl, self.form)
 
         # set status to 'unread' if not specified - a status of '- no
         # selection -' doesn't make sense
@@ -395,13 +407,9 @@ class Client:
                 pass
             else:
                 props['status'] = unread_id
-        # add assignedto to the nosy list
-        if props.has_key('assignedto'):
-            assignedto_id = props['assignedto']
-            if props.has_key('nosy') and assignedto_id not in props['nosy']:
-                props['nosy'].append(assignedto_id)
-            else:
-                props['nosy'] = [assignedto_id]
+
+        self._add_assignedto_to_nosy(props)
+
         # check for messages and files
         message, files = self._handle_message()
         if message:
@@ -412,7 +420,7 @@ class Client:
         return cl.create(**props)
 
     def _handle_message(self):
-        ''' generate and edit message
+        ''' generate an edit message
         '''
         # handle file attachments 
         files = []
@@ -433,7 +441,7 @@ class Client:
         props = cl.getprops()
         note = None
         # in a nutshell, don't do anything if there's no note or there's no
-        # nosy
+        # NOSY
         if self.form.has_key('__note'):
             note = self.form['__note'].value
         if not props.has_key('messages'):
@@ -458,8 +466,8 @@ class Client:
 
         # handle the messageid
         # TODO: handle inreplyto
-        messageid = "%s.%s.%s%s-%s"%(time.time(), random.random(),
-            classname, nodeid, self.MAIL_DOMAIN)
+        messageid = "<%s.%s.%s@%s>"%(time.time(), random.random(),
+            self.classname, self.instance.MAIL_DOMAIN)
 
         # now create the message, attaching the files
         content = '\n'.join(m)
@@ -549,7 +557,7 @@ class Client:
                 self.nodeid = nid
                 self.pagehead('%s: %s'%(self.classname.capitalize(), nid),
                     message)
-                item = htmltemplate.ItemTemplate(self, self.TEMPLATES, 
+                item = htmltemplate.ItemTemplate(self, self.instance.TEMPLATES, 
                     self.classname)
                 item.render(nid)
                 self.pagefoot()
@@ -563,7 +571,7 @@ class Client:
             self.classname.capitalize()}, message)
 
         # call the template
-        newitem = htmltemplate.NewItemTemplate(self, self.TEMPLATES,
+        newitem = htmltemplate.NewItemTemplate(self, self.instance.TEMPLATES,
             self.classname)
         newitem.render(self.form)
 
@@ -582,7 +590,7 @@ class Client:
         keys = self.form.keys()
         if [i for i in keys if i[0] != ':']:
             try:
-                props, dummy = parsePropsFromForm(self.db, cl, self.form)
+                props = parsePropsFromForm(self.db, cl, self.form)
                 nid = cl.create(**props)
                 # handle linked nodes 
                 self._post_editnode(nid)
@@ -597,7 +605,7 @@ class Client:
              self.classname.capitalize()}, message)
 
         # call the template
-        newitem = htmltemplate.NewItemTemplate(self, self.TEMPLATES,
+        newitem = htmltemplate.NewItemTemplate(self, self.instance.TEMPLATES,
             self.classname)
         newitem.render(self.form)
 
@@ -635,7 +643,7 @@ class Client:
 
         self.pagehead(_('New %(classname)s')%{'classname':
              self.classname.capitalize()}, message)
-        newitem = htmltemplate.NewItemTemplate(self, self.TEMPLATES,
+        newitem = htmltemplate.NewItemTemplate(self, self.instance.TEMPLATES,
             self.classname)
         newitem.render(self.form)
         self.pagefoot()
@@ -662,21 +670,21 @@ class Client:
         num_re = re.compile('^\d+$')
         if keys:
             try:
-                props, changed = parsePropsFromForm(self.db, user, self.form,
+                props = parsePropsFromForm(self.db, user, self.form,
                     self.nodeid)
                 set_cookie = 0
-                if self.nodeid == self.getuid() and changed.has_key('password'):
+                if props.has_key('password'):
                     password = self.form['password'].value.strip()
-                    if password:
-                        set_cookie = password
-                    else:
+                    if not password:
                         # no password was supplied - don't change it
                         del props['password']
-                        del changed['password']
+                    elif self.nodeid == self.getuid():
+                        # this is the logged-in user's password
+                        set_cookie = password
                 user.set(self.nodeid, **props)
                 # and some feedback for the user
                 message = _('%(changes)s edited ok')%{'changes':
-                    ', '.join(changed.keys())}
+                    ', '.join(props.keys())}
             except:
                 self.db.rollback()
                 s = StringIO.StringIO()
@@ -695,7 +703,7 @@ class Client:
         self.pagehead(_('User: %(user)s')%{'user': node_user}, message)
 
         # use the template to display the item
-        item = htmltemplate.ItemTemplate(self, self.TEMPLATES, 'user')
+        item = htmltemplate.ItemTemplate(self, self.instance.TEMPLATES, 'user')
         item.render(self.nodeid)
         self.pagefoot()
 
@@ -748,7 +756,7 @@ class Client:
     <td><input type="submit" value="Log In"></td></tr>
 </form>
 ''')%locals())
-        if self.user is None and self.ANONYMOUS_REGISTER == 'deny':
+        if self.user is None and self.instance.ANONYMOUS_REGISTER == 'deny':
             self.write('</table>')
             self.pagefoot()
             return
@@ -833,7 +841,7 @@ class Client:
         # TODO: pre-check the required fields and username key property
         cl = self.db.user
         try:
-            props, dummy = parsePropsFromForm(self.db, cl, self.form)
+            props = parsePropsFromForm(self.db, cl, self.form)
             uid = cl.create(**props)
         except ValueError, message:
             action = self.form['__destination_url'].value
@@ -874,7 +882,6 @@ class Client:
             'roundup_user=deleted; Max-Age=0; expires=%s; Path=%s;'%(now,
             path)})
         self.login()
-
 
     def main(self):
         '''Wrap the database accesses so we can close the database cleanly
@@ -942,7 +949,7 @@ class Client:
         if action == 'newuser_action':
             # if we don't have a login and anonymous people aren't allowed to
             # register, then spit up the login form
-            if self.ANONYMOUS_REGISTER == 'deny' and self.user is None:
+            if self.instance.ANONYMOUS_REGISTER == 'deny' and self.user is None:
                 if action == 'login':
                     self.login()         # go to the index after login
                 else:
@@ -957,7 +964,7 @@ class Client:
                 action = 'index'
 
         # no login or registration, make sure totally anonymous access is OK
-        elif self.ANONYMOUS_ACCESS == 'deny' and self.user is None:
+        elif self.instance.ANONYMOUS_ACCESS == 'deny' and self.user is None:
             if action == 'login':
                 self.login()             # go to the index after login
             else:
@@ -1047,7 +1054,7 @@ class ExtendedClient(Client):
             message = _('<div class="system-msg">%(message)s</div>')%locals()
         else:
             message = ''
-        style = open(os.path.join(self.TEMPLATES, 'style.css')).read()
+        style = open(os.path.join(self.instance.TEMPLATES, 'style.css')).read()
         user_name = self.user or ''
         if self.user == 'admin':
             admin_links = _(' | <a href="list_classes">Class List</a>' \
@@ -1098,7 +1105,6 @@ def parsePropsFromForm(db, cl, form, nodeid=0):
     '''Pull properties for the given class out of the form.
     '''
     props = {}
-    changed = {}
     keys = form.keys()
     num_re = re.compile('^\d+$')
     for key in keys:
@@ -1110,9 +1116,17 @@ def parsePropsFromForm(db, cl, form, nodeid=0):
         elif isinstance(proptype, hyperdb.Password):
             value = password.Password(form[key].value.strip())
         elif isinstance(proptype, hyperdb.Date):
-            value = date.Date(form[key].value.strip())
+            value = form[key].value.strip()
+            if value:
+                value = date.Date(form[key].value.strip())
+            else:
+                value = None
         elif isinstance(proptype, hyperdb.Interval):
-            value = date.Interval(form[key].value.strip())
+            value = form[key].value.strip()
+            if value:
+                value = date.Interval(form[key].value.strip())
+            else:
+                value = None
         elif isinstance(proptype, hyperdb.Link):
             value = form[key].value.strip()
             # see if it's the "no selection" choice
@@ -1149,7 +1163,6 @@ def parsePropsFromForm(db, cl, form, nodeid=0):
                 l.append(entry)
             l.sort()
             value = l
-        props[key] = value
 
         # get the old value
         if nodeid:
@@ -1160,14 +1173,79 @@ def parsePropsFromForm(db, cl, form, nodeid=0):
                 # value
                 if not cl.properties.has_key(key): raise
 
-        # if changed, set it
-        if nodeid and value != existing:
-            changed[key] = value
+            # if changed, set it
+            if value != existing:
+                props[key] = value
+        else:
             props[key] = value
-    return props, changed
+    return props
 
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.100  2002/01/16 07:02:57  richard
+#  . lots of date/interval related changes:
+#    - more relaxed date format for input
+#
+# Revision 1.99  2002/01/16 03:02:42  richard
+# #503793 ] changing assignedto resets nosy list
+#
+# Revision 1.98  2002/01/14 02:20:14  richard
+#  . changed all config accesses so they access either the instance or the
+#    config attriubute on the db. This means that all config is obtained from
+#    instance_config instead of the mish-mash of classes. This will make
+#    switching to a ConfigParser setup easier too, I hope.
+#
+# At a minimum, this makes migration a _little_ easier (a lot easier in the
+# 0.5.0 switch, I hope!)
+#
+# Revision 1.97  2002/01/11 23:22:29  richard
+#  . #502437 ] rogue reactor and unittest
+#    in short, the nosy reactor was modifying the nosy list. That code had
+#    been there for a long time, and I suspsect it was there because we
+#    weren't generating the nosy list correctly in other places of the code.
+#    We're now doing that, so the nosy-modifying code can go away from the
+#    nosy reactor.
+#
+# Revision 1.96  2002/01/10 05:26:10  richard
+# missed a parsePropsFromForm in last update
+#
+# Revision 1.95  2002/01/10 03:39:45  richard
+#  . fixed some problems with web editing and change detection
+#
+# Revision 1.94  2002/01/09 13:54:21  grubert
+# _add_assignedto_to_nosy did set nosy to assignedto only, no adding.
+#
+# Revision 1.93  2002/01/08 11:57:12  richard
+# crying out for real configuration handling... :(
+#
+# Revision 1.92  2002/01/08 04:12:05  richard
+# Changed message-id format to "<%s.%s.%s%s@%s>" so it complies with RFC822
+#
+# Revision 1.91  2002/01/08 04:03:47  richard
+# I mucked the intent of the code up.
+#
+# Revision 1.90  2002/01/08 03:56:55  richard
+# Oops, missed this before the beta:
+#  . #495392 ] empty nosy -patch
+#
+# Revision 1.89  2002/01/07 20:24:45  richard
+# *mutter* stupid cutnpaste
+#
+# Revision 1.88  2002/01/02 02:31:38  richard
+# Sorry for the huge checkin message - I was only intending to implement #496356
+# but I found a number of places where things had been broken by transactions:
+#  . modified ROUNDUPDBSENDMAILDEBUG to be SENDMAILDEBUG and hold a filename
+#    for _all_ roundup-generated smtp messages to be sent to.
+#  . the transaction cache had broken the roundupdb.Class set() reactors
+#  . newly-created author users in the mailgw weren't being committed to the db
+#
+# Stuff that made it into CHANGES.txt (ie. the stuff I was actually working
+# on when I found that stuff :):
+#  . #496356 ] Use threading in messages
+#  . detectors were being registered multiple times
+#  . added tests for mailgw
+#  . much better attaching of erroneous messages in the mail gateway
+#
 # Revision 1.87  2001/12/23 23:18:49  richard
 # We already had an admin-specific section of the web heading, no need to add
 # another one :)

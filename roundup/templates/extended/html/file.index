@@ -1,7 +1,7 @@
-<!-- $Id: file.index,v 1.2 2001-10-21 11:42:15 richard Exp $-->
+<!-- $Id: file.index,v 1.2.2.1 2002-02-06 04:05:54 richard Exp $-->
 <tr>
     <property name="name">
-        <td><display call="link('name', is_download=1)"></td>
+        <td><display call="download('name')"></td>
     </property>
     <property name="type">
         <td><display call="plain('type')"></td>
