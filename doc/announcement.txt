@@ -14,6 +14,7 @@ from Ka-Ping Yee in the Software Carpentry "Track" design competition.
 - hack to fix some anydbm export problems (sf bug 1081454)
 - ignore AutoReply messages (sf patch 1085051)
 - fix ZRoundup syntax error (sf bug 1122335)
+- fix RDBMS clear() so it resets all class itemid counters
 
 If you're upgrading from an older version of Roundup you *must* follow
 the "Software Upgrade" guidelines given in the maintenance documentation.

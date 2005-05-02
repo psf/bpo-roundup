@@ -16,7 +16,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 # 
-# $Id: setup.py,v 1.64.2.11 2004-11-29 02:02:06 anthonybaxter Exp $
+# $Id: setup.py,v 1.64.2.12 2005-05-02 05:58:15 richard Exp $
 
 from distutils.core import setup, Extension
 from distutils.util import get_platform
@@ -216,34 +216,17 @@ from Ka-Ping Yee in the Software Carpentry "Track" design competition.
 If you're upgrading from an older version of Roundup you *must* follow
 the "Software Upgrade" guidelines given in the maintenance documentation.
 
-This is a bug fix release (with one feature cleaning up an API
-inconsistency):
-
-Feature:
-- DateHTMLProperty.field() accepts format string (thanks Wil Cooley)
-
-Fixed:
-- popup listing uses filter args (thanks Marlon van den Berg)
-- fixed editing of message contents
-- loosened the detection of issue cross-references in messages
-- open CSV files in "universal newline" mode
-- s/Modifed/Modified (thanks donfu)
-- applied patch fixing some form handling issues in ZRoundup (thanks Chris
-  Withers)
-- enforce View Permission when serving file content (sf bug 1050470)
-- don't index common words (sf bug 1046612)
-- set the current username correctly after rego (sf bug 1048398)
-- don't wrap query.item.html in a <span> (thanks Roch'e Compaan)
-- TAL expressions like 'request/show/whatever' return True
-  if the request does not contain explicit @columns list
-- NumberHTMLProperty should return '' not "None" if not set (thanks
-  William)
-- ensure multilink ordering in RDBMS backends (thanks Marcus Priesch, sf
-  bug 950963)
-- always honor indexme property on Strings (sf patch 1063711)
-- make hyperdb value parsing errors readable in mailgw errors
-- make anydbm journal export handle removed properties
-- allow use of XML templates again
+- handle capitalisation of class names in text hyperlinking (sf bug
+  1101043)
+- quote full-text search text in URL generation
+- fixed problem migrating mysql databases
+- fix search_checkboxes macro (sf patch 1113828)
+- fix bug in date editing in Metakit
+- allow suppression of search_text in indexargs_form (sf bug 1101548)
+- hack to fix some anydbm export problems (sf bug 1081454)
+- ignore AutoReply messages (sf patch 1085051)
+- fix ZRoundup syntax error (sf bug 1122335)
+- fix RDBMS clear() so it resets all class itemid counters
 ''',
         author = "Richard Jones",
         author_email = "richard@users.sourceforge.net",
@@ -251,7 +234,7 @@ Fixed:
         download_url = 'http://sourceforge.net/project/showfiles.php?group_id=31577',
         packages = packagelist,
         classifiers = [
-            'Development Status :: 4 - Beta',
+            'Development Status :: 5 - Production/Stable',
             'Environment :: Console',
             'Environment :: Web Environment',
             'Intended Audience :: End Users/Desktop',
