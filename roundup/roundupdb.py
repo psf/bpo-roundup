@@ -305,7 +305,7 @@ class IssueClass:
         # add author information
         if authid:
             if len(self.get(nodeid,'messages')) == 1:
-                m.append(_("New submission from %(authname)s%:")
+                m.append(_("New submission from %(authname)s:")
                     % locals())
             else:
                 m.append(_("%(authname)s added the comment:")
