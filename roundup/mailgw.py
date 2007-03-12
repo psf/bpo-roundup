@@ -882,8 +882,13 @@ The mail gateway is not properly set up. Please contact
             if author == anonid:
                 # we're anonymous and we need to be a registered user
                 from_address = from_list[0][1]
+                tracker_web = self.instance.config.TRACKER_WEB
                 raise Unauthorized, _("""
-You are not a registered user.
+You are not a registered user. Please register at:
+
+%(tracker_web)suser?@template=register
+
+...before sending mail to the tracker.
 
 Unknown address: %(from_address)s
 """) % locals()
