@@ -250,7 +250,7 @@ class IssueClass:
     sendmessage = nosymessage
 
     def send_message(self, nodeid, msgid, note, sendto, from_address=None,
-            bcc_sendto=[]):
+            bcc_sendto=[], authid=None):
         '''Actually send the nominated message from this node to the sendto
            recipients, with the note appended.
         '''
@@ -280,7 +280,12 @@ class IssueClass:
         title = self.get(nodeid, 'title') or '%s message copy'%cn
 
         # figure author information
-        if msgid:
+        if authid:
+            authname = users.get(authid, 'realname')
+            if not authname:
+                authname = users.get(authid, 'username', '')
+            authaddr = users.get(authid, 'address', '')            
+        elif msgid:
             authid = messages.get(msgid, 'author')
             authname = users.get(authid, 'realname')
             if not authname:
@@ -304,12 +309,15 @@ class IssueClass:
 
         # add author information
         if authid:
-            if len(self.get(nodeid,'messages')) == 1:
+            if msgid and len(self.get(nodeid,'messages')) == 1:
                 m.append(_("New submission from %(authname)s:")
                     % locals())
-            else:
+            elif msgid:
                 m.append(_("%(authname)s added the comment:")
                     % locals())
+            else:
+                m.append(_("Changes by %(authname)s:")
+                         % locals())
         else:
             m.append(_("System message:"))
         m.append('')
