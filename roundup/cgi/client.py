@@ -349,9 +349,28 @@ class Client:
         if now - last_clean < hour:
             return
 
+        # This is a bit ugly, but right now, I'm too lazy to fix a new API
+        # in all rdbms-based backends to cope with this problem that only
+        # appears on Postgres.
+        try:
+            from psycopg import ProgrammingError
+        except ImportError:
+            from psycopg2.psycopg1 import ProgrammingError
+        except ImportError:
+            ProgrammingError = None
+
         sessions.clean(now)
         self.db.getOTKManager().clean(now)
-        sessions.set('last_clean', last_use=time.time())
+        try:
+            sessions.set('last_clean', last_use=time.time())
+        except ProgrammingError, err:
+            response = str(err).split('\n')[0]
+            if -1 != response.find('ERROR') and \
+               -1 != response.find('could not serialize access due to concurrent update'):
+                # Another client just updated, and we're running on
+                # serializable isolation.
+                # See http://www.postgresql.org/docs/7.4/interactive/transaction-iso.html
+                return 
         self.db.commit(fail_ok=True)
 
     def determine_charset(self):
