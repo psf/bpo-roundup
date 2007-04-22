@@ -370,6 +370,7 @@ class Client:
                 # Another client just updated, and we're running on
                 # serializable isolation.
                 # See http://www.postgresql.org/docs/7.4/interactive/transaction-iso.html
+                self.db.rollback()
                 return 
         self.db.commit(fail_ok=True)
 
