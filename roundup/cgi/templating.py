@@ -1231,7 +1231,7 @@ class HTMLProperty(HTMLInputMixin, HTMLPermissions):
         return self.is_edit_ok()
 
 class StringHTMLProperty(HTMLProperty):
-    hyper_re = re.compile(r'((?P<url>\w{3,6}://\S+)|'
+    hyper_re = re.compile(r'((?P<url>\w{3,6}://\S+[\w/])|'
                           r'(?P<email>[-+=%/\w\.]+@[\w\.\-]+)|'
                           r'(?P<item>(?P<class>[A-Za-z_]+)(\s*)(?P<id>\d+)))')
     def _hyper_repl(self, match):
