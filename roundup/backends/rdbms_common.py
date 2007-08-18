@@ -2636,7 +2636,7 @@ class FileClass(hyperdb.FileClass, Class):
         Note that the content prop is indexed separately, hence no indexme.
         '''
         d = Class.getprops(self, protected=protected).copy()
-        d['content'] = hyperdb.String()
+        d['content'] = hyperdb.String(indexme='yes')
         return d
 
     def set(self, itemid, **propvalues):
