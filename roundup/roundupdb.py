@@ -425,7 +425,8 @@ class IssueClass:
                 # Assume messages are sorted by increasing message number here
                 if msgs[0] != nodeid:
                     inreplyto = messages.get(msgs[0], 'messageid')
-                    writer.addheader('In-Reply-To', inreplyto)
+                    if inreplyto:
+                        writer.addheader('In-Reply-To', inreplyto)
             # end additional headers
 
             # attach files
