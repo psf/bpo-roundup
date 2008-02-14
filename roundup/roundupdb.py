@@ -423,7 +423,9 @@ class IssueClass:
                 # Default the reply to the first message
                 msgs = self.get(nodeid, 'messages')
                 # Assume messages are sorted by increasing message number here
-                if msgs[0] != nodeid:
+                # If the issue is just being created, and the submitter didn't
+                # provide a message, then msgs will be empty.
+                if msgs and msgs[0] != nodeid:
                     inreplyto = messages.get(msgs[0], 'messageid')
                     if inreplyto:
                         writer.addheader('In-Reply-To', inreplyto)
