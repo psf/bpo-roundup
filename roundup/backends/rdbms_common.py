@@ -2175,7 +2175,7 @@ class Class(hyperdb.Class):
                                 d[entry] = entry
                             l = []
                             if d.has_key(None) or not d:
-                                del d[None]
+                                if d.has_key(None):del d[None]
                                 l.append('_%s._%s is NULL'%(pln, k))
                             if d:
                                 v = d.keys()
