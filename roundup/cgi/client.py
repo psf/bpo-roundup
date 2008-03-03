@@ -359,9 +359,9 @@ class Client:
         except ImportError:
             ProgrammingError = None
 
-        sessions.clean(now)
-        self.db.getOTKManager().clean(now)
         try:
+            sessions.clean(now)
+            self.db.getOTKManager().clean(now)
             sessions.set('last_clean', last_use=time.time())
         except ProgrammingError, err:
             response = str(err).split('\n')[0]
