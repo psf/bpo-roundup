@@ -998,11 +998,13 @@ class ExportCSVAction(Action):
                 self.client.STORAGE_CHARSET, self.client.charset, 'replace')
 
         writer = csv.writer(wfile)
-        writer.writerow(columns)
+        # mvl: protect against connection loss
+        self.client._socket_op(writer.writerow, columns)
 
         # and search
         for itemid in klass.filter(matches, filterspec, sort, group):
-            writer.writerow([str(klass.get(itemid, col)) for col in columns])
+            # mvl: likewise
+            self.client._socket_op(writer.writerow, [str(klass.get(itemid, col)) for col in columns])
 
         return '\n'
 
