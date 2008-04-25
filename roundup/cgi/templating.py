@@ -1283,14 +1283,14 @@ class StringHTMLProperty(HTMLProperty):
         """ Render a "hyperlinked" version of the text """
         return self.plain(hyperlink=1)
 
-    def plain(self, escape=0, hyperlink=0):
+    def plain(self, escape=0, hyperlink=0, unchecked=0):
         """Render a "plain" representation of the property
 
         - "escape" turns on/off HTML quoting
         - "hyperlink" turns on/off in-text hyperlinking of URLs, email
           addresses and designators
         """
-        if not self.is_view_ok():
+        if not self.is_view_ok() and not unchecked:
             return self._('[hidden]')
 
         if self._value is None:
