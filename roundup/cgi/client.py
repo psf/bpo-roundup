@@ -380,8 +380,20 @@ class Client:
             if self.instance.config.WEB_DEBUG:
                 self.write_html(cgitb.html(i18n=self.translator))
             else:
-                self.mailer.exception_message()
+                self.mailer.exception_message(self.exception_data())
                 return self.write_html(self._(error_message))
+
+    def exception_data(self):
+        result = ''
+        try:
+            for k,v in self.env.items():
+                result += "%s=%s\n" % (k,v)
+            for k,v in self.request.headers.items():
+                result += "%s=%s\n" % (k,v)
+            result += "user:" + repr(self.user) + "\n"
+        except:
+            pass
+        return result
 
     def clean_sessions(self):
         """Age sessions, remove when they haven't been used for a week.
