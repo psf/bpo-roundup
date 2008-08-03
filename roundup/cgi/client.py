@@ -410,6 +410,8 @@ class Client:
         hour = 60*60
         now = time.time()
         if now - last_clean < hour:
+            # Release the database lock obtained when looking at last_clean
+            self.db.rollback()
             return
 
         # This is a bit ugly, but right now, I'm too lazy to fix a new API
