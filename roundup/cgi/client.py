@@ -866,7 +866,7 @@ class Client:
     # these are the actions that are available
     actions = (
         ('edit',        EditItemAction),
-        ('editcsv',     EditCSVAction),
+        # ('editcsv',     EditCSVAction),
         ('new',         NewItemAction),
         ('register',    RegisterAction),
         ('confrego',    ConfRegoAction),
