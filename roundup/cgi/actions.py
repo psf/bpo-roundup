@@ -59,12 +59,12 @@ class Action:
                 '%(action)s the %(classname)s class.')%info
 
     _marker = []
-    def hasPermission(self, permission, classname=_marker, itemid=None):
+    def hasPermission(self, permission, classname=_marker, itemid=None, property=None):
         """Check whether the user has 'permission' on the current class."""
         if classname is self._marker:
             classname = self.client.classname
         return self.db.security.hasPermission(permission, self.client.userid,
-            classname=classname, itemid=itemid)
+            classname=classname, itemid=itemid, property=property)
 
     def gettext(self, msgid):
         """Return the localized translation of msgid"""
@@ -127,7 +127,7 @@ class RetireAction(Action):
     def hasPermission(self, permission, classname=Action._marker, itemid=None):
         if itemid is None:
             itemid = self.nodeid
-        return Action.hasPermission(self, permission, classname, itemid)
+        return Action.hasPermission(self, permission, classname, itemid, '__retired__')
 
 class SearchAction(Action):
     name = 'search'
