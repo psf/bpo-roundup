@@ -346,7 +346,8 @@ class IssueClass:
                 m.append(_("Changes by %(authname)s:")
                          % locals())
             else:
-                m.append(_("Change by %(authname)s%(authaddr)s:") % locals())
+                m.append(_("Changes by %(authname)s%(authaddr)s:")
+                         % locals())
             m.append('')
 
         # add the content
