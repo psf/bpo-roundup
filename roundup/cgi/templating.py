@@ -2400,13 +2400,21 @@ class HTMLRequest(HTMLInputMixin):
         for name in ':pagesize @pagesize'.split():
             if self.form.has_key(name):
                 self.special_char = name[0]
-                self.pagesize = int(self.form.getfirst(name))
+                try:
+                    self.pagesize = int(self.form.getfirst(name))
+                except ValueError:
+                    # Not an integer. XXX report to user somehow?
+                    pass                    
 
         self.startwith = 0
         for name in ':startwith @startwith'.split():
             if self.form.has_key(name):
                 self.special_char = name[0]
-                self.startwith = int(self.form.getfirst(name))
+                try:
+                    self.startwith = int(self.form.getfirst(name))
+                except ValueError:
+                    # Not an integer. XXX report to user somehow?
+                    pass
 
         # dispname
         if self.form.has_key('@dispname'):
