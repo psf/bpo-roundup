@@ -1018,6 +1018,14 @@ class ExportCSVAction(Action):
                 # the same bogus field specs
                 raise exceptions.SeriousError, "Property %s does not exist" % c
 
+        # validate the request
+        allprops = klass.getprops()
+        for c in filterspec.keys() + columns + [x[1] for x in group + sort]:
+            if not allprops.has_key(c):
+                # Can't use FormError, since that would try to use
+                # the same bogus field specs
+                raise exceptions.SeriousError, "Property %s does not exist" % c
+
         # full-text search
         if request.search_text:
             matches = self.db.indexer.search(
