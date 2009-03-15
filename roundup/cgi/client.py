@@ -1033,15 +1033,14 @@ class Client:
                 to = [self.mailer.config.ADMIN_EMAIL]
                 subject = "Templating Error: %s" % exc_info[1]
                 content = cgitb.pt_html()
-                message, writer = self.mailer.get_standard_message(
-                    to, subject)
-                writer.addheader('Content-Transfer-Encoding', 'quoted-printable')
-                body = writer.startbody('text/html; charset=utf-8')
-                content = StringIO(content)
-                quopri.encode(content, body, 0)
-                self.mailer.smtp_send(to, message)
+                message = self.mailer.get_standard_message(to, subject)
+                # delete existing content-type headers
+                del message['Content-type']
+                message['Content-type'] = 'text/html; charset=utf-8'
+                message.set_payload(content)
+                self.mailer.smtp_send(to, str(message))
                 # Now report the error to the user.
-                return self._(error_message)
+                return self._(self.error_message)
             except:
                 # Reraise the original exception.  The user will
                 # receive an error message, and the adminstrator will

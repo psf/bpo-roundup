@@ -55,7 +55,7 @@ class Mailer:
         Subject and author are encoded using the EMAIL_CHARSET from the
         config (default UTF-8).
 
-        Returns a Message object and body part writer.
+        Returns a Message object.
         '''
         # encode header values if they need to be
         charset = getattr(self.config, 'EMAIL_CHARSET', 'utf-8')
