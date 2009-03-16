@@ -14,7 +14,7 @@ from roundup.cgi.actions import *
 from roundup.exceptions import *
 from roundup.cgi.exceptions import *
 from roundup.cgi.form_parser import FormParser
-from roundup.mailer import Mailer, MessageSendError
+from roundup.mailer import Mailer, MessageSendError, encode_quopri
 from roundup.cgi import accept_language
 from roundup import xmlrpc
 
@@ -1038,6 +1038,7 @@ class Client:
                 del message['Content-type']
                 message['Content-type'] = 'text/html; charset=utf-8'
                 message.set_payload(content)
+                encode_quopri(message)
                 self.mailer.smtp_send(to, str(message))
                 # Now report the error to the user.
                 return self._(self.error_message)

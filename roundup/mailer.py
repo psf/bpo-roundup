@@ -116,6 +116,7 @@ class Mailer:
         """
         message = self.get_standard_message(to, subject, author)
         message.set_payload(content)
+        encode_quopri(message)
         self.smtp_send(to, str(message))
 
     def bounce_message(self, bounced_message, to, error,
