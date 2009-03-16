@@ -23,6 +23,7 @@ def encode_quopri(msg):
     orig = msg.get_payload()
     encdata = quopri.encodestring(orig)
     msg.set_payload(encdata)
+    del msg['Content-Transfer-Encoding']
     msg['Content-Transfer-Encoding'] = 'quoted-printable'
 
 class Mailer:
@@ -70,8 +71,8 @@ class Mailer:
             message = MIMEMultipart()
         else:
             message = Message()
+            message.set_type('text/plain')
             message.set_charset(charset)
-            message['Content-Type'] = 'text/plain; charset="%s"'%charset
 
         try:
             message['Subject'] = subject.encode('ascii')
