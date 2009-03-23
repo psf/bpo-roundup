@@ -2332,7 +2332,9 @@ class HTMLRequest(HTMLInputMixin):
                     dirs.append(self.form.getfirst(dirkey))
             if fields: # only try other special char if nothing found
                 break
-        cls = self.client.db.getclass(self.classname)
+        cls = None
+        if self.classname:
+            cls = self.client.db.getclass(self.classname)
         for f, d in map(None, fields, dirs):
             if f.startswith('-'):
                 dir, name = '-', f[1:]
@@ -2340,7 +2342,7 @@ class HTMLRequest(HTMLInputMixin):
                 dir, name = '-', f
             else:
                 dir, name = '+', f
-            if cls.get_transitive_prop(name) is None:
+            if cls and cls.get_transitive_prop(name) is None:
                 self.client.error_message.append("Unknown property "+name)
             else:
                 var.append((dir, name))
