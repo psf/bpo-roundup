@@ -69,7 +69,7 @@ class Mailer:
             try:
                 name.encode('ascii')
             except UnicodeError:
-                name = Charset(charset).header_encode(name)
+                name = Charset(charset).header_encode(name.encode(charset))
             author = formataddr((name, author[1]))
 
         if multipart:
