@@ -13,6 +13,7 @@ from roundup.date import get_timezone
 from email.Utils import formatdate, formataddr
 from email.Message import Message
 from email.Header import Header
+from email.Charset import Charset
 from email.MIMEText import MIMEText
 from email.MIMEMultipart import MIMEMultipart
 
@@ -65,6 +66,10 @@ class Mailer:
             author = formataddr((tracker_name, self.config.ADMIN_EMAIL))
         else:
             name = unicode(author[0], 'utf-8')
+            try:
+                name.encode('ascii')
+            except UnicodeError:
+                name = Charset(charset).header_encode(name)
             author = formataddr((name, author[1]))
 
         if multipart:
@@ -79,10 +84,9 @@ class Mailer:
         except UnicodeError:
             message['Subject'] = Header(subject, charset)
         message['To'] = ', '.join(to)
-        try:
-            message['From'] = author.encode('ascii')
-        except UnicodeError:
-            message['From'] = Header(author, charset)
+        # This should not fail, since we already encoded non-ASCII
+        # name characters
+        message['From'] = author.encode('ascii')
         message['Date'] = formatdate(localtime=True)
 
         # add a Precedence header so autoresponders ignore us
