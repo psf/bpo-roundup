@@ -244,7 +244,7 @@
   <div class="footer">
 <!-- Created: Wed Jan 14 11:55:38 EST 2009 -->
 <!-- hhmts start -->
-Last modified: Mon Jun  1 15:00:08 EDT 2009
+Last modified: Wed Jun  3 00:02:37 EDT 2009
 <!-- hhmts end -->
   </div> <!-- footer -->
   <pre tal:condition="request/form/deissue | nothing" tal:content="request"></pre>
@@ -326,7 +326,7 @@ Could extend it (METAL 1.1 attribute "extend-macro")
 <!-- currently, there is no convenient API to get a list of all roles -->
 <td metal:define-macro="search_select_roles"
 	  tal:define="onchange onchange | nothing">
-  <select name=roles id=roles tal:attributes="onchange onchange">
+  <select name="roles" id="roles" tal:attributes="onchange onchange">
     <option value="" i18n:translate="">don't care</option>
     <option value="" i18n:translate="" disabled="disabled">------------</option>
     <option value="User">User</option>
