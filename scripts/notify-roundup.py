@@ -183,7 +183,7 @@ def notify_local_inner(db, tracker_home, repos):
     date = roundup.date.Date(repos.date)
     msgid = db.msg.create(content=repos.message, summary=repos.summary,
         author=userid, date=date, revision=svn_rev_id)
-    messages = db.issue.get(repos.itemid, 'messages')
+    messages = db.bug.get(repos.itemid, 'messages')
     messages.append(msgid)
     klass = db.getclass(repos.klass)
     klass.set(repos.itemid, messages=messages)
