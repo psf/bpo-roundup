@@ -9,6 +9,25 @@
 #   creator = Link('user')
 #   actor = Link('user')
 
+
+# This is the repository class, then you can see/edit repositories in pages like
+# "http://tracker/url/svn_repo1"
+svn_repo = Class(db, "svn_repo",
+name=String(),
+host=String(),
+path=String(),
+viewcvs_url=String())
+svn_repo.setkey('name')
+
+# Stores revision data, lets you see/edit revisions in pages like
+# "http://tracker/url/svn_rev1". The svn_rev.item.html template is currently
+# broken, but this works fine without it.
+svn_rev = Class(db, "svn_rev",
+repository=Link('svn_repo'),
+revision=Number())
+
+
+
 # Component
 component = Class(db, 'component',
                   name=String(),
@@ -78,8 +97,15 @@ user = Class(db, "user",
              alternate_addresses=String(),
              queries=Multilink('query'),
              roles=String(),     # comma-separated string of Role names
-             timezone=String())
+             timezone=String(),
+             svn_name=String())
+
 user.setkey("username")
+
+# Permissions for revision creation and repository viewing.
+for role in ('User',):
+    db.security.addPermissionToRole(role, 'Create', 'svn_rev')
+    db.security.addPermissionToRole(role, 'View', 'svn_repo')
 
 # FileClass automatically gets this property in addition to the Class ones:
 #   content = String()    [saved to disk in <tracker home>/db/files/]
@@ -91,7 +117,8 @@ msg = FileClass(db, "msg",
                 summary=String(),
                 files=Multilink("file"),
                 messageid=String(),
-                inreplyto=String())
+                inreplyto=String(),
+                revision=Link("svn_rev"))
 
 file = FileClass(db, "file",
                 name=String(),
