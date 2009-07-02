@@ -47,10 +47,17 @@ def main(pool):
     cfg.read(sys.argv[1])
     repos_dir = sys.argv[2]
     revision = int(sys.argv[3])
-
-    # get a handle on the revision in the repository
-    repos = Repository(repos_dir, revision, pool)
-
+    
+    vcs_type = cfg.get('vcs', 'type')
+    
+    # get a handle on the revision in the VCS repository
+    if vcs_type == 'svn':
+        repos = SVNRepository(repos_dir, revision, pool)
+    elif vcs_type == 'hg':
+        repos = HGRepository(repos_dir, revision, pool)
+    else:
+        logging.error('we currently don\'t support %s VCS type'%vcs_type)
+      
     repos.klass = cfg.get('main', 'item-class')
     if not repos.extract_info():
         return
@@ -237,8 +244,15 @@ def generate_list(output, header, changelist, selection):
         output.write('      - copied%s from r%d, %s%s\n'
                      % (text, change.base_rev, change.base_path[1:], is_dir))
 
-class Repository:
-    '''Hold roots and other information about the repository. From mailer.py
+class HGRepository:
+    '''Holds roots and other information about the hg repository.'
+    '''
+    
+    def __init__(self,repos_dir,rev,pool):
+        pass
+        
+class SVNRepository:
+    '''Hold roots and other information about the svn repository. From mailer.py
     '''
     def __init__(self, repos_dir, rev, pool):
         self.repos_dir = repos_dir
