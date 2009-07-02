@@ -11,19 +11,19 @@
 
 
 # This is the repository class, then you can see/edit repositories in pages like
-# "http://tracker/url/svn_repo1"
-svn_repo = Class(db, "svn_repo",
+# "http://tracker/url/vcs_repo1"
+vcs_repo = Class(db, "vcs_repo",
 name=String(),
 host=String(),
 path=String(),
-viewcvs_url=String())
-svn_repo.setkey('name')
+webview_url=String())
+vcs_repo.setkey('name')
 
 # Stores revision data, lets you see/edit revisions in pages like
-# "http://tracker/url/svn_rev1". The svn_rev.item.html template is currently
+# "http://tracker/url/vcs_rev1". The vcs_rev.item.html template is currently
 # broken, but this works fine without it.
-svn_rev = Class(db, "svn_rev",
-repository=Link('svn_repo'),
+vcs_rev = Class(db, "vcs_rev",
+repository=Link('vcs_repo'),
 revision=Number())
 
 
@@ -98,14 +98,14 @@ user = Class(db, "user",
              queries=Multilink('query'),
              roles=String(),     # comma-separated string of Role names
              timezone=String(),
-             svn_name=String())
+             vcs_name=String())
 
 user.setkey("username")
 
 # Permissions for revision creation and repository viewing.
 for role in ('User',):
-    db.security.addPermissionToRole(role, 'Create', 'svn_rev')
-    db.security.addPermissionToRole(role, 'View', 'svn_repo')
+    db.security.addPermissionToRole(role, 'Create', 'vcs_rev')
+    db.security.addPermissionToRole(role, 'View', 'vcs_repo')
 
 # FileClass automatically gets this property in addition to the Class ones:
 #   content = String()    [saved to disk in <tracker home>/db/files/]
@@ -118,7 +118,7 @@ msg = FileClass(db, "msg",
                 files=Multilink("file"),
                 messageid=String(),
                 inreplyto=String(),
-                revision=Link("svn_rev"))
+                revision=Link("vcs_rev"))
 
 file = FileClass(db, "file",
                 name=String(),
