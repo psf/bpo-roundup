@@ -62,7 +62,9 @@ def undo_title(db, cl, nodeid, newvalues):
 
 def init(db):
     db.msg.audit('create', parse_message)
-    db.issue.audit('set', undo_title)
+    repos.klass = cfg.get('main', 'item-class')
+    klass = db.getclass(repos.klass)
+    klass.audit('set', undo_title)
 
 #
 # 2005-05-16 - 1.2
