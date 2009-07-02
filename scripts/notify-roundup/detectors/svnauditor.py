@@ -14,18 +14,18 @@ import roundup.date
 
 import ConfigParser
 
-svn_msg = re.compile('^(revision|repos|host|date|summary)=(.*)$')
+vcs_msg = re.compile('^(revision|repos|host|date|summary)=(.*)$')
 ini_path = '/path/to/notify-roundup.ini'
 
 def parse_message(db, cl, nodeid, newvalues):
-    '''Parse an incoming message for Subversion information.
+    '''Parse an incoming message for VCS (Subversion right now) information.
     '''
 
     # collect up our meta-data from the message
     info = {}
     content = []
     for line in newvalues.get('content', '').splitlines():
-        m = svn_msg.match(line)
+        m = vcs_msg.match(line)
         if not m:
             content.append(line)
             continue
@@ -37,14 +37,14 @@ def parse_message(db, cl, nodeid, newvalues):
 
     # look up the repository id
     try:
-        svn_repo_id = db.svn_repo.stringFind(path=info['repos'],
+        vcs_repo_id = db.vcs_repo.stringFind(path=info['repos'],
             host=info['host'])[0]
     except IndexError:
         #logger.error('no repository %s in tracker'%repos.repos_dir)
         return
 
     # create the subversion revision item
-    svn_rev_id = db.svn_rev.create(repository=svn_repo_id,
+    vcs_rev_id = db.vcs_rev.create(repository=vcs_repo_id,
         revision=int(info['revision']))
 
     # minor bit of content cleaning - remove the single leading blank line
@@ -55,11 +55,11 @@ def parse_message(db, cl, nodeid, newvalues):
     newvalues['content'] = '\n'.join(content)
     newvalues['date'] = roundup.date.Date(info['date'])
     newvalues['summary'] = info['summary']
-    newvalues['revision'] = svn_rev_id
+    newvalues['revision'] = vcs_rev_id
 
 def undo_title(db, cl, nodeid, newvalues):
-    '''Don't change the title of issues to "SVN commit message..."'''
-    if newvalues.get('title', '').lower().startswith('svn commit message'):
+    '''Don't change the title of issues to "vcs commit message..."'''
+    if newvalues.get('title', '').lower().startswith('vcs commit message'):
         del newvalues['title']
 
 
