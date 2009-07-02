@@ -1,0 +1,53 @@
+Roundup devel tracker in love with subversion
+=============================================
+
+This document serves a tutorial on setting up a Roundup instance
+with devel template featuring subversion integration. Several assumptions
+are made in this tutorial:
+
+1) You've checked out gsoc-2009 Roundup branch
+2) You know how to setup subversion repository
+3) You want to work with a local subversion repository
+
+Let's follow the steps:
+
+1) Setup subversion post-commit hook
+
+a) Rename post-commit.tmpl to post-commit
+b) Make sure its executable (chmod +x)
+c) Add the following to it:
+
+PYTHON=/usr/bin/python
+NOTIFY=/path/to/notify-roundup.py[1]
+CONFIG=/path/to/notify-roundup.ini[1]
+PYTHONPATH=/path/to/roundup/instance "$PYTHON" "$NOTIFY" "$CONFIG" "$REPOS" "$REV"
+
+[1] notify-roundup.py and notify-roundup.ini can be found in scripts/notify-roundup
+
+2) Modify notify-roundup.ini
+
+a) Set tracker home: tracker-home = /path/to/tracker-home
+b) Set address mappings
+
+3) Copy html templates from scripts/notify-roundup/html to share/roundup/templates/devel/html
+
+4) Copy revision_info.py extension from scripts/notify-roundup/extensions to share/roundup/templates/devel/extensions
+
+5) Now, now, this wasn't so hard :)
+
+How-to format subversion commit message
+=======================================
+
+By default, notify-roundup handles bugs.
+To change status of bug1, format your commit
+message like this:
+
+bug1 pending
+
+Current limitations
+===================
+
+1) Notify-roundup can work only with one item-class
+2) Notify-roundup can only modify Status
+
+We are aware of the those limitations, and have plans to alleviate them in the future.

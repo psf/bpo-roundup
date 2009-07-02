@@ -1,0 +1,31 @@
+<tal:block metal:use-macro="templates/page/macros/frame">
+<title metal:fill-slot="head_title">
+ SVN Revision <span tal:replace="context/revision" />
+</title>
+<tal:block metal:fill-slot="body_title">
+ SVN Revision <span tal:replace="context/revision" />
+</tal:block>
+
+<td class="content" metal:fill-slot="content">
+
+<p tal:condition="not:context/is_view_ok" i18n:translate="">You are not
+    allowed to view this page.</p>
+
+<div tal:condition="context/is_view_ok">
+
+<table class="messages">
+<tal:block repeat="file python:utils.getRevisionInfo(context)">
+ <tr>
+  <th tal:content="string: ${file/action} ${file/path}" />
+ </tr>
+ <tr tal:condition="file/info"><td><pre tal:content="file/info" /></td></tr>
+</tal:block>
+</table>
+
+<tal:block tal:condition="context/id" tal:replace="structure context/history" />
+
+</div>
+
+</td>
+
+</tal:block>
