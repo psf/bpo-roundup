@@ -71,19 +71,4 @@ def init(db):
     klass = db.getclass(fetch_klass)
     klass.audit('set', undo_title)
 
-#
-# 2005-05-16 - 1.2
-# 
-#   - Status wasn't being set by ID in local mode
-#   - Wasn't catching errors in local changes, hence not cleaning up db
-#     correctly
-#   - svnauditor.py wasn't handling the fifth argument from notify-roundup.py
-#   - viewcvs_url formatting wasn't quite right
-#
-# 2005-05-04 - 1.1
-#   - Several fixes from  Ron Alford
-#   - Don't change issue titles to "SVN commit message..."
-# 
-# 2005-04-26 - 1.0
-#   - Initial version released
-#
+
