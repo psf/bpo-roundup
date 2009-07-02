@@ -232,6 +232,7 @@
 <table class="messages" tal:condition="context/messages">
  <tr><th colspan="4" class="header" i18n:translate="">Messages</th></tr>
  <tal:block tal:repeat="msg context/messages">
+
   <tr>
    <th><a tal:attributes="href string:msg${msg/id}"
     i18n:translate="">msg<tal:x replace="msg/id" i18n:name="id" /></a></th>
@@ -239,22 +240,23 @@
        i18n:name="author" /> (<tal:x replace="msg/author"/>)</th>
    <th i18n:translate="">Date: <tal:x replace="python:msg.date.pretty('%Y-%m-%d %H:%M')"
        i18n:name="date" /></th>
-   <th>
     <form style="padding:0" tal:condition="msg/is_edit_ok"
           tal:attributes="action string:bug${context/id}">
      <input type="hidden" name="@remove@messages" tal:attributes="value msg/id">
      <input type="hidden" name="@action" value="edit">
      <input type="submit" value="remove" i18n:attributes="value">
     </form>
+  </tr>
+
+
+   <tr tal:condition="msg/revision">
+   <th tal:define="r msg/revision" colspan="4">
+    <a tal:attributes="href string:svn_rev${r/id}"
+       tal:content="string:Subversion revision ${r/revision}" />
    </th>
   </tr>
+  
   <tr>
-  <tr tal:condition="msg/revision">
- <th tal:define="r msg/revision" colspan="4">
-  <a tal:attributes="href string:svn_rev${r/id}"
-     tal:content="python:'Subversion revision %d'%r['revision']" />
- </th>
- </tr>
 
    <td colspan="4" class="content">
     <pre tal:condition="python:msg.content.is_view_ok()"
