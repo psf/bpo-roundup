@@ -15,6 +15,7 @@ import roundup.date
 import ConfigParser
 
 svn_msg = re.compile('^(revision|repos|host|date|summary)=(.*)$')
+ini_path = '/path/to/notify-roundup.ini'
 
 def parse_message(db, cl, nodeid, newvalues):
     '''Parse an incoming message for Subversion information.
@@ -65,8 +66,9 @@ def undo_title(db, cl, nodeid, newvalues):
 def init(db):
     db.msg.audit('create', parse_message)
     cfg = ConfigParser.ConfigParser()
-    repos.klass = cfg.get('main', 'item-class')
-    klass = db.getclass(repos.klass)
+    cfg.read(ini_path)
+    fetch_klass = cfg.get('main', 'item-class')
+    klass = db.getclass(fetch_klass)
     klass.audit('set', undo_title)
 
 #
