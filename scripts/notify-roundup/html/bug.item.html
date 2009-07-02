@@ -251,8 +251,8 @@
 
    <tr tal:condition="msg/revision">
    <th tal:define="r msg/revision" colspan="4">
-    <a tal:attributes="href string:svn_rev${r/id}"
-       tal:content="string:Subversion revision ${r/revision}" />
+    <a tal:attributes="href string:vcs_rev${r/id}"
+       tal:content="string:VCS revision ${r/revision}" />
    </th>
   </tr>
   
