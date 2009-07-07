@@ -161,6 +161,7 @@ def notify_local_inner(db, tracker_home, repos):
         logger.error('no repository %s in tracker'%repos.repos_dir)
         raise Failed
 
+    '''
     # log in as the appropriate user
     try:
         matches = db.user.stringFind(vcs_name=repos.author)
@@ -171,12 +172,13 @@ def notify_local_inner(db, tracker_home, repos):
         userid = matches[0]
     else:
         try:
-            userid = db.user.lookup(repos.author)
-        #except KeyError:
-            #raise Failed, 'no Roundup user matching %s'%repos.author
-    #username = db.user.get(userid, 'username')
+        userid = db.user.lookup(repos.author)
+        except KeyError:
+            raise Failed, 'no Roundup user matching %s'%repos.author
+    username = db.user.get(userid, 'username')
+    '''
     username = "admin"
-    db.close()
+    #db.close()
 
     # tell Roundup
     tracker = roundup.instance.open(tracker_home)
