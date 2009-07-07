@@ -295,6 +295,8 @@ class HGRepository:
         self.status = m.group(4)
 
         logger.debug('Roundup info item=%r, status=%r'%(issue, self.status))
+        # Generate email for the various groups and option-params.
+        output = cStringIO.StringIO()
         
         output.write('Log:\n%s\n'%log_mines)
 
