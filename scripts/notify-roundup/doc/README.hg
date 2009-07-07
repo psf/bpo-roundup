@@ -1,0 +1,53 @@
+Roundup devel tracker in love with Mercurial
+=============================================
+
+This document serves a tutorial on setting up a Roundup instance
+with devel template featuring Mercurial integration. Several assumptions
+are made in this tutorial:
+
+1) You've checked out gsoc-2009 Roundup branch
+2) You know how to setup mercurial repository
+3) You want to work with a local mercurial repository
+
+Let's follow the steps:
+
+1) Setup Mercurial post-commit hook
+
+a) Copy notify-roundup.sh from scripts/notify-roundup/hg/notify-roundup.sh to somewhere
+b) Make sure its executable (chmod +x)
+c) Add the following to /path/to/hg/repo/.hg/hgrc
+
+[hooks]
+commit = /path/to/notify-roundup.sh
+
+[1] notify-roundup.py and notify-roundup.ini can be found in scripts/notify-roundup
+
+2) Modify notify-roundup.ini
+
+a) Set tracker home: tracker-home = /path/to/tracker-home
+b) Set address mappings
+c) Set VCS type to hg
+
+3) Replace "/home/mario/Projects/roundup-hg" in notify-roundup.py with path to your repository
+
+How-to format mercurial commit message
+=======================================
+
+By default, notify-roundup handles bugs.
+To change status of bug1, format your commit
+message like this:
+
+bug1 pending
+
+Current limitations and bugs
+============================
+
+1) Notify-roundup can work only with one item-class
+2) Notify-roundup can only modify Status
+3) Commit date isn't parsed 
+4) Summary isn't composed
+5) HG repository path is hard-coded
+6) Changed files should be generated and posted
+7) Diff should be created for vcs_rev page
+
+We are aware of the those limitations, and have plans to alleviate them in the future.
