@@ -49,5 +49,6 @@ Current limitations and bugs
 5) HG repository path is hard-coded
 6) Changed files should be generated and posted
 7) Diff should be created for vcs_rev page
+8) Parse multiple lines of commit message
 
 We are aware of the those limitations, and have plans to alleviate them in the future.
