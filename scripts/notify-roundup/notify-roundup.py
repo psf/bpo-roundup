@@ -57,7 +57,7 @@ def main(pool):
         revision = int(sys.argv[3])
     elif vcs_type == 'hg':
         rev_type = sys.argv[3].split(':')
-        revision = rev_type(1)
+        revision = rev_type[1]
         logger.debug(revision)
     else:
         logging.error('something wen\'t wrong')
@@ -267,7 +267,7 @@ class HGRepository:
         
         authors_calls = subprocess.call('hg log ' + self.repos_dir + ' --rev ' + self.rev + ' | grep user' , shell=True)
         authors_split = authors.calls.split(':')
-        logger.debug('Author is:', authors_split(1))
+        logger.debug('Author is:', authors_split[1])
     
 
         
