@@ -58,7 +58,6 @@ def main(pool):
     elif vcs_type == 'hg':
         rev_type = sys.argv[3].split(':')
         revision = rev_type[1]
-        logger.debug(revision)
     else:
         logging.error('something wen\'t wrong')
         
@@ -196,7 +195,7 @@ def notify_local_inner(db, tracker_home, repos):
         raise Unauthorised, "Can't edit items of class '%s'"%repos.klass
 
     # create the revision
-    svn_rev_id = db.svn_rev.create(repository=svn_repo_id, revision=repos.rev)
+    vcs_rev_id = db.vcs_rev.create(repository=vcs_repo_id, revision=repos.rev)
 
     # add the message to the spool
     date = roundup.date.Date(repos.date)
@@ -265,7 +264,7 @@ class HGRepository:
         self.rev = rev
         self.pool = pool
         
-        authors_calls = subprocess.call('hg log ' + self.repos_dir + ' --rev ' + self.rev + ' | grep user' , shell=True)
+        authors_calls = subprocess.call('hg log ' + self.repos_dir + ' --rev=tip | grep user' , shell=True)
         #authors_split = authors_calls.split(':')
         logger.debug('Author is:', authors_calls)
     
@@ -276,7 +275,7 @@ class HGRepository:
         re.I)
 
         # parse for Roundup item information
-        log = subprocess.call("/usr/bin/hg log " + self.repos_dir + " --rev=tip" + " | grep summary") or ''
+        log = subprocess.call('hg log ' + self.repos_dir + ' --rev=tip | grep summary', shell=True) or ''
         logger.debug('Log parsed:', log)
         for line in log.splitlines():
             m = issue_re.match(line)
