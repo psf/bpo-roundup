@@ -10,7 +10,7 @@
 # See end of file for change history
 
 import sys, os, time, cStringIO, re, logging, smtplib, ConfigParser, socket
-import subprocess
+import commands
 
 # configure logging
 logger = logging.getLogger('notify-roundup')
@@ -53,7 +53,6 @@ def main(pool):
     
     vcs_type = cfg.get('vcs', 'type')
     
-    logger.debug('VCS TYPE:', vcs_type)
     if vcs_type == 'svn':
         revision = int(sys.argv[3])
     elif vcs_type == 'hg':
@@ -264,10 +263,9 @@ class HGRepository:
         self.rev = rev
         self.pool = pool
         
-        authors_calls = subprocess.call('hg log ' + self.repos_dir + ' --rev=tip | grep user' , shell=True)
-        #authors_split = authors_calls.split(':')
-        logger.debug('Author is:', authors_calls)
-    
+        authors_calls = commands.getoutput('hg log /home/mario/Projects/roundup-hg --rev=tip | grep user')
+        authors_split = authors_calls.split(':')
+        self.author = authors_split[1].lstrip()
 
         
     def extract_info(self):
@@ -275,9 +273,10 @@ class HGRepository:
         re.I)
 
         # parse for Roundup item information
-        log = subprocess.call('hg log ' + self.repos_dir + ' --rev=tip | grep summary', shell=True) or ''
-        logger.debug('Log parsed:', log)
-        for line in log.splitlines():
+        log = commands.getoutput('hg log /home/mario/Projects/roundup-hg --rev=tip | grep summary') or ''
+        log_mine = log.split(':')
+        log_mines = log_mine[1].lstrip()
+        for line in log_mines.splitlines():
             m = issue_re.match(line)
             if m:
                 break
