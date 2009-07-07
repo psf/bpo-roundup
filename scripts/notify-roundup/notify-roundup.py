@@ -161,7 +161,7 @@ def notify_local_inner(db, tracker_home, repos):
         logger.error('no repository %s in tracker'%repos.repos_dir)
         raise Failed
 
-    '''
+    
     # log in as the appropriate user
     try:
         matches = db.user.stringFind(vcs_name=repos.author)
@@ -172,21 +172,20 @@ def notify_local_inner(db, tracker_home, repos):
         userid = matches[0]
     else:
         try:
-        userid = db.user.lookup(repos.author)
+            userid = db.user.lookup(repos.author)
         except KeyError:
             raise Failed, 'no Roundup user matching %s'%repos.author
     username = db.user.get(userid, 'username')
-    '''
-    username = "admin"
-    #db.close()
+    
+    db.close()
 
     # tell Roundup
     tracker = roundup.instance.open(tracker_home)
     db = tracker.open(username)
 
     # check perms
-    if not db.security.hasPermission('Create', userid, 'svn_rev'):
-        raise Unauthorised, "Can't create items of class 'svn_rev'"
+    if not db.security.hasPermission('Create', userid, 'vcs_rev'):
+        raise Unauthorised, "Can't create items of class 'vcs_rev'"
     if not db.security.hasPermission('Create', userid, 'msg'):
         raise Unauthorised, "Can't create items of class 'msg'"
     if not db.security.hasPermission('Edit', userid, repos.klass,
@@ -200,7 +199,7 @@ def notify_local_inner(db, tracker_home, repos):
     vcs_rev_id = db.vcs_rev.create(repository=vcs_repo_id, revision=repos.rev)
 
     # add the message to the spool
-    date = roundup.date.Date(repos.date)
+    #date = roundup.date.Date(repos.date)
     msgid = db.msg.create(content=repos.message, summary=repos.summary,
         author=userid, date=date, revision=vcs_rev_id)
     klass = db.getclass(repos.klass)
@@ -268,7 +267,8 @@ class HGRepository:
         
         authors_calls = commands.getoutput('hg log /home/mario/Projects/roundup-hg --rev=tip | grep user')
         authors_split = authors_calls.split(':')
-        self.author = authors_split[1].lstrip()
+        authoro = authors_split[1].lstrip().split('<')
+        self.author = "mario"
 
         
     def extract_info(self):
