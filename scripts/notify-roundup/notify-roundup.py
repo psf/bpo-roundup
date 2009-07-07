@@ -49,10 +49,19 @@ def main(pool):
     cfg = ConfigParser.ConfigParser()
     cfg.read(sys.argv[1])
     repos_dir = sys.argv[2]
-    revision = int(sys.argv[3])
+
     
     vcs_type = cfg.get('vcs', 'type')
     
+    if vcs_type == 'svn':
+        revision = int(sys.argv[3])
+    elif vcs_type == 'hg':
+        rev_type = sys.argv[3].split(':')
+        revision = rev_type(1)
+        logger.debug(revision)
+    else:
+        logging.error('something wen\'t wrong')
+        
     # get a handle on the revision in the VCS repository
     if vcs_type == 'svn':
         repos = SVNRepository(repos_dir, revision, pool)
