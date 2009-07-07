@@ -266,7 +266,7 @@ class HGRepository:
         self.pool = pool
         
         authors_calls = subprocess.call('hg log ' + self.repos_dir + ' --rev ' + self.rev + ' | grep user' , shell=True)
-        authors_split = authors.calls.split(':')
+        authors_split = authors_calls.split(':')
         logger.debug('Author is:', authors_split[1])
     
 
