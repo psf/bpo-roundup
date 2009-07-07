@@ -57,7 +57,8 @@ def main(pool):
         revision = int(sys.argv[3])
     elif vcs_type == 'hg':
         revisions = sys.argv[3].split(':')
-        revision = revisions[0]
+        revisionz = revisions[1].lstrip()
+        revision = int(revisionz)
     else:
         logging.error('something wen\'t wrong')
         
