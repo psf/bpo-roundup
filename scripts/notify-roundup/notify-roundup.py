@@ -202,7 +202,7 @@ def notify_local_inner(db, tracker_home, repos):
     # add the message to the spool
     date = roundup.date.Date(repos.date)
     msgid = db.msg.create(content=repos.message, summary=repos.summary,
-        author=userid, date=date, revision=svn_rev_id)
+        author=userid, date=date, revision=vcs_rev_id)
     klass = db.getclass(repos.klass)
     messages = klass.get(repos.itemid, 'messages')
     messages.append(msgid)
