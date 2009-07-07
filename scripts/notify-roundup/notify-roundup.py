@@ -155,7 +155,7 @@ def notify_local_inner(db, tracker_home, repos):
     print repos.host, repos.repos_dir
     # get the svn repo information from the tracker
     try:
-        svn_repo_id = db.svn_repo.stringFind(host=repos.host,
+        vcs_repo_id = db.vcs_repo.stringFind(host=repos.host,
             path=repos.repos_dir)[0]
     except IndexError:
         logger.error('no repository %s in tracker'%repos.repos_dir)
