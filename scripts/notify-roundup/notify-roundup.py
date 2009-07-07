@@ -163,7 +163,7 @@ def notify_local_inner(db, tracker_home, repos):
 
     # log in as the appropriate user
     try:
-        matches = db.user.stringFind(svn_name=repos.author)
+        matches = db.user.stringFind(vcs_name=repos.author)
     except KeyError:
         # the user class has no property "svn_name"
         matches = []
