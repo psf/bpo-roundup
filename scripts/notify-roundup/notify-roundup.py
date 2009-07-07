@@ -10,7 +10,7 @@
 # See end of file for change history
 
 import sys, os, time, cStringIO, re, logging, smtplib, ConfigParser, socket
-import commands
+import commands, datetime
 
 # configure logging
 logger = logging.getLogger('notify-roundup')
@@ -201,7 +201,7 @@ def notify_local_inner(db, tracker_home, repos):
     vcs_rev_id = db.vcs_rev.create(repository=vcs_repo_id, revision=repos.rev)
 
     # add the message to the spool
-    #date = roundup.date.Date(repos.date)
+    date = roundup.date.Date(repos.date)
     msgid = db.msg.create(content=repos.message, summary=repos.summary,
         author=userid, date=date, revision=vcs_rev_id)
     klass = db.getclass(repos.klass)
@@ -303,7 +303,8 @@ class HGRepository:
         output.write('Log:\n%s\n'%log_mines)
 
         self.message = output.getvalue()
-        
+        self.summary = "This is hg change"
+        self.date = time.localtime()
         
         return True
         
