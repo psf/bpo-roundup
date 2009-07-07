@@ -296,6 +296,10 @@ class HGRepository:
 
         logger.debug('Roundup info item=%r, status=%r'%(issue, self.status))
         
+        output.write('Log:\n%s\n'%log_mines)
+
+        self.message = output.getvalue()
+        
         
         return True
         
