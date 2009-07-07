@@ -10,7 +10,7 @@
 # See end of file for change history
 
 import sys, os, time, cStringIO, re, logging, smtplib, ConfigParser, socket
-
+import commands, datetime
 
 # configure logging
 logger = logging.getLogger('notify-roundup')
@@ -30,9 +30,12 @@ try:
     import svn.delta
     import svn.repos
     import svn.core
+    
+    from mercurial import ui, hg
 except:
-    logger.exception('Exception while importing Roundup and SVN')
+    logger.exception('Exception while importing Roundup and SVN/hg')
     sys.exit(1)
+    
 
 class Failed(Exception):
     pass
@@ -46,11 +49,27 @@ def main(pool):
     cfg = ConfigParser.ConfigParser()
     cfg.read(sys.argv[1])
     repos_dir = sys.argv[2]
-    revision = int(sys.argv[3])
 
-    # get a handle on the revision in the repository
-    repos = Repository(repos_dir, revision, pool)
-
+    
+    vcs_type = cfg.get('vcs', 'type')
+    
+    if vcs_type == 'svn':
+        revision = int(sys.argv[3])
+    elif vcs_type == 'hg':
+        revisions = sys.argv[3].split(':')
+        revisionz = revisions[1].lstrip()
+        revision = int(revisionz)
+    else:
+        logging.error('something wen\'t wrong')
+        
+    # get a handle on the revision in the VCS repository
+    if vcs_type == 'svn':
+        repos = SVNRepository(repos_dir, revision, pool)
+    elif vcs_type == 'hg':
+        repos = HGRepository(repos_dir, revision, pool)
+    else:
+        logging.error('we currently don\'t support %s VCS type'%vcs_type)
+      
     repos.klass = cfg.get('main', 'item-class')
     if not repos.extract_info():
         return
@@ -138,15 +157,16 @@ def notify_local_inner(db, tracker_home, repos):
     print repos.host, repos.repos_dir
     # get the svn repo information from the tracker
     try:
-        svn_repo_id = db.svn_repo.stringFind(host=repos.host,
+        vcs_repo_id = db.vcs_repo.stringFind(host=repos.host,
             path=repos.repos_dir)[0]
     except IndexError:
         logger.error('no repository %s in tracker'%repos.repos_dir)
         raise Failed
 
+    
     # log in as the appropriate user
     try:
-        matches = db.user.stringFind(svn_name=repos.author)
+        matches = db.user.stringFind(vcs_name=repos.author)
     except KeyError:
         # the user class has no property "svn_name"
         matches = []
@@ -158,6 +178,7 @@ def notify_local_inner(db, tracker_home, repos):
         except KeyError:
             raise Failed, 'no Roundup user matching %s'%repos.author
     username = db.user.get(userid, 'username')
+    
     db.close()
 
     # tell Roundup
@@ -165,8 +186,8 @@ def notify_local_inner(db, tracker_home, repos):
     db = tracker.open(username)
 
     # check perms
-    if not db.security.hasPermission('Create', userid, 'svn_rev'):
-        raise Unauthorised, "Can't create items of class 'svn_rev'"
+    if not db.security.hasPermission('Create', userid, 'vcs_rev'):
+        raise Unauthorised, "Can't create items of class 'vcs_rev'"
     if not db.security.hasPermission('Create', userid, 'msg'):
         raise Unauthorised, "Can't create items of class 'msg'"
     if not db.security.hasPermission('Edit', userid, repos.klass,
@@ -177,12 +198,12 @@ def notify_local_inner(db, tracker_home, repos):
         raise Unauthorised, "Can't edit items of class '%s'"%repos.klass
 
     # create the revision
-    svn_rev_id = db.svn_rev.create(repository=svn_repo_id, revision=repos.rev)
+    vcs_rev_id = db.vcs_rev.create(repository=vcs_repo_id, revision=repos.rev)
 
     # add the message to the spool
     date = roundup.date.Date(repos.date)
     msgid = db.msg.create(content=repos.message, summary=repos.summary,
-        author=userid, date=date, revision=svn_rev_id)
+        author=userid, date=date, revision=vcs_rev_id)
     klass = db.getclass(repos.klass)
     messages = klass.get(repos.itemid, 'messages')
     messages.append(msgid)
@@ -237,8 +258,59 @@ def generate_list(output, header, changelist, selection):
         output.write('      - copied%s from r%d, %s%s\n'
                      % (text, change.base_rev, change.base_path[1:], is_dir))
 
-class Repository:
-    '''Hold roots and other information about the repository. From mailer.py
+class HGRepository:
+    '''Holds roots and other information about the hg repository.'
+    '''
+    
+    def __init__(self,repos_dir,rev,pool):
+        self.repos_dir = repos_dir
+        self.rev = rev
+        self.pool = pool
+        
+        authors_calls = commands.getoutput('hg log /home/mario/Projects/roundup-hg --rev=tip | grep user')
+        authors_split = authors_calls.split(':')
+        authoro = authors_split[1].lstrip().split('<')
+        self.author = "mario"
+
+        
+    def extract_info(self):
+        issue_re = re.compile('^\s*(%s)\s*(\d+)(\s+(\S+))?\s*$'%self.klass,
+        re.I)
+
+        # parse for Roundup item information
+        log = commands.getoutput('hg log /home/mario/Projects/roundup-hg --rev=tip | grep summary') or ''
+        log_mine = log.split(':')
+        log_mines = log_mine[1].lstrip()
+        for line in log_mines.splitlines():
+            m = issue_re.match(line)
+            if m:
+                break
+        else:
+            # nothing to do
+            return
+            
+        # parse out the issue information
+        klass = m.group(1)
+        self.itemid = m.group(2)
+
+        issue = klass + self.itemid
+        self.status = m.group(4)
+
+        logger.debug('Roundup info item=%r, status=%r'%(issue, self.status))
+        # Generate email for the various groups and option-params.
+        output = cStringIO.StringIO()
+        
+        output.write('Log:\n%s\n'%log_mines)
+
+        self.message = output.getvalue()
+        self.summary = "This is hg change"
+        self.date = time.localtime()
+        
+        return True
+        
+    
+class SVNRepository:
+    '''Hold roots and other information about the svn repository. From mailer.py
     '''
     def __init__(self, repos_dir, rev, pool):
         self.repos_dir = repos_dir
@@ -247,7 +319,7 @@ class Repository:
 
         self.repos_ptr = svn.repos.svn_repos_open(repos_dir, pool)
         self.fs_ptr = svn.repos.svn_repos_fs(self.repos_ptr)
-
+        
         self.roots = {}
 
         self.root_this = self.roots[rev] = svn.fs.revision_root(self.fs_ptr,
@@ -367,19 +439,3 @@ if __name__ == '__main__':
         logger.exception('top level')
         sys.exit(1)
 
-#
-# 2005-05-16 - 1.2
-# 
-#   - Status wasn't being set by ID in local mode
-#   - Wasn't catching errors in local changes, hence not cleaning up db
-#     correctly
-#   - svnauditor.py wasn't handling the fifth argument from notify-roundup.py
-#   - viewcvs_url formatting wasn't quite right
-#
-# 2005-05-04 - 1.1
-#   - Several fixes from  Ron Alford
-#   - Don't change issue titles to "SVN commit message..."
-# 
-# 2005-04-26 - 1.0
-#   - Initial version released
-#
