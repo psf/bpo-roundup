@@ -10,7 +10,7 @@
 # See end of file for change history
 
 import sys, os, time, cStringIO, re, logging, smtplib, ConfigParser, socket
-
+import subprocess
 
 # configure logging
 logger = logging.getLogger('notify-roundup')
@@ -30,9 +30,12 @@ try:
     import svn.delta
     import svn.repos
     import svn.core
+    
+    from mercurial import ui, hg
 except:
-    logger.exception('Exception while importing Roundup and SVN')
+    logger.exception('Exception while importing Roundup and SVN/hg')
     sys.exit(1)
+    
 
 class Failed(Exception):
     pass
@@ -249,8 +252,44 @@ class HGRepository:
     '''
     
     def __init__(self,repos_dir,rev,pool):
-        pass
+        self.repos_dir = repos_dir
+        self.rev = rev
+        self.pool = pool
         
+        authors_calls = subprocess.call('hg log ' + self.repos_dir + ' --rev ' + self.rev + ' | grep user' , shell=True)
+        authors_split = authors.calls.split(':')
+        logger.debug('Author is:', authors_split(1))
+    
+
+        
+    def extract_info(self):
+        issue_re = re.compile('^\s*(%s)\s*(\d+)(\s+(\S+))?\s*$'%self.klass,
+        re.I)
+
+        # parse for Roundup item information
+        log = subprocess.call("/usr/bin/hg log " + self.repos_dir + " --rev=tip" + " | grep summary") or ''
+        logger.debug('Log parsed:', log)
+        for line in log.splitlines():
+            m = issue_re.match(line)
+            if m:
+                break
+        else:
+            # nothing to do
+            return
+            
+        # parse out the issue information
+        klass = m.group(1)
+        self.itemid = m.group(2)
+
+        issue = klass + self.itemid
+        self.status = m.group(4)
+
+        logger.debug('Roundup info item=%r, status=%r'%(issue, self.status))
+        
+        
+        return True
+        
+    
 class SVNRepository:
     '''Hold roots and other information about the svn repository. From mailer.py
     '''
@@ -261,7 +300,7 @@ class SVNRepository:
 
         self.repos_ptr = svn.repos.svn_repos_open(repos_dir, pool)
         self.fs_ptr = svn.repos.svn_repos_fs(self.repos_ptr)
-
+        
         self.roots = {}
 
         self.root_this = self.roots[rev] = svn.fs.revision_root(self.fs_ptr,
@@ -381,19 +420,3 @@ if __name__ == '__main__':
         logger.exception('top level')
         sys.exit(1)
 
-#
-# 2005-05-16 - 1.2
-# 
-#   - Status wasn't being set by ID in local mode
-#   - Wasn't catching errors in local changes, hence not cleaning up db
-#     correctly
-#   - svnauditor.py wasn't handling the fifth argument from notify-roundup.py
-#   - viewcvs_url formatting wasn't quite right
-#
-# 2005-05-04 - 1.1
-#   - Several fixes from  Ron Alford
-#   - Don't change issue titles to "SVN commit message..."
-# 
-# 2005-04-26 - 1.0
-#   - Initial version released
-#
