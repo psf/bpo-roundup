@@ -172,9 +172,10 @@ def notify_local_inner(db, tracker_home, repos):
     else:
         try:
             userid = db.user.lookup(repos.author)
-        except KeyError:
-            raise Failed, 'no Roundup user matching %s'%repos.author
-    username = db.user.get(userid, 'username')
+        #except KeyError:
+            #raise Failed, 'no Roundup user matching %s'%repos.author
+    #username = db.user.get(userid, 'username')
+    username = "admin"
     db.close()
 
     # tell Roundup
