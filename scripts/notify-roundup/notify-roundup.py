@@ -56,7 +56,8 @@ def main(pool):
     if vcs_type == 'svn':
         revision = int(sys.argv[3])
     elif vcs_type == 'hg':
-        revision = sys.argv[3]
+        revisions = sys.argv[3].split(':')
+        revision = revisions[0]
     else:
         logging.error('something wen\'t wrong')
         
