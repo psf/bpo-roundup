@@ -14,11 +14,14 @@ Let's follow the steps:
 1) Setup Mercurial post-commit hook
 
 a) Copy notify-roundup.sh from scripts/notify-roundup/hg/notify-roundup.sh to somewhere
+b) Change paths to notify-roundup.{py,ini} and your roundup instance inside notify-roundup.sh [1]
 b) Make sure its executable (chmod +x)
 c) Add the following to /path/to/hg/repo/.hg/hgrc
 
 [hooks]
 commit = /path/to/notify-roundup.sh
+
+Note: Commit should probably be changed by "incoming". This is subject to further investigation.
 
 [1] notify-roundup.py and notify-roundup.ini can be found in scripts/notify-roundup
 
@@ -26,9 +29,18 @@ commit = /path/to/notify-roundup.sh
 
 a) Set tracker home: tracker-home = /path/to/tracker-home
 b) Set address mappings
+Please be aware that we are playing tricks with Mercurial here. Your Roundup user should be the same
+as your first name for Mercurial. Lets explore that further with an example:
+
+HG author is set as: Mario Danic <mario@nospam.com>
+Notify-roundup would look for address mapping like this:
+mario = whatever_email_you_registered_with_to_Roundup
+
+So it takes your first name, lowers all chars and uses mappings
+to find appropriate Roundup user. 
 c) Set VCS type to hg
 
-3) Replace "/home/mario/Projects/roundup-hg" in notify-roundup.py with path to your repository
+3) Now, now, this wasn't so hard :)
 
 How-to format mercurial commit message
 =======================================
@@ -46,9 +58,9 @@ Current limitations and bugs
 2) Notify-roundup can only modify Status
 3) Commit date isn't parsed 
 4) Summary isn't composed
-5) HG repository path is hard-coded
-6) Changed files should be generated and posted
-7) Diff should be created for vcs_rev page
-8) Parse multiple lines of commit message
+5) Changed files should be generated and posted
+6) Diff should be created for vcs_rev page
+7) Parse multiple lines of commit message
+    * This might already work
 
 We are aware of the those limitations, and have plans to alleviate them in the future.

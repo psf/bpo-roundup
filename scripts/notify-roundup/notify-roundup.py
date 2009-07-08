@@ -10,7 +10,7 @@
 # See end of file for change history
 
 import sys, os, time, cStringIO, re, logging, smtplib, ConfigParser, socket
-import commands, datetime
+import commands
 
 # configure logging
 logger = logging.getLogger('notify-roundup')
@@ -258,8 +258,8 @@ def generate_list(output, header, changelist, selection):
         output.write('      - copied%s from r%d, %s%s\n'
                      % (text, change.base_rev, change.base_path[1:], is_dir))
 
-class HGRepository:
-    '''Holds roots and other information about the hg repository.'
+class BZRRepository:
+    '''Holds roots and other information about the bzr repository.
     '''
     
     def __init__(self,repos_dir,rev,pool):
@@ -267,10 +267,21 @@ class HGRepository:
         self.rev = rev
         self.pool = pool
         
-        authors_calls = commands.getoutput('hg log /home/mario/Projects/roundup-hg --rev=tip | grep user')
+        authors_calls = commands.getoutput('bzr log -r-1 --line ' + self.repos_dir)
+class HGRepository:
+    '''Holds roots and other information about the hg repository.
+    '''
+    
+    def __init__(self,repos_dir,rev,pool):
+        self.repos_dir = repos_dir
+        self.rev = rev
+        self.pool = pool
+        
+        authors_calls = commands.getoutput('hg log ' + self.repos_dir + ' --rev=tip | grep user')
         authors_split = authors_calls.split(':')
         authoro = authors_split[1].lstrip().split('<')
-        self.author = "mario"
+        author_split2 = authoro[0].rstrip('>').split()
+        self.author = author_split2[0].lower()
 
         
     def extract_info(self):
@@ -278,7 +289,7 @@ class HGRepository:
         re.I)
 
         # parse for Roundup item information
-        log = commands.getoutput('hg log /home/mario/Projects/roundup-hg --rev=tip | grep summary') or ''
+        log = commands.getoutput('hg log ' + self.repos_dir + ' --rev=tip | grep summary') or ''
         log_mine = log.split(':')
         log_mines = log_mine[1].lstrip()
         for line in log_mines.splitlines():
