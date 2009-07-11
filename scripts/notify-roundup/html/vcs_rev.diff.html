@@ -12,11 +12,13 @@
     allowed to view this page.</p>
 
 <div tal:condition="context/is_view_ok">
-  <a tal:attributes="href string:vcs_rev${context/id}?@template=diff">diff</a>
-  <ul tal:repeat="file python:utils.revision_info(context.repository.path.plain(),
-	    	                                  context.revision.plain())">
-    <li tal:content="string: ${file/action} ${file/path}" />
-  </ul>
+<table class="messages">
+<tal:block repeat="file python:utils.revision_info(context.repository.path.plain(),
+		   context.revision.plain())">
+ <tr><th tal:content="string: ${file/action} ${file/path}" /></tr>
+ <tr><td tal:content="structure file/diff" /></tr>
+</tal:block>
+</table>
 </div>
 
 </td>
