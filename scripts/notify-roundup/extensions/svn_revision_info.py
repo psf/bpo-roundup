@@ -8,11 +8,7 @@ import sys, os, time
 from svn import core, fs, delta, repos
 from libsvn.fs import svn_fs_file_contents as file_contents
 import tempfile
-import logging
 
-hdlr = logging.FileHandler('/tmp/log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-hdlr.setFormatter(formatter)
 
 def _dump_file(root, path):
     """Download file from repository and store it in local temporary."""
@@ -70,7 +66,6 @@ def _info(pool, path, rev):
     repos.svn_repos_replay(new_root, e_ptr, e_baton, pool)
 
     changeset = editor.changes.items()
-    logging.error(changeset)
     changeset.sort()
     return [ChangeSetItem(new_root, old_root, path, change)
             for path, change in changeset]
