@@ -1,0 +1,15 @@
+#!/bin/sh
+#
+# An example hook script that is called after a successful
+# commit is made.
+#
+# It is used for Roundup notification after a commit.
+
+PYTHON=/usr/bin/python
+NOTIFY=/path/to/your/notify-roundup.py
+CONFIG=/path/to/your/notify-roundup.ini
+REPOS=`/bin/pwd`
+REV="cd `/bin/pwd` ; /usr/bin/git log --pretty=format:%h | head -n1 "
+PYTHONPATH=/path/to/your/roundup/instance "$PYTHON" "$NOTIFY" "$CONFIG" "$REPOS" "$REV"
+
+: Nothing
