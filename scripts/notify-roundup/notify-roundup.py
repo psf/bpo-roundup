@@ -53,12 +53,11 @@ def main(pool):
     
     vcs_type = cfg.get('vcs', 'type')
     
-    if vcs_type == 'svn':
-        revision = int(sys.argv[3])
+    if vcs_type == 'svn' or vcs_type == 'bzr' or vcs_type == 'git':
+        revision = sys.argv[3]
     elif vcs_type == 'hg':
         revisions = sys.argv[3].split(':')
-        revisionz = revisions[1].lstrip()
-        revision = int(revisionz)
+        revision = revisions[1].lstrip()
     else:
         logging.error('something wen\'t wrong')
         
