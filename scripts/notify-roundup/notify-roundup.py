@@ -260,6 +260,7 @@ def generate_list(output, header, changelist, selection):
 
 class BZRRepository:
     '''Holds roots and other information about the bzr repository.
+       THIS IS WIP AND HASN'T BEEN TESTED AT ALL!
     '''
     
     def __init__(self,repos_dir,rev,pool):
@@ -267,7 +268,24 @@ class BZRRepository:
         self.rev = rev
         self.pool = pool
         
-        authors_calls = commands.getoutput('bzr log -r-1 --line ' + self.repos_dir)
+        authors_calls = commands.getoutput('bzr log -r-1 --line ' + self.repos_dir + ' | grep committer')
+        authors_split = authors_calls.split(':')
+        authoro = authors_split[1].lstrip().split('<')
+        author_split2 = authoro[0].rstrip('>').split()
+        self.author = author_split[0].lower()
+        
+
+
+class GitRepository:
+    '''Holds roots and other information about the git repository.
+       THIS IS WIP AND HASN'T BEEN TESTED AT ALL!
+    '''
+    
+    self.repos_dir = repos_dir
+    self.rev = rev
+    self.pool = pool
+    
+    
 class HGRepository:
     '''Holds roots and other information about the hg repository.
     '''
