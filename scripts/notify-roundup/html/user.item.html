@@ -74,8 +74,8 @@ define="edit_ok context/is_edit_ok"
  </tr>
   </tal:if>
  <tr>
- <th i18n:translate="">Subversion login</th>
- <td tal:content="structure context/svn_name/field">svn_name</td>
+ <th i18n:translate="">VCS login</th>
+ <td tal:content="structure context/vcs_name/field">vcs_name</td>
  </tr>
   <tal:if condition="python:request.user.hasPermission('Web Roles')">
  <tr tal:define="name string:roles; label string:Roles;">
