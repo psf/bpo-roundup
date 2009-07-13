@@ -24,7 +24,7 @@ vcs_repo.setkey('name')
 # broken, but this works fine without it.
 vcs_rev = Class(db, "vcs_rev",
 repository=Link('vcs_repo'),
-revision=Number())
+revision=String())
 
 
 
