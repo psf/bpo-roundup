@@ -268,22 +268,95 @@ class BZRRepository:
         self.rev = rev
         self.pool = pool
         
-        authors_calls = commands.getoutput('bzr log -r-1 --line ' + self.repos_dir + ' | grep committer')
+        authors_calls = commands.getoutput('bzr log -r-1 ' + self.repos_dir + ' | grep committer')
         authors_split = authors_calls.split(':')
         authoro = authors_split[1].lstrip().split('<')
         author_split2 = authoro[0].rstrip('>').split()
         self.author = author_split[0].lower()
+    
+    def extract_info(self):
+        issue_re = re.compile('^\s*(%s)\s*(\d+)(\s+(\S+))?\s*$'%self.klass,
+            re.I)
+
+        # parse for Roundup item information
+        log = commands.getoutput('bzr log -r-1 ' + self.repos_dir) or ''
+        log_mine = log.split('message:')
+        log_mines = log_mine[1].lstrip()
+        for line in log_mines.splitlines():
+            m = issue_re.match(line)
+            if m:
+                break
+        else:
+            # nothing to do
+            return
+            
+        # parse out the issue information
+        klass = m.group(1)
+        self.itemid = m.group(2)
+
+        issue = klass + self.itemid
+        self.status = m.group(4)
+
+        logger.debug('Roundup info item=%r, status=%r'%(issue, self.status))
+        # Generate email for the various groups and option-params.
+        output = cStringIO.StringIO()
         
+        output.write('Log:\n%s\n'%log_mines)
+
+        self.message = output.getvalue()
+        self.summary = "This is bzr change"
+        self.date = time.localtime()
+        
+        return True
+                
 
 
 class GitRepository:
     '''Holds roots and other information about the git repository.
        THIS IS WIP AND HASN'T BEEN TESTED AT ALL!
     '''
+    def __init__(self,repos_dir,rev,pool):
+        self.repos_dir = repos_dir
+        self.rev = rev
+        self.pool = pool
     
-    self.repos_dir = repos_dir
-    self.rev = rev
-    self.pool = pool
+        authors_calls = commands.getoutput('cd ' + self.repos_dir + '; git log --pretty=format:%an | head -n1')
+        authors_split = authors_calls.split()
+        self.author = authors_split[0].lower()
+    
+    def extract_info(self):
+        issue_re = re.compile('^\s*(%s)\s*(\d+)(\s+(\S+))?\s*$'%self.klass,
+            re.I)
+
+        # parse for Roundup item information
+        log = commands.getoutput('cd ' + self.repos_dir + '; git log --pretty=format:%s | head -n1') or ''
+        for line in log.splitlines():
+            m = issue_re.match(line)
+            if m:
+                break
+        else:
+            # nothing to do
+            return
+            
+        # parse out the issue information
+        klass = m.group(1)
+        self.itemid = m.group(2)
+
+        issue = klass + self.itemid
+        self.status = m.group(4)
+
+        logger.debug('Roundup info item=%r, status=%r'%(issue, self.status))
+        # Generate email for the various groups and option-params.
+        output = cStringIO.StringIO()
+        
+        output.write('Log:\n%s\n'%log_mines)
+
+        self.message = output.getvalue()
+        self.summary = "This is git change"
+        self.date = time.localtime()
+        
+        return True
+           
     
     
 class HGRepository:
@@ -304,7 +377,7 @@ class HGRepository:
         
     def extract_info(self):
         issue_re = re.compile('^\s*(%s)\s*(\d+)(\s+(\S+))?\s*$'%self.klass,
-        re.I)
+            re.I)
 
         # parse for Roundup item information
         log = commands.getoutput('hg log ' + self.repos_dir + ' --rev=tip | grep summary') or ''
