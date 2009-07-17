@@ -19,7 +19,7 @@ def diff (path, revision):
     """ Diff between two revisions."""
     
     
-def info(path, revision)
+def info(path, revision):
     dict = {}
 
     changes = commands.getoutput("hg log -p -r " + revision + " " + path + " | lsdiff -s --strip=1")
