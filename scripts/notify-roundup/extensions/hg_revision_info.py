@@ -1,9 +1,10 @@
 import commands
 from difflib import HtmlDiff    
+import tempfile
 
-path = '/home/mario/TestInstances/hgrepo'
+path_global = '/home/mario/TestInstances/hgrepo'
 
-def _dump_files(path, revision):
+def _dump_file(path, revision):
     """Download file from repository and store it in local temporary."""
 
     file = tempfile.mktemp()
@@ -11,26 +12,36 @@ def _dump_files(path, revision):
     output = open(file, 'w+')
     output2 = open(file2, 'w+')
     if path is not None:
-        output.write(commands.getoutput('hg cat '  + " --rev " + revision + " " + path))
-        output2.write(commands.getoutput('hg cat ' + " --rev " + int(revision-1) + " " + path))
+        output.write(commands.getoutput('hg cat '  + " --rev " + str(revision) + " " + path))
+        output2.write(commands.getoutput('hg cat ' + " --rev " + str(int(revision-1)) + " " + path))
     output.close()
     output2.close()
     return file, file2
 
 class ChangeSetItem:
-    def __init__(self, path, change):
+    def __init__(self,line):
 
-        self.path = path
-        #if change.path:
-            self.action = change.added and 'new' or 'modified'
-        #else:
-        #    self.action = 'delete'
-        self.change = change
+        pathos = line.split()
+        self.path = pathos[1]
 
+        self.line = line
+        
+        check = line.find('+')
+        if check != -1:
+            self.action = 'added'
+        check = line.find('!')
+        if check != -1:
+            self.action = 'modified'
+        check = line.find('!')
+        if check != -1:
+            self.action = 'modified'    
+
+        self.change = 'test'
+        
     def diff(self):
         from difflib import HtmlDiff
 
-        from_file, to_file = _dump_file(path, -1)
+        from_file, to_file = _dump_file(path_global, -1)
         html = HtmlDiff()
         return html.make_file(open(from_file, 'r').readlines(),
                               open(to_file, 'r').readlines(),
@@ -39,31 +50,21 @@ class ChangeSetItem:
         return html_diff(file1, file2)
     
     
-def info(path, revision):
-    dict = {}
+def _info(path, revision):
 
     changes = commands.getoutput("hg log -p -r " + revision + " " + path + " | lsdiff -s --strip=1")
     line_changes = changes.splitlines()
-    for line in line_changes:
-        check = line.str('+')
-        if check != -1:
-            split_check = line.split()
-            dict['Added:'] = split_check[1]
-            diff(split_check[1], revision)
-            continue
-        check = line.str('-')
-        if check != -1:
-            split_check = line.split()
-            dict['Removed:'] = split_check[1]
-            continue
-        check = line.str('!')
-        if check != -1:
-            split_check = line.split()
-            dict['Modified:'] = split_check[1]    
-            continue    
+    return [ChangeSetItem(line) for 
+        line in line_changes]
+    
+
+
 def info(path, revision):
-    return _info(path, int(revision))
+    global path_global
+    path_global = path
+    return _info(path, revision)
     
 
 def init(instance):
     instance.registerUtil('revision_info', info)
+
