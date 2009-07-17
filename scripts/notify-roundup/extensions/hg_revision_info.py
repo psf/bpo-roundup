@@ -13,7 +13,7 @@ def _dump_file(path, revision):
     output2 = open(file2, 'w+')
     if path is not None:
         output.write(commands.getoutput('hg cat '  + " --rev " + str(revision) + " " + path))
-        output2.write(commands.getoutput('hg cat ' + " --rev " + str(int(revision-1)) + " " + path))
+        output2.write(commands.getoutput('hg cat ' + " --rev " + str(revision-1) + " " + path))
     output.close()
     output2.close()
     return file, file2
@@ -32,9 +32,9 @@ class ChangeSetItem:
         check = line.find('!')
         if check != -1:
             self.action = 'modified'
-        check = line.find('!')
+        check = line.find('-')
         if check != -1:
-            self.action = 'modified'    
+            self.action = 'removed'    
 
         self.change = 'test'
         
