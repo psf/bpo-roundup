@@ -8,6 +8,8 @@ import sys, os, time
 from svn import core, fs, delta, repos
 from libsvn.fs import svn_fs_file_contents as file_contents
 import tempfile
+import logging
+
 
 
 def _dump_file(root, path):
@@ -67,6 +69,7 @@ def _info(pool, path, rev):
 
     changeset = editor.changes.items()
     changeset.sort()
+    logging.debug(changeset)
     return [ChangeSetItem(new_root, old_root, path, change)
             for path, change in changeset]
 
