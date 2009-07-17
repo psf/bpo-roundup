@@ -38,10 +38,10 @@ def info(path, revision):
             dict['Removed:'] = split_check[1]
             continue
         check = line.str('!')
-            if check != -1:
-                split_check = line.split()
-                dict['Modified:'] = split_check[1]    
-                continue    
+        if check != -1:
+            split_check = line.split()
+            dict['Modified:'] = split_check[1]    
+            continue    
         
     
 
