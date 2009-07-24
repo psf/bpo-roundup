@@ -1034,9 +1034,9 @@ Erase it? Y/N: """))
             try:
                 self.db.getclass(classname).retire(nodeid)
             except KeyError:
-                raise UsageError as _('no such class "%(classname)s"')%locals()
+                raise UsageError, _('no such class "%(classname)s"')%locals()
             except IndexError:
-                raise UsageError as _('no such %(classname)s node "%(nodeid)s"')%locals()
+                raise UsageError, _('no such %(classname)s node "%(nodeid)s"')%locals()
         self.db_uncommitted = True
         return 0
 
@@ -1057,9 +1057,9 @@ Erase it? Y/N: """))
             try:
                 self.db.getclass(classname).restore(nodeid)
             except KeyError:
-                raise UsageError as _('no such class "%(classname)s"')%locals()
+                raise UsageError, _('no such class "%(classname)s"')%locals()
             except IndexError:
-                raise UsageError as _('no such %(classname)s node "%(nodeid)s"')%locals()
+                raise UsageError, _('no such %(classname)s node "%(nodeid)s"')%locals()
         self.db_uncommitted = True
         return 0
 
