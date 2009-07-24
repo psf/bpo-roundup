@@ -150,7 +150,7 @@ class Mailer:
         # attach the original message to the returned message
         try:
             bounced_message.rewindbody()
-        except IOError, message:
+        except IOError as message:
             body.write("*** couldn't include message body: %s ***"
                        % bounced_message)
         else:
@@ -199,10 +199,10 @@ class Mailer:
                 # instead of to roundup
                 smtp = SMTPConnection(self.config)
                 smtp.sendmail(self.config.ADMIN_EMAIL, to, message)
-            except socket.error, value:
+            except socket.error as value:
                 raise MessageSendError("Error: couldn't send email: "
                                        "mailhost %s"%value)
-            except smtplib.SMTPException, msg:
+            except smtplib.SMTPException as msg:
                 raise MessageSendError("Error: couldn't send email: %s"%msg)
 
 class SMTPConnection(smtplib.SMTP):

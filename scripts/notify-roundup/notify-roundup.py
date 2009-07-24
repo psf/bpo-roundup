@@ -257,6 +257,19 @@ def generate_list(output, header, changelist, selection):
         output.write('      - copied%s from r%d, %s%s\n'
                      % (text, change.base_rev, change.base_path[1:], is_dir))
 
+
+class DarcsRepository:
+    '''Holds root and other information about the darcs repository.
+       THIS IS WIP AND HASN'T BEEN TESTED AT ALL
+    '''
+    
+    def __init__(self,repos_dir,rev,pool):
+    
+        self.repos_dir = repos_dir
+        self.rev = rev
+        self.pool = pool
+        
+        authors_calls = commands.getoutput('
 class BZRRepository:
     '''Holds roots and other information about the bzr repository.
        THIS IS WIP AND HASN'T BEEN TESTED AT ALL!
