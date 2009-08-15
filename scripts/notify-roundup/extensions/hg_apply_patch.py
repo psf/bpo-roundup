@@ -17,9 +17,6 @@ def _files(repo_path, file_path, revision):
 
 def _diff(repo_path, file_path, revision):
   from_file = _files(repo_path, file_path, revision)
-  # How to get location of from_file so I could patch it with hunk?
-  # I am aware of tempfile.NamedTemporaryFile() which might help
-  # but that is available only from 2.6
   
 def _parse(file_path):
   # How to get patch path on FS?
