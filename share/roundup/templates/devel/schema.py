@@ -120,9 +120,17 @@ msg = FileClass(db, "msg",
                 inreplyto=String(),
                 revision=Link("vcs_rev"))
 
+# File
 file = FileClass(db, "file",
                 name=String(),
                 description=String(indexme='yes'))
+
+# Patch
+patch = FileClass(db, "patch",
+                  name=String(),
+                  description=String(indexme='yes'),
+                  repository=String(),
+                  revision=String())
 
 # Bug Type
 bug_type = Class(db, 'bug_type',
@@ -135,6 +143,7 @@ bug_type.setkey('name')
 #   title = String()
 #   messages = Multilink("msg")
 #   files = Multilink("file")
+#   patches = Multilink("patches")
 #   nosy = Multilink("user")
 #   superseder = Multilink("issue")
 bug = IssueClass(db, "bug",
