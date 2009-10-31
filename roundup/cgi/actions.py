@@ -245,6 +245,11 @@ class SearchAction(Action):
                         # replace the single value with the split list
                         for v in l:
                             self.form.value.append(cgi.MiniFieldStorage(key, v))
+                elif isinstance(prop, hyperdb.Number):
+                    try:
+                        float(self.form[key].value)
+                    except ValueError:
+                        raise exceptions.FormError, "Invalid number: "+self.form[key].value
 
             self.form.value.append(cgi.MiniFieldStorage('@filter', key))
 
