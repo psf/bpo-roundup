@@ -921,7 +921,11 @@ class Client:
             raise Unauthorised, self._("You are not allowed to view "
                 "this file.")
 
-        mime_type = klass.get(nodeid, 'type')
+        # MvL 20100404: catch IndexError
+        try:
+            mime_type = klass.get(nodeid, 'type')
+        except IndexError:
+            raise NotFound, designator
 
         # if the mime_type is HTML-ish then make sure we're allowed to serve up
         # HTML-ish content
