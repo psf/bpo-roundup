@@ -2386,6 +2386,8 @@ class HTMLRequest(HTMLInputMixin):
                 dir, name = '+', f
             if cls and cls.get_transitive_prop(name) is None:
                 self.client.error_message.append("Unknown property "+name)
+            elif cls and isinstance(cls.get_transitive_prop(name), hyperdb.Multilink):
+                self.client.error_message.append("Cannot group or sort by "+name)
             else:
                 var.append((dir, name))
 
