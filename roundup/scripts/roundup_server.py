@@ -243,8 +243,7 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 f.close()
                 return self.run_cgi()
             finally:
-                pass
-                #os.unlink(jobfile)
+                os.unlink(jobfile)
         else:
             return self.run_cgi()
 
