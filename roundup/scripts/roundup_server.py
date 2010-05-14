@@ -233,7 +233,22 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                     traceback.print_exc()
         sys.stdin = save_stdin
 
-    do_GET = do_POST = do_HEAD = run_cgi
+    def run_cgi_outer(self):
+        "Log requests that are in progress"
+        if self.CONFIG and self.CONFIG['LOGFILE']:
+            jobfile = os.path.join(os.path.dirname(self.CONFIG['LOGFILE']), str(os.getpid()))
+            try:
+                f = open(jobfile, "w")
+                f.write(self.path)
+                f.close()
+                return self.run_cgi()
+            finally:
+                pass
+                #os.unlink(jobfile)
+        else:
+            return self.run_cgi()
+
+    do_GET = do_POST = do_HEAD = run_cgi_outer
 
     def index(self):
         ''' Print up an index of the available trackers
