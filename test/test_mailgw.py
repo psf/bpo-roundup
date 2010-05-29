@@ -595,7 +595,7 @@ Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example
 Content-Transfer-Encoding: quoted-printable
 
 
-Change by Bork, Chef <chef@bork.bork.bork>:
+Changes by Bork, Chef <chef@bork.bork.bork>:
 
 
 ----------

@@ -668,7 +668,7 @@ class FormTestCase(unittest.TestCase):
         output = StringIO.StringIO()
         cl.request = MockNull()
         cl.request.wfile = output
-        self.assertRaises(exceptions.Unauthorised,
+        self.assertRaises(exceptions.SeriousError,
             actions.ExportCSVAction(cl).handle)
 
 
