@@ -2658,12 +2658,32 @@ function help_window(helpurl, width, height) {
 </script>
 """%self.base
 
-    def batch(self):
+    def get_ignored(self, to_ignore='ignore'):
+        """ Return a dict of '(class, property):None' items to ignore
+
+        'ignore' is built from a form value, its name is passed as to_ignore
+        and it follows a 'class1:prop1,class2:prop2' format
+        """
+        ignore = {}
+        if not to_ignore or to_ignore not in self.form:
+            return ignore
+        for clprop in self.form[to_ignore].value.split(','):
+            clprop = clprop.strip()
+            if clprop.count(':') != 1:
+                continue
+            klass, prop = [kp.strip() for kp in clprop.split(':')]
+            if not klass or not prop:
+                continue
+            ignore[(klass, prop)] = None
+        return ignore
+
+    def batch(self, to_ignore='ignore'):
         """ Return a batch object for results from the "current search"
         """
         filterspec = self.filterspec
         sort = self.sort
         group = self.group
+        ignore = self.get_ignored(to_ignore)
 
         # get the list of ids we're batching over
         klass = self.client.db.getclass(self.classname)
@@ -2672,7 +2692,7 @@ function help_window(helpurl, width, height) {
                 [w.upper().encode("utf-8", "replace") for w in re.findall(
                     r'(?u)\b\w{2,25}\b',
                     unicode(self.search_text, "utf-8", "replace")
-                )], klass)
+                )], klass, ignore)
         else:
             matches = None
 
