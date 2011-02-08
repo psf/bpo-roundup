@@ -1104,6 +1104,9 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
     def hasnode(self, classname, nodeid):
         """ Determine if the database has a given node.
         """
+        if int(nodeid) >= 2**31:
+            # value out of range
+            return 0
         # If this node is in the cache, then we do not need to go to
         # the database.  (We don't consider this an LRU hit, though.)
         if self.cache.has_key((classname, nodeid)):
