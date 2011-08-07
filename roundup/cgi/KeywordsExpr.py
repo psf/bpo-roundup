@@ -119,7 +119,7 @@ function parse(s) {
 }
 
 function render_select(handler) {
-    var out = '<select name="keyword" id="keyword"';
+    var out = '<select name="keywords" id="keywords"';
     if (handler != null) {
         out += ' onchange="' + handler + '"';
     }
@@ -134,7 +134,7 @@ function render_select(handler) {
 }
 
 function first_select() {
-    var value = document.getElementById("keyword").value;
+    var value = document.getElementById("keywords").value;
     current = value;
     set_content();
 }
@@ -157,7 +157,7 @@ function not_b_wrap(expr) {
 function and_clicked() {
     var expr = parse(current);
     if (expr == null) return;
-    var value = document.getElementById("keyword").value;
+    var value = document.getElementById("keywords").value;
     if (value == "-1") return;
     undo.push(current);
     current = new And(expr, not_b_wrap(new Equals(value))).postfix();
@@ -167,7 +167,7 @@ function and_clicked() {
 function or_clicked() {
     var expr = parse(current);
     if (expr == null) return;
-    var value = document.getElementById("keyword").value;
+    var value = document.getElementById("keywords").value;
     if (value == "-1") return;
     undo.push(current);
     current = new Or(expr, not_b_wrap(new Equals(value))).postfix();
@@ -182,7 +182,7 @@ function undo_clicked() {
 }
 
 function enable_and_or() {
-    var value = document.getElementById("keyword").value;
+    var value = document.getElementById("keywords").value;
     value = value == "-1";
     document.getElementById("and").disabled = value;
     document.getElementById("or").disabled = value;
@@ -222,7 +222,7 @@ function create() {
 
 function main_content() {
     var out = '';
-    out += '<input type="hidden" name="%(prop)s" value="' + current + '"\/>';
+    out += '<input type="hidden" name="keywords" value="' + current + '"\/>';
     out += parse(current).infix();
     return out;
 }
