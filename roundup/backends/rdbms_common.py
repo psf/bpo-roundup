@@ -65,10 +65,13 @@ from roundup.i18n import _
 
 # support
 from roundup.backends.blobfiles import FileStorage
-try:
-    from roundup.backends.indexer_xapian import Indexer
-except ImportError:
-    from roundup.backends.indexer_rdbms import Indexer
+# mvl 20120421: disable xapian usage because of various problems
+#try:
+#    from roundup.backends.indexer_xapian import Indexer
+#except ImportError:
+#    from roundup.backends.indexer_rdbms import Indexer
+from roundup.backends.indexer_rdbms import Indexer
+
 from roundup.backends.sessions_rdbms import Sessions, OneTimeKeys
 from roundup.date import Range
 
