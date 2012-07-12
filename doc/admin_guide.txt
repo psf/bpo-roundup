@@ -2,7 +2,7 @@
 Administration Guide
 ====================
 
-:Version: $Revision: 1.23 $
+:Version: $Revision: 1.27 $
 
 .. contents::
 
@@ -82,6 +82,9 @@ The basic configuration file layout is as follows (take from the
     ;log_ip = yes
     ;pidfile =
     ;logfile =
+    ;template =
+    ;ssl = no
+    ;pem =
 
     [trackers]
     ; Add one of these per tracker being served
@@ -109,6 +112,18 @@ are as follows:
   written to this file. It must be specified if **pidfile** is specified.
   If per-tracker logging is specified, then very little will be written to
   this file.
+**template**
+  Specifies a template used for displaying the tracker index when
+  multiple trackers are being used. The variable "trackers" is available
+  to the template and is a dict of all configured trackers.
+**ssl**
+  Enables the use of SSL to secure the connection to the roundup-server.
+  If you enable this, ensure that your tracker's config.ini specifies
+  an *https* URL.
+**pem**
+  If specified, the SSL PEM file containing the private key and certificate.
+  If not specified, roundup will generate a temporary, self-signed certificate
+  for use.
 **trackers** section
   Each line denotes a mapping from a URL component to a tracker home.
   Make sure the name part doesn't include any url-unsafe characters like
@@ -168,8 +183,15 @@ Maintenance of Roundup can involve one of the following:
 Tracker Backup
 --------------
 
-Stop the web and email frontends and to copy the contents of the tracker home
-directory to some other place using standard backup tools.
+The roundup-admin import and export commands are **not** recommended for
+performing backup.
+
+Optionally stop the web and email frontends and to copy the contents of the
+tracker home directory to some other place using standard backup tools.
+This means using
+*pg_dump* to take a snapshot of your Postgres backend database, for example.
+A simple copy of the tracker home (and files storage area if you've configured
+it to be elsewhere) will then complete the backup.
 
 
 Software Upgrade
@@ -187,6 +209,12 @@ take:
 4. Stop the tracker web and email frontends.
 5. Follow the steps in the `upgrading documentation`_ for the new version of
    the software in the copied.
+
+   Usually you will be asked to run `roundup_admin migrate` on your tracker
+   before you allow users to start accessing the tracker.
+
+   It's safe to run this even if it's not required, so just get into the
+   habit.
 6. You may test each of the admin tool, web interface and mail gateway using
    the new version of the software. To do this, invoke the scripts directly
    in the source directory with::

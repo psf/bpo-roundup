@@ -16,7 +16,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: admin.py,v 1.105 2006-08-11 05:13:06 richard Exp $
+# $Id: admin.py,v 1.110 2008-02-07 03:28:33 richard Exp $
 
 '''Administration commands for maintaining Roundup trackers.
 '''
@@ -75,6 +75,7 @@ class AdminTool:
                 self.help[k[5:]] = getattr(self, k)
         self.tracker_home = ''
         self.db = None
+        self.db_uncommitted = False
 
     def get_class(self, classname):
         '''Get the class - raise an exception if it doesn't exist.
@@ -286,26 +287,31 @@ Command help:
 
         Look in the following places, where the later rules take precedence:
 
-         1. <prefix>/share/roundup/templates/*
+         1. <roundup.admin.__file__>/../../share/roundup/templates/*
+            this is where they will be if we installed an egg via easy_install
+         2. <prefix>/share/roundup/templates/*
             this should be the standard place to find them when Roundup is
             installed
-         2. <roundup.admin.__file__>/../templates/*
+         3. <roundup.admin.__file__>/../templates/*
             this will be used if Roundup's run in the distro (aka. source)
             directory
-         3. <current working dir>/*
+         4. <current working dir>/*
             this is for when someone unpacks a 3rd-party template
-         4. <current working dir>
+         5. <current working dir>
             this is for someone who "cd"s to the 3rd-party template dir
         '''
         # OK, try <prefix>/share/roundup/templates
+        #     and <egg-directory>/share/roundup/templates
         # -- this module (roundup.admin) will be installed in something
         # like:
-        #    /usr/lib/python2.2/site-packages/roundup/admin.py  (5 dirs up)
-        #    c:\python22\lib\site-packages\roundup\admin.py     (4 dirs up)
-        # we're interested in where the "lib" directory is - ie. the /usr/
-        # part
+        #    /usr/lib/python2.5/site-packages/roundup/admin.py  (5 dirs up)
+        #    c:\python25\lib\site-packages\roundup\admin.py     (4 dirs up)
+        #    /usr/lib/python2.5/site-packages/roundup-1.3.3-py2.5-egg/roundup/admin.py
+        #    (2 dirs up)
+        #
+        # we're interested in where the directory containing "share" is
         templates = {}
-        for N in 4, 5:
+        for N in 2, 4, 5:
             path = __file__
             # move up N elements in the path
             for i in range(N):
@@ -642,6 +648,7 @@ Erase it? Y/N: """))
             except (TypeError, IndexError, ValueError), message:
                 import traceback; traceback.print_exc()
                 raise UsageError, message
+        self.db_uncommitted = True
         return 0
 
     def do_find(self, args):
@@ -749,7 +756,7 @@ Erase it? Y/N: """))
             keys.sort()
             for key in keys:
                 value = cl.get(nodeid, key)
-                print _('%(key)s: %(value)r')%locals()
+                print _('%(key)s: %(value)s')%locals()
 
     def do_create(self, args):
         ""'''Usage: create classname property=value ...
@@ -813,6 +820,7 @@ Erase it? Y/N: """))
             print apply(cl.create, (), props)
         except (TypeError, IndexError, ValueError), message:
             raise UsageError, message
+        self.db_uncommitted = True
         return 0
 
     def do_list(self, args):
@@ -995,6 +1003,7 @@ Erase it? Y/N: """))
         they are successful.
         '''
         self.db.commit()
+        self.db_uncommitted = False
         return 0
 
     def do_rollback(self, args):
@@ -1007,6 +1016,7 @@ Erase it? Y/N: """))
         immediately after would make no changes to the database.
         '''
         self.db.rollback()
+        self.db_uncommitted = False
         return 0
 
     def do_retire(self, args):
@@ -1030,6 +1040,7 @@ Erase it? Y/N: """))
                 raise UsageError, _('no such class "%(classname)s"')%locals()
             except IndexError:
                 raise UsageError, _('no such %(classname)s node "%(nodeid)s"')%locals()
+        self.db_uncommitted = True
         return 0
 
     def do_restore(self, args):
@@ -1052,6 +1063,7 @@ Erase it? Y/N: """))
                 raise UsageError, _('no such class "%(classname)s"')%locals()
             except IndexError:
                 raise UsageError, _('no such %(classname)s node "%(nodeid)s"')%locals()
+        self.db_uncommitted = True
         return 0
 
     def do_export(self, args, export_files=True):
@@ -1110,10 +1122,7 @@ Erase it? Y/N: """))
             # all nodes for this class
             for nodeid in cl.getnodeids():
                 if self.verbose:
-                    sys.stdout.write('Exporting %s - %s\r'%(classname, nodeid))
-                    sys.stdout.flush()
-                if self.verbose:
-                    sys.stdout.write('Exporting %s - %s\r'%(classname, nodeid))
+                    sys.stdout.write('\rExporting %s - %s'%(classname, nodeid))
                     sys.stdout.flush()
                 writer.writerow(cl.export_list(propnames, nodeid))
                 if export_files and hasattr(cl, 'export_files'):
@@ -1198,7 +1207,7 @@ Erase it? Y/N: """))
                     continue
 
                 if self.verbose:
-                    sys.stdout.write('Importing %s - %s\r'%(classname, n))
+                    sys.stdout.write('\rImporting %s - %s'%(classname, n))
                     sys.stdout.flush()
 
                 # do the import and figure the current highest nodeid
@@ -1219,6 +1228,7 @@ Erase it? Y/N: """))
             print 'setting', classname, maxid+1
             self.db.setid(classname, str(maxid+1))
 
+        self.db_uncommitted = True
         return 0
 
     def do_pack(self, args):
@@ -1257,6 +1267,7 @@ Erase it? Y/N: """))
         elif m['date']:
             pack_before = date.Date(value)
         self.db.pack(pack_before)
+        self.db_uncommitted = True
         return 0
 
     def do_reindex(self, args, desre=re.compile('([A-Za-z]+)([0-9]+)')):
@@ -1320,6 +1331,33 @@ Erase it? Y/N: """))
                             'only)')%d
                 else:
                     print _(' %(description)s (%(name)s)')%d
+        return 0
+
+
+    def do_migrate(self, args):
+        '''Usage: migrate
+        Update a tracker's database to be compatible with the Roundup
+        codebase.
+
+        You should run the "migrate" command for your tracker once you've
+        installed the latest codebase. 
+
+        Do this before you use the web, command-line or mail interface and
+        before any users access the tracker.
+
+        This command will respond with either "Tracker updated" (if you've
+        not previously run it on an RDBMS backend) or "No migration action
+        required" (if you have run it, or have used another interface to the
+        tracker, or possibly because you are using anydbm).
+
+        It's safe to run this even if it's not required, so just get into
+        the habit.
+        '''
+        if getattr(self.db, 'db_version_updated'):
+            print _('Tracker updated')
+            self.db_uncommitted = True
+        else:
+            print _('No migration action required')
         return 0
 
     def run_command(self, args):
@@ -1427,7 +1465,7 @@ Erase it? Y/N: """))
             self.run_command(args)
 
         # exit.. check for transactions
-        if self.db and self.db.transactions:
+        if self.db and self.db_uncommitted:
             commit = raw_input(_('There are unsaved changes. Commit them (y/N)? '))
             if commit and commit[0].lower() == 'y':
                 self.db.commit()

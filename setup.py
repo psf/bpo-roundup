@@ -16,7 +16,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: setup.py,v 1.96 2006-12-19 03:03:36 richard Exp $
+# $Id: setup.py,v 1.99 2007-11-07 21:24:24 richard Exp $
 
 from distutils.core import setup, Extension
 from distutils.util import get_platform
@@ -219,6 +219,11 @@ def check_manifest():
     finally:
         f.close()
     err = [line for line in manifest if not os.path.exists(line)]
+    err.sort()
+    # ignore auto-generated files
+    if err == ['roundup-admin', 'roundup-demo', 'roundup-gettext',
+            'roundup-mailgw', 'roundup-server']:
+        err = []
     if err:
         n = len(manifest)
         print '\n*** SOURCE WARNING: There are files missing (%d/%d found)!'%(
@@ -347,25 +352,35 @@ def main():
 '''In this release
 ===============
 
-Fixed in 1.3.2:
+The metakit backend has been removed due to lack of maintenance and
+presence of good alternatives (in particular sqlite built into Python 2.5)
 
-- relax rules for required fields in form_parser.py (sf bug 1599740)
-- documentation cleanup from Luke Ross (sf patch 1594860)
-- updated Spanish translation from Ramiro Morales (sf patch 1594718)
-- handle 8-bit untranslateable messages in tracker templates
-- handling of required for boolean False and numeric 0 (sf bug 1608200)
-- removed bogus args attr of ConfigurationError (sf bug 1608056)
-- implemented start_response in roundup.cgi (sf bug 1604304)
-- clarified windows service documentation (sf patch 1597713)
-- HTMLClass fixed to work with new item permissions check (sf bug 1602983)
-- support POP over SSL (sf patch 1597703)
-- clean up input field generation and quoting of values (sf bug 1615616)
-- allow use of roundup-server pidfile without forking (sf bug 1614753)
-- allow translation of status/priority menu options (sf bug 1613976)
+Release 1.4.1 removes an old trace of the metakit backend that was
+preventing new tracker installation.
 
-New Features in 1.3.0:
+New Features in 1.4.0:
 
-- WSGI support via roundup.cgi.wsgi_handler
+- Roundup has a new xmlrpc frontend that gives access to a tracker using
+  XMLRPC.
+- Dates can now be in the year-range 1-9999
+- Add simple anti-spam recipe to docs
+- Allow customisation of regular expressions used in email parsing, thanks
+  Bruno Damour
+- Italian translation by Marco Ghidinelli
+- Multilinks take any iterable
+- config option: specify port and local hostname for SMTP connections
+- Tracker index templating (i.e. when roundup_server is serving multiple
+  trackers) (sf bug 1058020)
+- config option: Limit nosy attachments based on size (Philipp Gortan)
+- roundup_server supports SSL via pyopenssl
+- templatable 404 not found messages (sf bug 1403287)
+- Unauthorized email includes a link to the registration page for
+  the tracker
+- config options: control whether author info/email is included in email
+  sent by roundup
+- support for receiving OpenPGP MIME messages (signed or encrypted)
+
+There's also a ton of bugfixes.
 
 If you're upgrading from an older version of Roundup you *must* follow
 the "Software Upgrade" guidelines given in the maintenance documentation.

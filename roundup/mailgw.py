@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #
 # Copyright (c) 2001 Bizar Software Pty Ltd (http://www.bizarsoftware.com.au/)
 # This module is free software, and you may redistribute it and/or modify
@@ -72,7 +73,7 @@ are calling the create() method to create a new node). If an auditor raises
 an exception, the original message is bounced back to the sender with the
 explanatory message given in the exception.
 
-$Id: mailgw.py,v 1.180 2006-12-19 01:13:31 richard Exp $
+$Id: mailgw.py,v 1.195 2008-02-07 03:33:31 richard Exp $
 """
 __docformat__ = 'restructuredtext'
 
@@ -80,9 +81,14 @@ import string, re, os, mimetools, cStringIO, smtplib, socket, binascii, quopri
 import time, random, sys, logging
 import traceback, MimeWriter, rfc822
 
-from roundup import hyperdb, date, password, rfc2822, exceptions
+from roundup import configuration, hyperdb, date, password, rfc2822, exceptions
 from roundup.mailer import Mailer, MessageSendError
 from roundup.i18n import _
+
+try:
+    import pyme, pyme.core, pyme.gpgme
+except ImportError:
+    pyme = None
 
 SENDMAILDEBUG = os.environ.get('SENDMAILDEBUG', '')
 
@@ -140,6 +146,70 @@ def getparam(str, param):
                 return rfc822.unquote(f[i+1:].strip())
     return None
 
+def gpgh_key_getall(key, attr):
+    ''' return list of given attribute for all uids in
+        a key
+    '''
+    u = key.uids
+    while u:
+        yield getattr(u, attr)
+        u = u.next
+
+def gpgh_sigs(sig):
+    ''' more pythonic iteration over GPG signatures '''
+    while sig:
+        yield sig
+        sig = sig.next
+
+
+def iter_roles(roles):
+    ''' handle the text processing of turning the roles list
+        into something python can use more easily
+    '''
+    for role in [x.lower().strip() for x in roles.split(',')]:
+        yield role
+
+def user_has_role(db, userid, role_list):
+    ''' see if the given user has any roles that appear
+        in the role_list
+    '''
+    for role in iter_roles(db.user.get(userid, 'roles')):
+        if role in iter_roles(role_list):
+            return True
+    return False
+
+
+def check_pgp_sigs(sig, gpgctx, author):
+    ''' Theoretically a PGP message can have several signatures. GPGME
+        returns status on all signatures in a linked list. Walk that
+        linked list looking for the author's signature
+    '''
+    for sig in gpgh_sigs(sig):
+        key = gpgctx.get_key(sig.fpr, False)
+        # we really only care about the signature of the user who
+        # submitted the email
+        if key and (author in gpgh_key_getall(key, 'email')):
+            if sig.summary & pyme.gpgme.GPGME_SIGSUM_VALID:
+                return True
+            else:
+                # try to narrow down the actual problem to give a more useful
+                # message in our bounce
+                if sig.summary & pyme.gpgme.GPGME_SIGSUM_KEY_MISSING:
+                    raise MailUsageError, \
+                        _("Message signed with unknown key: %s") % sig.fpr
+                elif sig.summary & pyme.gpgme.GPGME_SIGSUM_KEY_EXPIRED:
+                    raise MailUsageError, \
+                        _("Message signed with an expired key: %s") % sig.fpr
+                elif sig.summary & pyme.gpgme.GPGME_SIGSUM_KEY_REVOKED:
+                    raise MailUsageError, \
+                        _("Message signed with a revoked key: %s") % sig.fpr
+                else:
+                    raise MailUsageError, \
+                        _("Invalid PGP signature detected.")
+
+    # we couldn't find a key belonging to the author of the email
+    raise MailUsageError, _("Message signed with unknown key: %s") % sig.fpr
+
 class Message(mimetools.Message):
     ''' subclass mimetools.Message so we can retrieve the parts of the
         message...
@@ -156,6 +226,17 @@ class Message(mimetools.Message):
             if not line:
                 break
             if line.strip() in (mid, end):
+                # according to rfc 1431 the preceding line ending is part of
+                # the boundary so we need to strip that
+                length = s.tell()
+                s.seek(-2, 1)
+                lineending = s.read(2)
+                if lineending == '\r\n':
+                    s.truncate(length - 2)
+                elif lineending[1] in ('\r', '\n'):
+                    s.truncate(length - 1)
+                else:
+                    raise ValueError('Unknown line ending in message.')
                 break
             s.write(line)
         if not s.getvalue().strip():
@@ -166,6 +247,7 @@ class Message(mimetools.Message):
     def getparts(self):
         """Get all parts of this multipart message."""
         # skip over the intro to the first boundary
+        self.fp.seek(0)
         self.getpart()
 
         # accumulate the other parts
@@ -264,8 +346,13 @@ class Message(mimetools.Message):
     # multipart/form-data:
     #   For web forms only.
 
-    def extract_content(self, parent_type=None):
-        """Extract the body and the attachments recursively."""
+    def extract_content(self, parent_type=None, ignore_alternatives = False):
+        """Extract the body and the attachments recursively.
+        
+           If the content is hidden inside a multipart/alternative part,
+           we use the *last* text/plain part of the *first*
+           multipart/alternative in the whole message.
+        """
         content_type = self.gettype()
         content = None
         attachments = []
@@ -273,17 +360,35 @@ class Message(mimetools.Message):
         if content_type == 'text/plain':
             content = self.getbody()
         elif content_type[:10] == 'multipart/':
+            content_found = bool (content)
+            ig = ignore_alternatives and not content_found
             for part in self.getparts():
-                new_content, new_attach = part.extract_content(content_type)
+                new_content, new_attach = part.extract_content(content_type,
+                    not content and ig)
 
                 # If we haven't found a text/plain part yet, take this one,
                 # otherwise make it an attachment.
                 if not content:
                     content = new_content
+                    cpart   = part
                 elif new_content:
-                    attachments.append(part.as_attachment())
+                    if content_found or content_type != 'multipart/alternative':
+                        attachments.append(part.text_as_attachment())
+                    else:
+                        # if we have found a text/plain in the current
+                        # multipart/alternative and find another one, we
+                        # use the first as an attachment (if configured)
+                        # and use the second one because rfc 2046, sec.
+                        # 5.1.4. specifies that later parts are better
+                        # (thanks to Philipp Gortan for pointing this
+                        # out)
+                        attachments.append(cpart.text_as_attachment())
+                        content = new_content
+                        cpart   = part
 
                 attachments.extend(new_attach)
+            if ig and content_type == 'multipart/alternative' and content:
+                attachments = []
         elif (parent_type == 'multipart/signed' and
               content_type == 'application/pgp-signature'):
             # ignore it so it won't be saved as an attachment
@@ -292,9 +397,107 @@ class Message(mimetools.Message):
             attachments.append(self.as_attachment())
         return content, attachments
 
+    def text_as_attachment(self):
+        """Return first text/plain part as Message"""
+        if not self.gettype().startswith ('multipart/'):
+            return self.as_attachment()
+        for part in self.getparts():
+            content_type = part.gettype()
+            if content_type == 'text/plain':
+                return part.as_attachment()
+            elif content_type.startswith ('multipart/'):
+                p = part.text_as_attachment()
+                if p:
+                    return p
+        return None
+
     def as_attachment(self):
         """Return this message as an attachment."""
         return (self.getname(), self.gettype(), self.getbody())
+
+    def pgp_signed(self):
+        ''' RFC 3156 requires OpenPGP MIME mail to have the protocol parameter
+        '''
+        return self.gettype() == 'multipart/signed' \
+            and self.typeheader.find('protocol="application/pgp-signature"') != -1
+
+    def pgp_encrypted(self):
+        ''' RFC 3156 requires OpenPGP MIME mail to have the protocol parameter
+        '''
+        return self.gettype() == 'multipart/encrypted' \
+            and self.typeheader.find('protocol="application/pgp-encrypted"') != -1
+
+    def decrypt(self, author):
+        ''' decrypt an OpenPGP MIME message
+            This message must be signed as well as encrypted using the "combined"
+            method. The decrypted contents are returned as a new message.
+        '''
+        (hdr, msg) = self.getparts()
+        # According to the RFC 3156 encrypted mail must have exactly two parts.
+        # The first part contains the control information. Let's verify that
+        # the message meets the RFC before we try to decrypt it.
+        if hdr.getbody() != 'Version: 1' or hdr.gettype() != 'application/pgp-encrypted':
+            raise MailUsageError, \
+                _("Unknown multipart/encrypted version.")
+
+        context = pyme.core.Context()
+        ciphertext = pyme.core.Data(msg.getbody())
+        plaintext = pyme.core.Data()
+
+        result = context.op_decrypt_verify(ciphertext, plaintext)
+
+        if result:
+            raise MailUsageError, _("Unable to decrypt your message.")
+
+        # we've decrypted it but that just means they used our public
+        # key to send it to us. now check the signatures to see if it
+        # was signed by someone we trust
+        result = context.op_verify_result()
+        check_pgp_sigs(result.signatures, context, author)
+
+        plaintext.seek(0,0)
+        # pyme.core.Data implements a seek method with a different signature
+        # than roundup can handle. So we'll put the data in a container that
+        # the Message class can work with.
+        c = cStringIO.StringIO()
+        c.write(plaintext.read())
+        c.seek(0)
+        return Message(c)
+
+    def verify_signature(self, author):
+        ''' verify the signature of an OpenPGP MIME message
+            This only handles detached signatures. Old style
+            PGP mail (i.e. '-----BEGIN PGP SIGNED MESSAGE----')
+            is archaic and not supported :)
+        '''
+        # we don't check the micalg parameter...gpgme seems to
+        # figure things out on its own
+        (msg, sig) = self.getparts()
+
+        if sig.gettype() != 'application/pgp-signature':
+            raise MailUsageError, \
+                _("No PGP signature found in message.")
+
+        context = pyme.core.Context()
+        # msg.getbody() is skipping over some headers that are
+        # required to be present for verification to succeed so
+        # we'll do this by hand
+        msg.fp.seek(0)
+        # according to rfc 3156 the data "MUST first be converted
+        # to its content-type specific canonical form. For
+        # text/plain this means conversion to an appropriate
+        # character set and conversion of line endings to the
+        # canonical <CR><LF> sequence."
+        # TODO: what about character set conversion?
+        canonical_msg = re.sub('(?<!\r)\n', '\r\n', msg.fp.read())
+        msg_data = pyme.core.Data(canonical_msg)
+        sig_data = pyme.core.Data(sig.getbody())
+
+        context.op_verify(sig_data, msg_data, None)
+
+        # check all signatures for validity
+        result = context.op_verify_result()
+        check_pgp_sigs(result.signatures, context, author)
 
 class MailGW:
 
@@ -561,12 +764,15 @@ class MailGW:
 
             # bounce the message back to the sender with the error message
             # let the admin know that something very bad is happening
-            sendto = [sendto[0][1], self.instance.config.ADMIN_EMAIL]
             m = ['']
             m.append('An unexpected error occurred during the processing')
             m.append('of your message. The tracker administrator is being')
             m.append('notified.\n')
-            self.mailer.bounce_message(message, sendto, m)
+            self.mailer.bounce_message(message, sendto[0][1], m)
+
+            m.append('----------------')
+            m.append(traceback.format_exc())
+            self.mailer.bounce_message(message, [self.instance.config.ADMIN_EMAIL], m)
 
     def handle_message(self, message):
         ''' message - a Message instance
@@ -620,8 +826,9 @@ Emails to Roundup trackers must include a Subject: line!
         # Matches subjects like:
         # Re: "[issue1234] title of issue [status=resolved]"
 
-        tmpsubject = subject # We need subject untouched for later use
-                             # in error messages
+        # Alias since we need a reference to the original subject for
+        # later use in error messages
+        tmpsubject = subject
 
         sd_open, sd_close = config['MAILGW_SUBJECT_SUFFIX_DELIMITERS']
         delim_open = re.escape(sd_open)
@@ -633,41 +840,49 @@ Emails to Roundup trackers must include a Subject: line!
                                  'nodeid', 'title', 'args',
                                  'argswhole'])
 
-
         # Look for Re: et. al. Used later on for MAILGW_SUBJECT_CONTENT_MATCH
-        re_re = r'''(?P<refwd>(\s*\W?\s*(fw|fwd|re|aw|sv|ang)\W)+)\s*'''
-        m = re.match(re_re, tmpsubject, re.IGNORECASE|re.VERBOSE)
+        re_re = r"(?P<refwd>%s)\s*" % config["MAILGW_REFWD_RE"].pattern
+        m = re.match(re_re, tmpsubject, re.IGNORECASE|re.VERBOSE|re.UNICODE)
         if m:
-            matches.update(m.groupdict())
-            tmpsubject = tmpsubject[len(matches['refwd']):] # Consume Re:
+            m = m.groupdict()
+            if m['refwd']:
+                matches.update(m)
+                tmpsubject = tmpsubject[len(m['refwd']):] # Consume Re:
 
         # Look for Leading "
-        m = re.match(r'''(?P<quote>\s*")''', tmpsubject,
-                     re.IGNORECASE|re.VERBOSE)
+        m = re.match(r'(?P<quote>\s*")', tmpsubject,
+                     re.IGNORECASE)
         if m:
             matches.update(m.groupdict())
             tmpsubject = tmpsubject[len(matches['quote']):] # Consume quote
 
-        class_re = r'''%s(?P<classname>(%s))+(?P<nodeid>\d+)?%s''' % \
-                   (delim_open, "|".join(self.db.getclasses()), delim_close)
+        has_prefix = re.search(r'^%s(\w+)%s'%(delim_open,
+            delim_close), tmpsubject.strip())
+
+        class_re = r'%s(?P<classname>(%s))(?P<nodeid>\d+)?%s'%(delim_open,
+            "|".join(self.db.getclasses()), delim_close)
         # Note: re.search, not re.match as there might be garbage
         # (mailing list prefix, etc.) before the class identifier
-        m = re.search(class_re, tmpsubject, re.IGNORECASE|re.VERBOSE)
+        m = re.search(class_re, tmpsubject, re.IGNORECASE)
         if m:
             matches.update(m.groupdict())
             # Skip to the end of the class identifier, including any
             # garbage before it.
-            
+
             tmpsubject = tmpsubject[m.end():]
 
-        m = re.match(r'''(?P<title>[^%s]+)''' % delim_open, tmpsubject,
-                     re.IGNORECASE|re.VERBOSE)
+        # if we've not found a valid classname prefix then force the
+        # scanning to handle there being a leading delimiter
+        title_re = r'(?P<title>%s[^%s]+)'%(
+            not matches['classname'] and '.' or '', delim_open)
+        m = re.match(title_re, tmpsubject.strip(), re.IGNORECASE)
         if m:
             matches.update(m.groupdict())
             tmpsubject = tmpsubject[len(matches['title']):] # Consume title
 
-        args_re = r'''(?P<argswhole>%s(?P<args>.+?)%s)?''' % (delim_open, delim_close)
-        m = re.search(args_re, tmpsubject, re.IGNORECASE|re.VERBOSE)
+        args_re = r'(?P<argswhole>%s(?P<args>.+?)%s)?'%(delim_open,
+            delim_close)
+        m = re.search(args_re, tmpsubject.strip(), re.IGNORECASE|re.VERBOSE)
         if m:
             matches.update(m.groupdict())
 
@@ -687,21 +902,14 @@ Emails to Roundup trackers must include a Subject: line!
                 sendto = [from_list[0][1]]
                 self.mailer.standard_message(sendto, subject, '')
                 return
+
         # get the classname
         if pfxmode == 'none':
             classname = None
         else:
             classname = matches['classname']
-        if classname is None:
-            if self.default_class:
-                classname = self.default_class
-            else:
-                classname = config['MAILGW_DEFAULT_CLASS']
-                if not classname:
-                    # fail
-                    m = None
 
-        if not classname and pfxmode == 'strict':
+        if not classname and has_prefix and pfxmode == 'strict':
             raise MailUsageError, _("""
 The message you sent to roundup did not contain a properly formed subject
 line. The subject must contain a class name or designator to indicate the
@@ -716,29 +924,50 @@ line. The subject must contain a class name or designator to indicate the
 Subject was: '%(subject)s'
 """) % locals()
 
-        # try to get the class specified - if "loose" then fall back on the
-        # default
-        attempts = [classname]
-        if pfxmode == 'loose':
-            if self.default_class:
-                attempts.append(self.default_class)
-            else:
-                attempts.append(config['MAILGW_DEFAULT_CLASS'])
+        # try to get the class specified - if "loose" or "none" then fall
+        # back on the default
+        attempts = []
+        if classname:
+            attempts.append(classname)
+
+        if self.default_class:
+            attempts.append(self.default_class)
+        else:
+            attempts.append(config['MAILGW_DEFAULT_CLASS'])
+
+        # first valid class name wins
         cl = None
         for trycl in attempts:
             try:
-                cl = self.db.getclass(classname)
+                cl = self.db.getclass(trycl)
+                classname = trycl
                 break
             except KeyError:
                 pass
+
         if not cl:
             validname = ', '.join(self.db.getclasses())
-            raise MailUsageError, _("""
-The class name you identified in the subject line ("%(classname)s") does not exist in the
-database.
+            if classname:
+                raise MailUsageError, _("""
+The class name you identified in the subject line ("%(classname)s") does
+not exist in the database.
 
 Valid class names are: %(validname)s
 Subject was: "%(subject)s"
+""") % locals()
+            else:
+                raise MailUsageError, _("""
+You did not identify a class name in the subject line and there is no
+default set for this tracker. The subject must contain a class name or
+designator to indicate the 'topic' of the message. For example:
+    Subject: [issue] This is a new issue
+      - this will create a new issue in the tracker with the title 'This is
+        a new issue'.
+    Subject: [issue1234] This is a followup to issue 1234
+      - this will append the message's contents to the existing issue 1234
+        in the tracker.
+
+Subject was: '%(subject)s'
 """) % locals()
 
         # get the optional nodeid
@@ -770,7 +999,7 @@ Subject was: "%(subject)s"
         if nodeid is None and not title:
             raise MailUsageError, _("""
 I cannot match your message to a node in the database - you need to either
-supply a full designator (with number, eg "[issue123]" or keep the
+supply a full designator (with number, eg "[issue123]") or keep the
 previous subject title intact so I can match that.
 
 Subject was: "%(subject)s"
@@ -882,7 +1111,16 @@ The mail gateway is not properly set up. Please contact
             if author == anonid:
                 # we're anonymous and we need to be a registered user
                 from_address = from_list[0][1]
-                tracker_web = self.instance.config.TRACKER_WEB
+                registration_info = ""
+                if self.db.security.hasPermission('Web Access', author) and \
+                   self.db.security.hasPermission('Create', anonid, 'user'):
+                    tracker_web = self.instance.config.TRACKER_WEB
+                    registration_info = """ Please register at:
+
+%(tracker_web)suser?template=register
+
+...before sending mail to the tracker.""" % locals()
+
                 raise Unauthorized, _("""
 You are not a registered user. Please register at:
 
@@ -978,21 +1216,48 @@ Subject was: "%(subject)s"
             messageid = "<%s.%s.%s%s@%s>"%(time.time(), random.random(),
                 classname, nodeid, config['MAIL_DOMAIN'])
 
+        # if they've enabled PGP processing then verify the signature
+        # or decrypt the message
+
+        # if PGP_ROLES is specified the user must have a Role in the list
+        # or we will skip PGP processing
+        def pgp_role():
+            if self.instance.config.PGP_ROLES:
+                return user_has_role(self.db, author,
+                    self.instance.config.PGP_ROLES)
+            else:
+                return True
+
+        if self.instance.config.PGP_ENABLE and pgp_role():
+            assert pyme, 'pyme is not installed'
+            # signed/encrypted mail must come from the primary address
+            author_address = self.db.user.get(author, 'address')
+            if self.instance.config.PGP_HOMEDIR:
+                os.environ['GNUPGHOME'] = self.instance.config.PGP_HOMEDIR
+            if message.pgp_signed():
+                message.verify_signature(author_address)
+            elif message.pgp_encrypted():
+                # replace message with the contents of the decrypted
+                # message for content extraction
+                # TODO: encrypted message handling is far from perfect
+                # bounces probably include the decrypted message, for
+                # instance :(
+                message = message.decrypt(author_address)
+            else:
+                raise MailUsageError, _("""
+This tracker has been configured to require all email be PGP signed or
+encrypted.""")
         # now handle the body - find the message
-        content, attachments = message.extract_content()
+        ig = self.instance.config.MAILGW_IGNORE_ALTERNATIVES
+        content, attachments = message.extract_content(ignore_alternatives = ig)
         if content is None:
             raise MailUsageError, _("""
 Roundup requires the submission to be plain text. The message parser could
 not find a text/plain part to use.
 """)
 
-        # figure how much we should muck around with the email body
-        keep_citations = config['MAILGW_KEEP_QUOTED_TEXT']
-        keep_body = config['MAILGW_LEAVE_BODY_UNCHANGED']
-
         # parse the body of the message, stripping out bits as appropriate
-        summary, content = parseContent(content, keep_citations,
-            keep_body)
+        summary, content = parseContent(content, config=config)
         content = content.strip()
 
         #
@@ -1085,7 +1350,7 @@ Mail message was rejected by a detector.
                 cl.set(nodeid, **props)
             else:
                 nodeid = cl.create(**props)
-        except (TypeError, IndexError, ValueError), message:
+        except (TypeError, IndexError, ValueError, exceptions.Reject), message:
             raise MailUsageError, _("""
 There was a problem with the message you sent:
    %(message)s
@@ -1193,30 +1458,45 @@ def uidFromAddress(db, address, create=1, **user_props):
     else:
         return 0
 
+def parseContent(content, keep_citations=None, keep_body=None, config=None):
+    """Parse mail message; return message summary and stripped content
 
-def parseContent(content, keep_citations, keep_body,
-        blank_line=re.compile(r'[\r\n]+\s*[\r\n]+'),
-        eol=re.compile(r'[\r\n]+'),
-        signature=re.compile(r'^[>|\s]*-- ?$'),
-        original_msg=re.compile(r'^[>|\s]*-----\s?Original Message\s?-----$')):
-    ''' The message body is divided into sections by blank lines.
-        Sections where the second and all subsequent lines begin with a ">"
-        or "|" character are considered "quoting sections". The first line of
-        the first non-quoting section becomes the summary of the message.
+    The message body is divided into sections by blank lines.
+    Sections where the second and all subsequent lines begin with a ">"
+    or "|" character are considered "quoting sections". The first line of
+    the first non-quoting section becomes the summary of the message.
 
-        If keep_citations is true, then we keep the "quoting sections" in the
-        content.
-        If keep_body is true, we even keep the signature sections.
-    '''
+    Arguments:
+
+        keep_citations: declared for backward compatibility.
+            If omitted or None, use config["MAILGW_KEEP_QUOTED_TEXT"]
+
+        keep_body: declared for backward compatibility.
+            If omitted or None, use config["MAILGW_LEAVE_BODY_UNCHANGED"]
+
+        config: tracker configuration object.
+            If omitted or None, use default configuration.
+
+    """
+    if config is None:
+        config = configuration.CoreConfig()
+    if keep_citations is None:
+        keep_citations = config["MAILGW_KEEP_QUOTED_TEXT"]
+    if keep_body is None:
+        keep_body = config["MAILGW_LEAVE_BODY_UNCHANGED"]
+    eol = config["MAILGW_EOL_RE"]
+    signature = config["MAILGW_SIGN_RE"]
+    original_msg = config["MAILGW_ORIGMSG_RE"]
+
     # strip off leading carriage-returns / newlines
     i = 0
     for i in range(len(content)):
         if content[i] not in '\r\n':
             break
     if i > 0:
-        sections = blank_line.split(content[i:])
+        sections = config["MAILGW_BLANKLINE_RE"].split(content[i:])
     else:
-        sections = blank_line.split(content)
+        sections = config["MAILGW_BLANKLINE_RE"].split(content)
 
     # extract out the summary from the message
     summary = ''

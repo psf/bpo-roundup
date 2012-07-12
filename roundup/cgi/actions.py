@@ -1,4 +1,4 @@
-#$Id: actions.py,v 1.62 2006-08-11 05:41:32 richard Exp $
+#$Id: actions.py,v 1.71 2007-09-20 23:44:58 jpend Exp $
 
 import re, cgi, StringIO, urllib, Cookie, time, random, csv, codecs
 
@@ -148,21 +148,16 @@ class SearchAction(Action):
         """
         self.fakeFilterVars()
         queryname = self.getQueryName()
-    
+
         # editing existing query name?
-        old_queryname = ''
-        for key in ('@old-queryname', ':old-queryname'):
-            if self.form.has_key(key):
-                old_queryname = self.form[key].value.strip()
+        old_queryname = self.getFromForm('old-queryname')
 
         # handle saving the query params
         if queryname:
             # parse the environment and figure what the query _is_
             req = templating.HTMLRequest(self.client)
 
-            # The [1:] strips off the '?' character, it isn't part of the
-            # query string.
-            url = req.indexargs_url('', {})[1:]
+            url = self.getCurrentURL(req)
 
             key = self.db.query.getkey()
             if key:
@@ -247,11 +242,28 @@ class SearchAction(Action):
 
             self.form.value.append(cgi.MiniFieldStorage('@filter', key))
 
-    def getQueryName(self):
-        for key in ('@queryname', ':queryname'):
+    def getCurrentURL(self, req):
+        """Get current URL for storing as a query.
+
+        Note: We are removing the first character from the current URL,
+        because the leading '?' is not part of the query string.
+
+        Implementation note:
+        But maybe the template should be part of the stored query:
+        template = self.getFromForm('template')
+        if template:
+            return req.indexargs_url('', {'@template' : template})[1:]
+        """
+        return req.indexargs_url('', {})[1:]
+
+    def getFromForm(self, name):
+        for key in ('@' + name, ':' + name):
             if self.form.has_key(key):
                 return self.form[key].value.strip()
         return ''
+
+    def getQueryName(self):
+        return self.getFromForm('queryname')
 
 class EditCSVAction(Action):
     name = 'edit'
@@ -355,9 +367,11 @@ class EditCommon(Action):
         deps = {}
         links = {}
         for cn, nodeid, propname, vlist in all_links:
-            if not all_props.has_key((cn, nodeid)):
+            numeric_id = int (nodeid or 0)
+            if not (numeric_id > 0 or all_props.has_key((cn, nodeid))):
                 # link item to link to doesn't (and won't) exist
                 continue
+
             for value in vlist:
                 if not all_props.has_key(value):
                     # link item to link to doesn't (and won't) exist
@@ -389,36 +403,33 @@ class EditCommon(Action):
         m = []
         for needed in order:
             props = all_props[needed]
-            if not props:
-                # nothing to do
-                continue
             cn, nodeid = needed
+            if props:
+                if nodeid is not None and int(nodeid) > 0:
+                    # make changes to the node
+                    props = self._changenode(cn, nodeid, props)
 
-            if nodeid is not None and int(nodeid) > 0:
-                # make changes to the node
-                props = self._changenode(cn, nodeid, props)
-
-                # and some nice feedback for the user
-                if props:
-                    info = ', '.join(map(self._, props.keys()))
-                    m.append(
-                        self._('%(class)s %(id)s %(properties)s edited ok')
-                        % {'class':cn, 'id':nodeid, 'properties':info})
+                    # and some nice feedback for the user
+                    if props:
+                        info = ', '.join(map(self._, props.keys()))
+                        m.append(
+                            self._('%(class)s %(id)s %(properties)s edited ok')
+                            % {'class':cn, 'id':nodeid, 'properties':info})
+                    else:
+                        m.append(self._('%(class)s %(id)s - nothing changed')
+                            % {'class':cn, 'id':nodeid})
                 else:
-                    m.append(self._('%(class)s %(id)s - nothing changed')
-                        % {'class':cn, 'id':nodeid})
-            else:
-                assert props
+                    assert props
 
-                # make a new node
-                newid = self._createnode(cn, props)
-                if nodeid is None:
-                    self.nodeid = newid
-                nodeid = newid
+                    # make a new node
+                    newid = self._createnode(cn, props)
+                    if nodeid is None:
+                        self.nodeid = newid
+                    nodeid = newid
 
-                # and some nice feedback for the user
-                m.append(self._('%(class)s %(id)s created')
-                    % {'class':cn, 'id':newid})
+                    # and some nice feedback for the user
+                    m.append(self._('%(class)s %(id)s created')
+                        % {'class':cn, 'id':newid})
 
             # fill in new ids in links
             if links.has_key(needed):
@@ -760,7 +771,7 @@ class ConfRegoAction(RegoCommon):
         except (ValueError, KeyError), message:
             self.client.error_message.append(str(message))
             return
-        self.finishRego()
+        return self.finishRego()
 
 class RegisterAction(RegoCommon, EditCommon):
     name = 'register'

@@ -16,7 +16,7 @@ from __future__ import nested_scopes
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: roundupdb.py,v 1.128 2006-12-18 11:34:41 a1s Exp $
+# $Id: roundupdb.py,v 1.138 2008-01-08 20:58:31 richard Exp $
 
 """Extending hyperdb with types specific to issue-tracking.
 """
@@ -24,6 +24,7 @@ __docformat__ = 'restructuredtext'
 
 import re, os, smtplib, socket, time, random
 import cStringIO, base64, quopri, mimetypes
+import os.path
 
 from rfc2822 import encode_header
 
@@ -141,10 +142,10 @@ class IssueClass:
     #
     # Note that this list also includes properties
     # defined in the classic template:
-    # assignedto, topic, priority, status.
+    # assignedto, keyword, priority, status.
     (
         ''"title", ''"messages", ''"files", ''"nosy", ''"superseder",
-        ''"assignedto", ''"topic", ''"priority", ''"status",
+        ''"assignedto", ''"keyword", ''"priority", ''"status",
         # following properties are common for all hyperdb classes
         # they are listed here to keep things in one place
         ''"actor", ''"activity", ''"creator", ''"creation",
@@ -287,18 +288,17 @@ class IssueClass:
             authaddr = users.get(authid, 'address', '')            
         elif msgid:
             authid = messages.get(msgid, 'author')
-            authname = users.get(authid, 'realname')
-            if not authname:
-                authname = users.get(authid, 'username', '')
-            authaddr = users.get(authid, 'address', '')
         else:
-            # "system message"
-            authid = None
-            authname = 'admin'
-            authaddr = self.db.config.ADMIN_EMAIL
+            authid = self.db.getuid()
+        authname = users.get(authid, 'realname')
+        if not authname:
+            authname = users.get(authid, 'username', '')
+        authaddr = users.get(authid, 'address', '')
 
-        if authaddr:
+        if authaddr and self.db.config.MAIL_ADD_AUTHOREMAIL:
             authaddr = " <%s>" % straddr( ('',authaddr) )
+        elif authaddr:
+            authaddr = ""
 
         # make the message body
         m = ['']
@@ -308,23 +308,39 @@ class IssueClass:
             m.append(self.email_signature(nodeid, msgid))
 
         # add author information
-        if authid:
-            if msgid and len(self.get(nodeid,'messages')) == 1:
+        if authid and self.db.config.MAIL_ADD_AUTHORINFO:
+            if msgid and len(self.get(nodeid, 'messages')) == 1:
                 m.append(_("New submission from %(authname)s:")
                     % locals())
             elif msgid:
                 m.append(_("%(authname)s added the comment:")
                     % locals())
-            else:
+            elif msgid:
                 m.append(_("Changes by %(authname)s:")
                          % locals())
-        else:
-            m.append(_("System message:"))
-        m.append('')
+            else:
+                m.append(_("Change by %(authname)s%(authaddr)s:") % locals())
+            m.append('')
 
         # add the content
         if msgid is not None:
             m.append(messages.get(msgid, 'content', ''))
+
+        # get the files for this message
+        message_files = []
+        if msgid :
+            for fileid in messages.get(msgid, 'files') :
+                # check the attachment size
+                filename = self.db.filename('file', fileid, None)
+                filesize = os.path.getsize(filename)
+                if filesize <= self.db.config.NOSY_MAX_ATTACHMENT_SIZE:
+                    message_files.append(fileid)
+                else:
+                    base = self.db.config.TRACKER_WEB
+                    link = "".join((base, files.classname, fileid))
+                    filename = files.get(fileid, 'name')
+                    m.append(_("File '%(filename)s' not attached - "
+                        "you can download it from %(link)s.") % locals())
 
         # add the change note
         if note:
@@ -343,12 +359,6 @@ class IssueClass:
         content_encoded = cStringIO.StringIO()
         quopri.encode(content, content_encoded, 0)
         content_encoded = content_encoded.getvalue()
-
-        # get the files for this message
-        if msgid is None:
-            message_files = None
-        else:
-            message_files = messages.get(msgid, 'files')
 
         # make sure the To line is always the same (for testing mostly)
         sendto.sort()

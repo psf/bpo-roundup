@@ -1,7 +1,7 @@
 """Sending Roundup-specific mail over SMTP.
 """
 __docformat__ = 'restructuredtext'
-# $Id: mailer.py,v 1.18 2006-08-11 01:41:25 richard Exp $
+# $Id: mailer.py,v 1.21 2007-11-14 05:53:20 jpend Exp $
 
 import time, quopri, os, socket, smtplib, re, sys, traceback
 
@@ -10,6 +10,7 @@ from MimeWriter import MimeWriter
 
 from roundup.rfc2822 import encode_header
 from roundup import __version__
+from roundup.date import get_timezone
 
 try:
     from email.Utils import formatdate
@@ -29,6 +30,16 @@ class Mailer:
         # this var must contain a file to write the mail to
         self.debug = os.environ.get('SENDMAILDEBUG', '') \
             or config["MAIL_DEBUG"]
+
+        # set timezone so that things like formatdate(localtime=True)
+        # use the configured timezone
+        # apparently tzset doesn't exist in python under Windows, my bad.
+        # my pathetic attempts at googling a Windows-solution failed
+        # so if you're on Windows your mail won't use your configured
+        # timezone.
+        if hasattr(time, 'tzset'):
+            os.environ['TZ'] = get_timezone(self.config.TIMEZONE).tzname(None)
+            time.tzset()
 
     def get_standard_message(self, to, subject, author=None):
         '''Form a standard email message from Roundup.
@@ -60,7 +71,7 @@ class Mailer:
         writer.addheader('Subject', encode_header(subject, charset))
         writer.addheader('To', ', '.join(to))
         writer.addheader('From', author)
-        writer.addheader('Date', formatdate())
+        writer.addheader('Date', formatdate(localtime=True))
 
         # Add a unique Roundup header to help filtering
         writer.addheader('X-Roundup-Name', encode_header(tracker_name,
@@ -190,8 +201,8 @@ class SMTPConnection(smtplib.SMTP):
     ''' Open an SMTP connection to the mailhost specified in the config
     '''
     def __init__(self, config):
-
-        smtplib.SMTP.__init__(self, config.MAILHOST)
+        smtplib.SMTP.__init__(self, config.MAILHOST, port=config['MAIL_PORT'],
+                              local_hostname=config['MAIL_LOCAL_HOSTNAME'])
 
         # start the TLS if requested
         if config["MAIL_TLS"]:

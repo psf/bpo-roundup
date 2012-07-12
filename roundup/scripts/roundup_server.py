@@ -17,12 +17,17 @@
 
 """Command-line script that runs a server over roundup.cgi.client.
 
-$Id: roundup_server.py,v 1.87 2006-12-18 05:56:49 a1s Exp $
+$Id: roundup_server.py,v 1.94 2007-09-25 04:27:12 jpend Exp $
 """
 __docformat__ = 'restructuredtext'
 
 import errno, cgi, getopt, os, socket, sys, traceback, urllib, time
 import ConfigParser, BaseHTTPServer, SocketServer, StringIO
+
+try:
+    from OpenSSL import SSL
+except ImportError:
+    SSL = None
 
 # python version check
 from roundup import configuration, version_check
@@ -30,6 +35,7 @@ from roundup import __version__ as roundup_version
 
 # Roundup modules of use here
 from roundup.cgi import cgitb, client
+from roundup.cgi.PageTemplates.PageTemplate import PageTemplate
 import roundup.instance
 from roundup.i18n import _
 
@@ -65,6 +71,82 @@ else:
 if hasattr(os, 'fork'):
     MULTIPROCESS_TYPES.append("fork")
 DEFAULT_MULTIPROCESS = MULTIPROCESS_TYPES[-1]
+
+def auto_ssl():
+    print _('WARNING: generating temporary SSL certificate')
+    import OpenSSL, time, random, sys
+    pkey = OpenSSL.crypto.PKey()
+    pkey.generate_key(OpenSSL.crypto.TYPE_RSA, 768)
+    cert = OpenSSL.crypto.X509()
+    cert.set_serial_number(random.randint(0, sys.maxint))
+    cert.gmtime_adj_notBefore(0)
+    cert.gmtime_adj_notAfter(60 * 60 * 24 * 365) # one year
+    cert.get_subject().CN = '*'
+    cert.get_subject().O = 'Roundup Dummy Certificate'
+    cert.get_issuer().CN = 'Roundup Dummy Certificate Authority'
+    cert.get_issuer().O = 'Self-Signed'
+    cert.set_pubkey(pkey)
+    cert.sign(pkey, 'md5')
+    ctx = SSL.Context(SSL.SSLv23_METHOD)
+    ctx.use_privatekey(pkey)
+    ctx.use_certificate(cert)
+
+    return ctx
+
+class SecureHTTPServer(BaseHTTPServer.HTTPServer):
+    def __init__(self, server_address, HandlerClass, ssl_pem=None):
+        assert SSL, "pyopenssl not installed"
+        BaseHTTPServer.HTTPServer.__init__(self, server_address, HandlerClass)
+        self.socket = socket.socket(self.address_family, self.socket_type)
+        if ssl_pem:
+            ctx = SSL.Context(SSL.SSLv23_METHOD)
+            ctx.use_privatekey_file(ssl_pem)
+            ctx.use_certificate_file(ssl_pem)
+        else:
+            ctx = auto_ssl()
+        self.ssl_context = ctx
+        self.socket = SSL.Connection(ctx, self.socket)
+        self.server_bind()
+        self.server_activate()
+
+    def get_request(self):
+        (conn, info) = self.socket.accept()
+        if self.ssl_context:
+
+            class RetryingFile(object):
+                """ SSL.Connection objects can return Want__Error
+                    on recv/write, meaning "try again". We'll handle
+                    the try looping here """
+                def __init__(self, fileobj):
+                    self.__fileobj = fileobj
+
+                def readline(self, *args):
+                    """ SSL.Connection can return WantRead """
+                    line = None
+                    while not line:
+                        try:
+                            line = self.__fileobj.readline(*args)
+                        except SSL.WantReadError:
+                            line = None
+                    return line
+
+                def __getattr__(self, attrib):
+                    return getattr(self.__fileobj, attrib)
+
+            class ConnFixer(object):
+                """ wraps an SSL socket so that it implements makefile
+                    which the HTTP handlers require """
+                def __init__(self, conn):
+                    self.__conn = conn
+                def makefile(self, mode, bufsize):
+                    fo = socket._fileobject(self.__conn, mode, bufsize)
+                    return RetryingFile(fo)
+
+                def __getattr__(self, attrib):
+                    return getattr(self.__conn, attrib)
+
+            conn = ConnFixer(conn)
+        return (conn, info)
 
 class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     TRACKER_HOMES = {}
@@ -149,19 +231,33 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         if len(keys) == 1:
             self.send_response(302)
             self.send_header('Location', urllib.quote(keys[0]) + '/index')
+            self.end_headers()
         else:
             self.send_response(200)
+
         self.send_header('Content-Type', 'text/html')
         self.end_headers()
         w = self.wfile.write
-        w(_('<html><head><title>Roundup trackers index</title></head>\n'
-            '<body><h1>Roundup trackers index</h1><ol>\n'))
-        keys.sort()
-        for tracker in keys:
-            w('<li><a href="%(tracker_url)s/index">%(tracker_name)s</a>\n'%{
-                'tracker_url': urllib.quote(tracker),
-                'tracker_name': cgi.escape(tracker)})
-        w('</ol></body></html>')
+
+        if self.CONFIG and self.CONFIG['TEMPLATE']:
+            template = open(self.CONFIG['TEMPLATE']).read()
+            pt = PageTemplate()
+            pt.write(template)
+            extra = { 'trackers': self.TRACKERS,
+                'nothing' : None,
+                'true' : 1,
+                'false' : 0,
+            }
+            w(pt.pt_render(extra_context=extra))
+        else:
+            w(_('<html><head><title>Roundup trackers index</title></head>\n'
+                '<body><h1>Roundup trackers index</h1><ol>\n'))
+            keys.sort()
+            for tracker in keys:
+                w('<li><a href="%(tracker_url)s/index">%(tracker_name)s</a>\n'%{
+                    'tracker_url': urllib.quote(tracker),
+                    'tracker_name': cgi.escape(tracker)})
+            w('</ol></body></html>')
 
     def inner_run_cgi(self):
         ''' This is the inner part of the CGI handling
@@ -216,7 +312,7 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
         # figure the tracker
         l_path = rest.split('/')
-        tracker_name = urllib.unquote(l_path[1])
+        tracker_name = urllib.unquote(l_path[1]).lower()
 
         # handle missing trailing '/'
         if len(l_path) == 2:
@@ -393,6 +489,13 @@ class ServerConfig(configuration.Config):
             (configuration.Option, "multiprocess", DEFAULT_MULTIPROCESS,
                 "Set processing of each request in separate subprocess.\n"
                 "Allowed values: %s." % ", ".join(MULTIPROCESS_TYPES)),
+            (configuration.NullableFilePathOption, "template", "",
+                "Tracker index template. If unset, built-in will be used."),
+            (configuration.BooleanOption, "ssl", "no",
+                "Enable SSL support (requires pyopenssl)"),
+            (configuration.NullableFilePathOption, "pem", "",
+                "PEM file used for SSL. A temporary self-signed certificate\n"
+                "will be used if left blank."),
         )),
         ("trackers", (), "Roundup trackers to serve.\n"
             "Each option in this section defines single Roundup tracker.\n"
@@ -413,6 +516,9 @@ class ServerConfig(configuration.Config):
         "nodaemon": "D",
         "log_hostnames": "N",
         "multiprocess": "t:",
+        "template": "i:",
+        "ssl": "s",
+        "pem": "e:",
     }
 
     def __init__(self, config_file=None):
@@ -476,28 +582,38 @@ class ServerConfig(configuration.Config):
             DEBUG_MODE = self["MULTIPROCESS"] == "debug"
             CONFIG = self
 
+        if self["SSL"]:
+            base_server = SecureHTTPServer
+        else:
+            base_server = BaseHTTPServer.HTTPServer
+
         # obtain request server class
         if self["MULTIPROCESS"] not in MULTIPROCESS_TYPES:
             print _("Multiprocess mode \"%s\" is not available, "
                 "switching to single-process") % self["MULTIPROCESS"]
             self["MULTIPROCESS"] = "none"
-            server_class = BaseHTTPServer.HTTPServer
+            server_class = base_server
         elif self["MULTIPROCESS"] == "fork":
             class ForkingServer(SocketServer.ForkingMixIn,
-                BaseHTTPServer.HTTPServer):
+                base_server):
                     pass
             server_class = ForkingServer
         elif self["MULTIPROCESS"] == "thread":
             class ThreadingServer(SocketServer.ThreadingMixIn,
-                BaseHTTPServer.HTTPServer):
+                base_server):
                     pass
             server_class = ThreadingServer
         else:
-            server_class = BaseHTTPServer.HTTPServer
+            server_class = base_server
+
         # obtain server before changing user id - allows to
         # use port < 1024 if started as root
         try:
-            httpd = server_class((self["HOST"], self["PORT"]), RequestHandler)
+            args = ((self["HOST"], self["PORT"]), RequestHandler)
+            kwargs = {}
+            if self["SSL"]:
+                kwargs['ssl_pem'] = self["PEM"]
+            httpd = server_class(*args, **kwargs)
         except socket.error, e:
             if e[0] == errno.EADDRINUSE:
                 raise socket.error, \
@@ -594,6 +710,9 @@ Options:
  -p <port>     set the port to listen on (default: %(port)s)
  -l <fname>    log to the file indicated by fname instead of stderr/stdout
  -N            log client machine names instead of IP addresses (much slower)
+ -i <fname>    set tracker index template
+ -s            enable SSL
+ -e <fname>    PEM file containing SSL key and certificate
  -t <mode>     multiprocess mode (default: %(mp_def)s).
                Allowed values: %(mp_types)s.
 %(os_part)s
@@ -796,4 +915,4 @@ def run(port=undefined, success_message=None):
 if __name__ == '__main__':
     run()
 
-# vim: set filetype=python sts=4 sw=4 et si :
+# vim: sts=4 sw=4 et si

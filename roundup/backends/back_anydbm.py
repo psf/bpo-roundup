@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-#$Id: back_anydbm.py,v 1.202 2006-08-29 04:20:50 richard Exp $
+#$Id: back_anydbm.py,v 1.210 2008-02-07 00:57:59 richard Exp $
 '''This module defines a backend that saves the hyperdatabase in a
 database chosen by anydbm. It is guaranteed to always be available in python
 versions >2.1.1 (the dumbdbm fallback in 2.1.1 and earlier has several
@@ -85,6 +85,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         Class.set(), Class.retire(), and Class.restore() methods are
         disabled.
         '''
+        FileStorage.__init__(self, config.UMASK)
         self.config, self.journaltag = config, journaltag
         self.dir = config.DATABASE
         self.classes = {}
@@ -214,7 +215,8 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         if os.path.exists(path):
             db_type = whichdb.whichdb(path)
             if not db_type:
-                raise hyperdb.DatabaseError, "Couldn't identify database type"
+                raise hyperdb.DatabaseError, \
+                    _("Couldn't identify database type")
         elif os.path.exists(path+'.db'):
             # if the path ends in '.db', it's a dbm database, whether
             # anydbm says it's dbhash or not!
@@ -240,8 +242,8 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
             dbm = __import__(db_type)
         except ImportError:
             raise hyperdb.DatabaseError, \
-                "Couldn't open database - the required module '%s'"\
-                " is not available"%db_type
+                _("Couldn't open database - the required module '%s'"\
+                " is not available")%db_type
         if __debug__:
             logging.getLogger('hyperdb').debug("opendb %r.open(%r, %r)"%(db_type, path,
                 mode))
@@ -376,6 +378,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
 
         # add the destroy commit action
         self.transactions.append((self.doDestroyNode, (classname, nodeid)))
+        self.transactions.append((FileStorage.destroy, (self, classname, nodeid)))
 
     def serialise(self, classname, node):
         '''Copy the node contents, converting non-marshallable data into
@@ -619,6 +622,11 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
                 db.close()
             del self.databases
 
+        # clear the transactions list now so the blobfile implementation
+        # doesn't think there's still pending file commits when it tries
+        # to access the file data
+        self.transactions = []
+
         # reindex the nodes that request it
         for classname, nodeid in filter(None, reindex.keys()):
             self.getclass(classname).index(nodeid)
@@ -717,9 +725,6 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         if db.has_key(nodeid):
             del db[nodeid]
 
-        # return the classname, nodeid so we reindex this content
-        return (classname, nodeid)
-
     def rollback(self):
         ''' Reverse all actions from the current transaction.
         '''
@@ -792,7 +797,7 @@ class Class(hyperdb.Class):
             raise KeyError, '"id" is reserved'
 
         if self.db.journaltag is None:
-            raise hyperdb.DatabaseError, 'Database open read-only'
+            raise hyperdb.DatabaseError, _('Database open read-only')
 
         if propvalues.has_key('creation') or propvalues.has_key('activity'):
             raise KeyError, '"creation" and "activity" are reserved'
@@ -840,8 +845,10 @@ class Class(hyperdb.Class):
                         (self.classname, newid, key))
 
             elif isinstance(prop, hyperdb.Multilink):
-                if type(value) != type([]):
-                    raise TypeError, 'new property "%s" not a list of ids'%key
+                if value is None:
+                    value = []
+                if not hasattr(value, '__iter__'):
+                    raise TypeError, 'new property "%s" not an iterable of ids'%key
 
                 # clean up and validate the list of links
                 link_class = self.properties[key].classname
@@ -1065,7 +1072,7 @@ class Class(hyperdb.Class):
             raise KeyError, '"id" is reserved'
 
         if self.db.journaltag is None:
-            raise hyperdb.DatabaseError, 'Database open read-only'
+            raise hyperdb.DatabaseError, _('Database open read-only')
 
         node = self.db.getnode(self.classname, nodeid)
         if node.has_key(self.db.RETIRED_FLAG):
@@ -1132,8 +1139,10 @@ class Class(hyperdb.Class):
                             (self.classname, nodeid, propname))
 
             elif isinstance(prop, hyperdb.Multilink):
-                if type(value) != type([]):
-                    raise TypeError, 'new property "%s" not a list of'\
+                if value is None:
+                    value = []
+                if not hasattr(value, '__iter__'):
+                    raise TypeError, 'new property "%s" not an iterable of'\
                         ' ids'%propname
                 link_class = self.properties[propname].classname
                 l = []
@@ -1260,7 +1269,7 @@ class Class(hyperdb.Class):
         to modify the "creation" or "activity" properties cause a KeyError.
         '''
         if self.db.journaltag is None:
-            raise hyperdb.DatabaseError, 'Database open read-only'
+            raise hyperdb.DatabaseError, _('Database open read-only')
 
         self.fireAuditors('retire', nodeid, None)
 
@@ -1278,7 +1287,7 @@ class Class(hyperdb.Class):
         Make node available for all operations like it was before retirement.
         '''
         if self.db.journaltag is None:
-            raise hyperdb.DatabaseError, 'Database open read-only'
+            raise hyperdb.DatabaseError, _('Database open read-only')
 
         node = self.db.getnode(self.classname, nodeid)
         # check if key property was overrided
@@ -1324,7 +1333,7 @@ class Class(hyperdb.Class):
         support the session storage of the cgi interface.
         '''
         if self.db.journaltag is None:
-            raise hyperdb.DatabaseError, 'Database open read-only'
+            raise hyperdb.DatabaseError, _('Database open read-only')
         self.db.destroynode(self.classname, nodeid)
 
     def history(self, nodeid):
@@ -1517,7 +1526,7 @@ class Class(hyperdb.Class):
         must_close = False
         if db is None:
             db = self.db.getclassdb(self.classname)
-            must_close = True 
+            must_close = True
         try:
             res = res + db.keys()
 
@@ -1556,7 +1565,7 @@ class Class(hyperdb.Class):
 
         The filter must match all properties specificed. If the property
         value to match is a list:
-        
+
         1. String properties must match all elements in the list, and
         2. Other properties must match any of the elements in the list.
         """
@@ -1640,7 +1649,7 @@ class Class(hyperdb.Class):
                 l.append((OTHER, k, [float(val) for val in v]))
 
         filterspec = l
-
+        
         # now, find all the nodes that are active and pass filtering
         matches = []
         cldb = self.db.getclassdb(cn)
@@ -1894,7 +1903,7 @@ class Class(hyperdb.Class):
             Return the nodeid of the node imported.
         '''
         if self.db.journaltag is None:
-            raise hyperdb.DatabaseError, 'Database open read-only'
+            raise hyperdb.DatabaseError, _('Database open read-only')
         properties = self.getprops()
 
         # make the new node's property map
@@ -1962,8 +1971,7 @@ class Class(hyperdb.Class):
                         prop = properties[propname]
                         # make sure the params are eval()'able
                         if value is None:
-                            # don't export empties
-                            continue
+                            pass
                         elif isinstance(prop, hyperdb.Date):
                             # this is a hack - some dates are stored as strings
                             if not isinstance(value, type('')):

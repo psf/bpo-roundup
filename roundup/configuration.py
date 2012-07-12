@@ -1,16 +1,18 @@
 # Roundup Issue Tracker configuration support
 #
-# $Id: configuration.py,v 1.39 2006-12-18 06:06:03 richard Exp $
+# $Id: configuration.py,v 1.50 2007-11-14 14:57:47 schlatterbeck Exp $
 #
 __docformat__ = "restructuredtext"
 
+import ConfigParser
 import getopt
 import imp
-import os
-import time
-import ConfigParser
 import logging, logging.config
+import os
+import re
 import sys
+import time
+import smtplib
 
 import roundup.date
 
@@ -39,7 +41,7 @@ class InvalidOptionError(ConfigurationError, KeyError, AttributeError):
 
     Configuration options may be accessed as configuration object
     attributes or items.  So this exception instances also are
-    instances of KeyError (invalid item access) and AttrributeError
+    instances of KeyError (invalid item access) and AttributeError
     (invalid attribute access).
 
     Constructor parameter: option name
@@ -192,7 +194,7 @@ class Option:
         return self._value == self._default_value
 
     def isset(self):
-        """Return True if the value is avaliable (either set or default)"""
+        """Return True if the value is available (either set or default)"""
         return self._value != NODEFAULT
 
     def __str__(self):
@@ -423,6 +425,37 @@ class TimezoneOption(Option):
                     "Timezone name or numeric hour offset required")
         return value
 
+class RegExpOption(Option):
+
+    """Regular Expression option (value is Regular Expression Object)"""
+
+    class_description = "Value is Python Regular Expression (UTF8-encoded)."
+
+    RE_TYPE = type(re.compile(""))
+
+    def __init__(self, config, section, setting,
+        default=NODEFAULT, description=None, aliases=None,
+        flags=0,
+    ):
+        self.flags = flags
+        Option.__init__(self, config, section, setting, default,
+            description, aliases)
+
+    def _value2str(self, value):
+        assert isinstance(value, self.RE_TYPE)
+        return value.pattern
+
+    def str2value(self, value):
+        if not isinstance(value, unicode):
+            value = str(value)
+            # if it is 7-bit ascii, use it as string,
+            # otherwise convert to unicode.
+            try:
+                value.decode("ascii")
+            except UnicodeError:
+                value = value.decode("utf-8")
+        return re.compile(value, self.flags)
+
 ### Main configuration layout.
 # Config is described as a sequence of sections,
 # where each section name is followed by a sequence
@@ -582,6 +615,12 @@ SETTINGS = (
             "If username is not empty, password (below) MUST be set!"),
         (Option, "password", NODEFAULT, "SMTP login password.\n"
             "Set this if your mail host requires authenticated access."),
+        (IntegerNumberOption, "port", smtplib.SMTP_PORT,
+            "Default port to send SMTP on.\n"
+            "Set this if your mail server runs on a different port."),
+        (NullableOption, "local_hostname", '',
+            "The local hostname to use during SMTP transmission.\n"
+            "Set this if your mail server requires something specific."),
         (BooleanOption, "tls", "no",
             "If your SMTP mail host provides or requires TLS\n"
             "(Transport Layer Security) then set this option to 'yes'."),
@@ -603,6 +642,15 @@ SETTINGS = (
             "messages to this file *instead* of sending them.\n"
             "This option has the same effect as environment variable"
             " SENDMAILDEBUG.\nEnvironment variable takes precedence."),
+        (BooleanOption, "add_authorinfo", "yes",
+            "Add a line with author information at top of all messages\n"
+            "sent by roundup"),
+        (BooleanOption, "add_authoremail", "yes",
+            "Add the mail address of the author to the author information at\n"
+            "the top of all messages.\n"
+            "If this is false but add_authorinfo is true, only the name\n"
+            "of the actor is added which protects the mail address of the\n"
+            "actor from being exposed at mail archives, etc."),
     ), "Outgoing email options.\nUsed for nozy messages and approval requests"),
     ("mailgw", (
         (BooleanOption, "keep_quoted_text", "yes",
@@ -653,7 +701,39 @@ SETTINGS = (
             "will match an issue for the interval after the issue's\n"
             "creation or last activity. The interval is a standard\n"
             "Roundup interval."),
+        (RegExpOption, "refwd_re", "(\s*\W?\s*(fw|fwd|re|aw|sv|ang)\W)+",
+            "Regular expression matching a single reply or forward\n"
+            "prefix prepended by the mailer. This is explicitly\n"
+            "stripped from the subject during parsing."),
+        (RegExpOption, "origmsg_re",
+            "^[>|\s]*-----\s?Original Message\s?-----$",
+            "Regular expression matching start of an original message\n"
+            "if quoted the in body."),
+        (RegExpOption, "sign_re", "^[>|\s]*-- ?$",
+            "Regular expression matching the start of a signature\n"
+            "in the message body."),
+        (RegExpOption, "eol_re", r"[\r\n]+",
+            "Regular expression matching end of line."),
+        (RegExpOption, "blankline_re", r"[\r\n]+\s*[\r\n]+",
+            "Regular expression matching a blank line."),
+        (BooleanOption, "ignore_alternatives", "no",
+            "When parsing incoming mails, roundup uses the first\n"
+            "text/plain part it finds. If this part is inside a\n"
+            "multipart/alternative, and this option is set, all other\n"
+            "parts of the multipart/alternative are ignored. The default\n"
+            "is to keep all parts and attach them to the issue."),
     ), "Roundup Mail Gateway options"),
+    ("pgp", (
+        (BooleanOption, "enable", "no",
+            "Enable PGP processing. Requires pyme."),
+        (NullableOption, "roles", "",
+            "If specified, a comma-separated list of roles to perform\n"
+            "PGP processing on. If not specified, it happens for all\n"
+            "users."),
+        (NullableOption, "homedir", "",
+            "Location of PGP directory. Defaults to $HOME/.gnupg if\n"
+            "not specified."),
+    ), "OpenPGP mail processing options"),
     ("nosy", (
         (RunDetectorOption, "messages_to_author", "no",
             "Send nosy messages to the author of the message.",
@@ -681,6 +761,10 @@ SETTINGS = (
             "\"multiple\" then a separate email is sent to each\n"
             "recipient. If \"single\" then a single email is sent with\n"
             "each recipient as a CC address."),
+        (IntegerNumberOption, "max_attachment_size", sys.maxint,
+            "Attachments larger than the given number of bytes\n"
+            "won't be attached to nosy mails. They will be replaced by\n"
+            "a link to the tracker's download page for the file.")
     ), "Nosy messages sending"),
 )
 

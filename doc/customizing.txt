@@ -2,7 +2,7 @@
 Customising Roundup
 ===================
 
-:Version: $Revision: 1.215 $
+:Version: $Revision: 1.222 $
 
 .. This document borrows from the ZopeBook section on ZPT. The original is at:
    http://www.zope.org/Documentation/Books/ZopeBook/current/ZPT.stx
@@ -95,6 +95,14 @@ Section **main**
   Path to the HTML templates directory. The path may be either absolute
   or relative to the directory containig this config file.
 
+ static_files -- default *blank*
+  Path to directory holding additional static files available via Web
+  UI.  This directory may contain sitewide images, CSS stylesheets etc.
+  and is searched for these files prior to the TEMPLATES directory
+  specified above.  If this option is not set, all static files are
+  taken from the TEMPLATES directory The path may be either absolute or
+  relative to the directory containig this config file.
+
  admin_email -- ``roundup-admin``
   Email address that roundup will complain to if it runs into trouble. If
   the email address doesn't contain an ``@`` part, the MAIL_DOMAIN defined
@@ -150,6 +158,9 @@ Section **main**
   your tracker. See the indexer source for the default list of
   stop-words (e.g. ``A,AND,ARE,AS,AT,BE,BUT,BY, ...``).
 
+ umask -- ``02``
+  Defines the file creation mode mask.
+
 Section **tracker**
  name -- ``Roundup issue tracker``
   A descriptive name for your roundup instance.
@@ -163,6 +174,11 @@ Section **tracker**
 
  email -- ``issue_tracker``
   Email address that mail to roundup should go to.
+
+ language -- default *blank*
+  Default locale name for this tracker. If this option is not set, the
+  language is determined by the environment variable LANGUAGE, LC_ALL,
+  LC_MESSAGES, or LANG, in that order of preference.
 
 Section **web**
  http_auth -- ``yes``
@@ -204,6 +220,13 @@ Section **rdbms**
  password -- ``roundup``
   Database user password.
 
+ read_default_file -- ``~/.my.cnf``
+  Name of the MySQL defaults file. Only used in MySQL connections.
+
+ read_default_group -- ``roundup``
+  Name of the group to use in the MySQL defaults file. Only used in
+  MySQL connections.
+
 Section **logging**
  config -- default *blank*
   Path to configuration file for standard Python logging module. If this
@@ -240,6 +263,15 @@ Section **mail**
   SMTP login password.
   Set this if your mail host requires authenticated access.
 
+ port -- default *25*
+  SMTP port on mail host.
+  Set this if your mail host runs on a different port.
+
+ local_hostname -- default *blank*
+  The fully qualified domain name (FQDN) to use during SMTP sessions. If left
+  blank, the underlying SMTP library will attempt to detect your FQDN. If your
+  mail host requires something specific, specify the FQDN to use.
+
  tls -- ``no``
   If your SMTP mail host provides or requires TLS (Transport Layer Security)
   then you may set this option to 'yes'.
@@ -268,6 +300,16 @@ Section **mail**
   precedence. The path may be either absolute or relative to the directory
   containig this config file.
 
+ add_authorinfo -- ``yes``
+  Add a line with author information at top of all messages send by
+  roundup.
+
+ add_authoremail -- ``yes``
+  Add the mail address of the author to the author information at the
+  top of all messages.  If this is false but add_authorinfo is true,
+  only the name of the actor is added which protects the mail address
+  of the actor from being exposed at mail archives, etc.
+
 Section **mailgw**
  Roundup Mail Gateway options
 
@@ -284,6 +326,10 @@ Section **mailgw**
  default_class -- ``issue``
   Default class to use in the mailgw if one isn't supplied in email subjects.
   To disable, leave the value blank.
+
+ language -- default *blank*
+  Default locale name for the tracker mail gateway.  If this option is
+  not set, mail gateway will use the language of the tracker instance.
 
  subject_prefix_parsing -- ``strict``
   Controls the parsing of the [prefix] on subject lines in incoming emails.
@@ -309,6 +355,42 @@ Section **mailgw**
   matching. ``creation + interval`` or ``activity + interval`` will match
   an issue for the interval after the issue's creation or last activity.
   The interval is a standard Roundup interval.
+
+ refwd_re -- ``(\s*\W?\s*(fw|fwd|re|aw|sv|ang)\W)+``
+  Regular expression matching a single reply or forward prefix
+  prepended by the mailer. This is explicitly stripped from the
+  subject during parsing.  Value is Python Regular Expression
+  (UTF8-encoded).
+
+ origmsg_re -- `` ^[>|\s]*-----\s?Original Message\s?-----$``
+  Regular expression matching start of an original message if quoted
+  the in body.  Value is Python Regular Expression (UTF8-encoded).
+
+ sign_re -- ``^[>|\s]*-- ?$``
+  Regular expression matching the start of a signature in the message
+  body.  Value is Python Regular Expression (UTF8-encoded).
+
+ eol_re -- ``[\r\n]+``
+  Regular expression matching end of line.  Value is Python Regular
+  Expression (UTF8-encoded).
+
+ blankline_re -- ``[\r\n]+\s*[\r\n]+``
+  Regular expression matching a blank line.  Value is Python Regular
+  Expression (UTF8-encoded).
+
+Section **pgp**
+ OpenPGP mail processing options
+
+ enable -- ``no``
+  Enable PGP processing. Requires pyme.
+
+ roles -- default *blank*
+  If specified, a comma-separated list of roles to perform PGP
+  processing on. If not specified, it happens for all users.
+
+ homedir -- default *blank*
+  Location of PGP directory. Defaults to $HOME/.gnupg if not
+  specified.
 
 Section **nosy**
  Nosy messages sending
@@ -339,6 +421,12 @@ Section **nosy**
   Controls the email sending from the nosy reactor. If ``multiple`` then
   a separate email is sent to each recipient. If ``single`` then a single
   email is sent with each recipient as a CC address.
+
+ max_attachment_size -- ``2147483647``
+  Attachments larger than the given number of bytes won't be attached
+  to nosy mails. They will be replaced by a link to the tracker's
+  download page for the file.
+
 
 You may generate a new default config file using the ``roundup-admin
 genconfig`` command.
@@ -436,7 +524,7 @@ specifying (default) labelling and ordering of classes.)::
 
     file = FileClass(db, "file", name=String())
 
-    issue = IssueClass(db, "issue", topic=Multilink("keyword"),
+    issue = IssueClass(db, "issue", keyword=Multilink("keyword"),
         status=Link("status"), assignedto=Link("user"),
         priority=Link("priority"))
     issue.setkey('title')
@@ -2472,10 +2560,10 @@ An index view specifier (URL fragment) looks like this (whitespace has
 been added for clarity)::
 
     /issue?status=unread,in-progress,resolved&
-        topic=security,ui&
+        keyword=security,ui&
         @group=priority,-status&
         @sort=-activity&
-        @filters=status,topic&
+        @filters=status,keyword&
         @columns=title,status,fixer
 
 The index view is determined by two parts of the specifier: the layout
@@ -2494,11 +2582,11 @@ of items with values matching any specified Multilink properties.
 
 The example specifies an index of "issue" items. Only items with a
 "status" of either "unread" or "in-progress" or "resolved" are
-displayed, and only items with "topic" values including both "security"
+displayed, and only items with "keyword" values including both "security"
 and "ui" are displayed. The items are grouped by priority arranged in
 ascending order and in descending order by status; and within
 groups, sorted by activity, arranged in descending order. The filter
-section shows filters for the "status" and "topic" properties, and the
+section shows filters for the "status" and "keyword" properties, and the
 table includes columns for the "title", "status", and "fixer"
 properties.
 
@@ -2892,28 +2980,42 @@ Schema changes are automatically applied to the database on the next
 tracker access (note that roundup-server would need to be restarted as it
 caches the schema).
 
-1. modify the ``schema.py``::
+1. Modify the ``schema.py``::
 
     issue = IssueClass(db, "issue", 
-                    assignedto=Link("user"), topic=Multilink("keyword"),
+                    assignedto=Link("user"), keyword=Multilink("keyword"),
                     priority=Link("priority"), status=Link("status"),
                     due_date=Date())
 
-2. add an edit field to the ``issue.item.html`` template::
+2. Add an edit field to the ``issue.item.html`` template::
 
     <tr> 
      <th>Due Date</th> 
      <td tal:content="structure context/due_date/field" /> 
-    </tr> 
+    </tr>
+    
+   If you want to show only the date part of due_date then do this instead::
+   
+    <tr> 
+     <th>Due Date</th> 
+     <td tal:content="structure python:context.due_date.field(format='%Y-%m-%d')" /> 
+    </tr>
 
-3. add the property to the ``issue.index.html`` page::
+3. Add the property to the ``issue.index.html`` page::
 
     (in the heading row)
       <th tal:condition="request/show/due_date">Due Date</th>
     (in the data row)
-      <td tal:condition="request/show/due_date" tal:content="i/due_date" />
+      <td tal:condition="request/show/due_date" 
+          tal:content="i/due_date" />
+          
+   If you want format control of the display of the due date you can
+   enter the following in the data row to show only the actual due date::
+    
+      <td tal:condition="request/show/due_date" 
+          tal:content="python:i.due_date.pretty('%Y-%m-%d')">&nbsp;</td>
 
-4. add the property to the ``issue.search.html`` page::
+4. Add the property to the ``issue.search.html`` page::
 
      <tr tal:define="name string:due_date">
        <th i18n:translate="">Due Date:</th>
@@ -2923,11 +3025,12 @@ caches the schema).
        <td metal:use-macro="group_input"></td>
      </tr>
 
-5. if you wish for the due date to appear in the standard views listed
-    in the sidebar of the web interface then you'll need to add "due_date"
-    to the list of @columns in the links in the sidebar section of
-    ``page.html``.
-
+5. If you wish for the due date to appear in the standard views listed
+   in the sidebar of the web interface then you'll need to add "due_date"
+   to the columns and columns_showall lists in your ``page.html``::
+    
+    columns string:id,activity,due_date,title,creator,status;
+    columns_showall string:id,activity,due_date,title,creator,assignedto,status;
 
 Adding a new constrained field to the classic schema
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3374,7 +3477,7 @@ be able to give a summary of the total time spent on a particular issue.
    ``schema.py``)::
 
     issue = IssueClass(db, "issue", 
-                    assignedto=Link("user"), topic=Multilink("keyword"),
+                    assignedto=Link("user"), keyword=Multilink("keyword"),
                     priority=Link("priority"), status=Link("status"),
                     times=Multilink("timelog"))
 
@@ -3392,7 +3495,7 @@ be able to give a summary of the total time spent on a particular issue.
     <tr> 
      <th>Time Log</th> 
      <td colspan=3><input type="text" name="timelog-1@period" /> 
-      <br />(enter as '3y 1m 4d 2:40:02' or parts thereof) 
+      (enter as '3y 1m 4d 2:40:02' or parts thereof) 
      </td> 
     </tr> 
          
@@ -3405,6 +3508,17 @@ be able to give a summary of the total time spent on a particular issue.
    On submission, the "-1" timelog item will be created and assigned a
    real item id. The "times" property of the issue will have the new id
    added to it.
+   
+   The full entry will now look like this::
+   
+    <tr> 
+     <th>Time Log</th> 
+     <td colspan=3><input type="text" name="timelog-1@period" /> 
+      (enter as '3y 1m 4d 2:40:02' or parts thereof)
+      <input type="hidden" name="@link@times" value="timelog-1" /> 
+     </td> 
+    </tr> 
+   
 
 4. We want to display a total of the timelog times that have been
    accumulated for an issue. To do this, we'll need to actually write
@@ -3451,7 +3565,7 @@ be able to give a summary of the total time spent on a particular issue.
    displayed in the template as text like "+ 1y 2:40" (1 year, 2 hours
    and 40 minutes).
 
-8. If you're using a persistent web server - ``roundup-server`` or
+6. If you're using a persistent web server - ``roundup-server`` or
    ``mod_python`` for example - then you'll need to restart that to pick up
    the code changes. When that's done, you'll be able to use the new
    time logging interface.
@@ -3459,7 +3573,7 @@ be able to give a summary of the total time spent on a particular issue.
 An extension of this modification attaches the timelog entries to any
 change message entered at the time of the timelog entry:
 
-1. Add a link to the timelog to the msg class:
+A. Add a link to the timelog to the msg class in ``schema.py``:
 
     msg = FileClass(db, "msg",
                     author=Link("user", do_journal='no'),
@@ -3468,19 +3582,51 @@ change message entered at the time of the timelog entry:
                     summary=String(),
                     files=Multilink("file"),
                     messageid=String(),
-                    inreplyto=String()
+                    inreplyto=String(),
                     times=Multilink("timelog"))
 
-2. Add a new hidden field that links that new timelog item (new
+B. Add a new hidden field that links that new timelog item (new
    because it's marked as having id "-1") to the new message.
-   It looks like this::
- 
-      <input type="hidden" name="msg-1@link@times" value="timelog-1" />
+   The link is placed in ``issue.item.html`` in the same section that
+   handles the timelog entry.
+   
+   It looks like this after this addition::
+
+    <tr> 
+     <th>Time Log</th> 
+     <td colspan=3><input type="text" name="timelog-1@period" /> 
+      (enter as '3y 1m 4d 2:40:02' or parts thereof)
+      <input type="hidden" name="@link@times" value="timelog-1" />
+      <input type="hidden" name="msg-1@link@times" value="timelog-1" /> 
+     </td> 
+    </tr> 
  
    The "times" property of the message will have the new id added to it.
 
-3. Add the timelog listing from step 5. to the ``msg.item.html`` template
-   so that the timelog entry appears on the message view page.
+C. Add the timelog listing from step 5. to the ``msg.item.html`` template
+   so that the timelog entry appears on the message view page. Note that
+   the call to totalTimeSpent is not used here since there will only be one
+   single timelog entry for each message.
+   
+   I placed it after the Date entry like this::
+   
+    <tr>
+     <th i18n:translate="">Date:</th>
+     <td tal:content="context/date"></td>
+    </tr>
+    </table>
+    
+    <table class="otherinfo" tal:condition="context/times">
+     <tr><th colspan="3" class="header">Time Log</th></tr>
+     <tr><th>Date</th><th>Period</th><th>Logged By</th></tr>
+     <tr tal:repeat="time context/times">
+      <td tal:content="time/creation"></td>
+      <td tal:content="time/period"></td>
+      <td tal:content="time/creator"></td>
+     </tr>
+    </table>
+    
+    <table class="messages">
 
 
 Tracking different types of issues
@@ -3504,7 +3650,7 @@ a system support issue class to a tracker.
 
     # store issues related to those systems
     support = IssueClass(db, "support", 
-                    assignedto=Link("user"), topic=Multilink("keyword"),
+                    assignedto=Link("user"), keyword=Multilink("keyword"),
                     status=Link("status"), deadline=Date(),
                     affects=Multilink("system"))
 
@@ -3776,6 +3922,37 @@ So you could reimplement this as something like::
 Changes to Tracker Behaviour
 ----------------------------
 
+Preventing SPAM
+~~~~~~~~~~~~~~~
+
+The following detector code may be installed in your tracker's
+``detectors`` directory. It will block any messages being created that
+have HTML attachments (a very common vector for spam and phishing)
+and any messages that have more than 2 HTTP URLs in them. Just copy
+the following into ``detectors/anti_spam.py`` in your tracker::
+
+    from roundup.exceptions import Reject
+
+    def reject_html(db, cl, nodeid, newvalues):
+        if newvalues['type'] == 'text/html':
+        raise Reject, 'not allowed'
+
+    def reject_manylinks(db, cl, nodeid, newvalues):
+        content = newvalues['content']
+        if content.count('http://') > 2:
+        raise Reject, 'not allowed'
+
+    def init(db):
+        db.file.audit('create', reject_html)
+        db.msg.audit('create', reject_manylinks)
+
+You may also wish to block image attachments if your tracker does not
+need that ability::
+
+    if newvalues['type'].startswith('image/'):
+        raise Reject, 'not allowed'
+
+
 Stop "nosy" messages going to people on vacation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -3957,14 +4134,14 @@ resolved. To achieve this:
    this class in your tracker's ``schema.py`` file. Change this::
 
     issue = IssueClass(db, "issue", 
-                    assignedto=Link("user"), topic=Multilink("keyword"),
+                    assignedto=Link("user"), keyword=Multilink("keyword"),
                     priority=Link("priority"), status=Link("status"))
 
    to this, adding the blockers entry::
 
     issue = IssueClass(db, "issue", 
                     blockers=Multilink("issue"),
-                    assignedto=Link("user"), topic=Multilink("keyword"),
+                    assignedto=Link("user"), keyword=Multilink("keyword"),
                     priority=Link("priority"), status=Link("status"))
 
 2. Add the new ``blockers`` property to the ``issue.item.html`` edit
@@ -3974,12 +4151,14 @@ resolved. To achieve this:
     <td>
      <span tal:replace="structure python:context.blockers.field(showid=1,
                                   size=20)" />
-     <span tal:replace="structure python:db.issue.classhelp('id,title')" />
+     <span tal:replace="structure python:db.issue.classhelp('id,title',
+                                  property='blockers')" />
      <span tal:condition="context/blockers"
            tal:repeat="blk context/blockers">
       <br>View: <a tal:attributes="href string:issue${blk/id}"
                    tal:content="blk/id"></a>
      </span>
+    </td>
 
    You'll need to fiddle with your item page layout to find an
    appropriate place to put it - I'll leave that fun part up to you.
@@ -4067,16 +4246,33 @@ resolved. To achieve this:
    example, the existing "Show All" link in the "page" template (in the
    tracker's "html" directory) looks like this::
 
-     <a href="issue?@sort=-activity&@group=priority&@filter=status&
-        @columns=id,activity,title,creator,assignedto,status&
-        status=-1,1,2,3,4,5,6,7">Show All</a><br>
+    <a href="#"
+       tal:attributes="href python:request.indexargs_url('issue', {
+      '@sort': '-activity',
+      '@group': 'priority',
+      '@filter': 'status',
+      '@columns': columns_showall,
+      '@search_text': '',
+      'status': status_notresolved,
+      '@dispname': i18n.gettext('Show All'),
+     })"
+       i18n:translate="">Show All</a><br>
 
    modify it to add the "blockers" info to the URL (note, both the
    "@filter" *and* "blockers" values must be specified)::
 
-     <a href="issue?@sort=-activity&@group=priority&@filter=status,blockers&
-        blockers=-1&@columns=id,activity,title,creator,assignedto,status&
-        status=-1,1,2,3,4,5,6,7">Show All</a><br>
+    <a href="#"
+       tal:attributes="href python:request.indexargs_url('issue', {
+      '@sort': '-activity',
+      '@group': 'priority',
+      '@filter': 'status,blockers',
+      '@columns': columns_showall,
+      '@search_text': '',
+      'status': status_notresolved,
+      'blockers': '-1',
+      '@dispname': i18n.gettext('Show All'),
+     })"
+       i18n:translate="">Show All</a><br>
 
    The above examples are line-wrapped on the trailing & and should
    be unwrapped.
@@ -4087,33 +4283,32 @@ on it (i.e. it's in their blockers list) you can look at the journal
 history at the bottom of the issue page - look for a "link" event to
 another issue's "blockers" property.
 
-Add users to the nosy list based on the topic
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Add users to the nosy list based on the keyword
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Let's say we need the ability to automatically add users to the nosy
 list based
-on the occurance of a topic. Every user should be allowed to edit their
-own list of topics for which they want to be added to the nosy list.
+on the occurance of a keyword. Every user should be allowed to edit their
+own list of keywords for which they want to be added to the nosy list.
 
 Below, we'll show that this change can be done with minimal
 understanding of the Roundup system, using only copy and paste.
 
 This requires three changes to the tracker: a change in the database to
-allow per-user recording of the lists of topics for which he wants to
+allow per-user recording of the lists of keywords for which he wants to
 be put on the nosy list, a change in the user view allowing them to edit
-this list of topics, and addition of an auditor which updates the nosy
-list when a topic is set.
+this list of keywords, and addition of an auditor which updates the nosy
+list when a keyword is set.
 
-Adding the nosy topic list
-::::::::::::::::::::::::::
+Adding the nosy keyword list
+::::::::::::::::::::::::::::
 
-The change to make in the database, is that for any user there should be
-a list of topics for which he wants to be put on the nosy list. Adding
-a ``Multilink`` of ``keyword`` seems to fullfill this (note that within
-the code, topics are called ``keywords``.) As such, all that has to be
-done is to add a new field to the definition of ``user`` within the
-file ``schema.py``.  We will call this new field ``nosy_keywords``, and
-the updated definition of user will be::
+The change to make in the database, is that for any user there should be a list
+of keywords for which he wants to be put on the nosy list. Adding a
+``Multilink`` of ``keyword`` seems to fullfill this. As such, all that has to
+be done is to add a new field to the definition of ``user`` within the file
+``schema.py``.  We will call this new field ``nosy_keywords``, and the updated
+definition of user will be::
 
     user = Class(db, "user", 
                     username=String(),   password=Password(),
@@ -4124,22 +4319,22 @@ the updated definition of user will be::
                     timezone=String(),
                     nosy_keywords=Multilink('keyword'))
  
-Changing the user view to allow changing the nosy topic list
-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+Changing the user view to allow changing the nosy keyword list
+::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
-We want any user to be able to change the list of topics for which
+We want any user to be able to change the list of keywords for which
 he will by default be added to the nosy list. We choose to add this
 to the user view, as is generated by the file ``html/user.item.html``.
 We can easily 
-see that the topic field in the issue view has very similar editing
-requirements as our nosy topics, both being lists of topics. As
-such, we look for Topics in ``issue.item.html``, and extract the
+see that the keyword field in the issue view has very similar editing
+requirements as our nosy keywords, both being lists of keywords. As
+such, we look for Keywords in ``issue.item.html``, and extract the
 associated parts from there. We add this to ``user.item.html`` at the 
 bottom of the list of viewed items (i.e. just below the 'Alternate
 E-mail addresses' in the classic template)::
 
  <tr>
-  <th>Nosy Topics</th>
+  <th>Nosy Keywords</th>
   <td>
   <span tal:replace="structure context/nosy_keywords/field" />
   <span tal:replace="structure python:db.keyword.classhelp(property='nosy_keywords')" />
@@ -4152,7 +4347,7 @@ Addition of an auditor to update the nosy list
 
 The more difficult part is the logic to add
 the users to the nosy list when required. 
-We choose to perform this action whenever the topics on an
+We choose to perform this action whenever the keywords on an
 item are set (this includes the creation of items).
 Here we choose to start out with a copy of the 
 ``detectors/nosyreaction.py`` detector, which we copy to the file
@@ -4173,8 +4368,8 @@ functionality is left in the new auditor. The following block of
 code, which handled adding the assignedto user(s) to the nosy list in
 ``updatenosy``, should be replaced by a block of code to add the
 interested users to the nosy list. We choose here to loop over all
-new topics, than looping over all users,
-and assign the user to the nosy list when the topic occurs in the user's
+new keywords, than looping over all users,
+and assign the user to the nosy list when the keyword occurs in the user's
 ``nosy_keywords``. The next part in ``updatenosy`` -- adding the author
 and/or recipients of a message to the nosy list -- is obviously not
 relevant here and is thus deleted from the new auditor. The last
@@ -4182,7 +4377,7 @@ part, copying the new nosy list to ``newvalues``, can stay as is.
 This results in the following function::
 
     def update_kw_nosy(db, cl, nodeid, newvalues):
-        '''Update the nosy list for changes to the topics
+        '''Update the nosy list for changes to the keywords
         '''
         # nodeid will be None if this is a new node
         current = {}
@@ -4207,17 +4402,17 @@ This results in the following function::
                 if not current.has_key(value):
                     current[value] = 1
 
-        # add users with topic in nosy_keywords to the nosy list
-        if newvalues.has_key('topic') and newvalues['topic'] is not None:
-            topic_ids = newvalues['topic']
-            for topic in topic_ids:
+        # add users with keyword in nosy_keywords to the nosy list
+        if newvalues.has_key('keyword') and newvalues['keyword'] is not None:
+            keyword_ids = newvalues['keyword']
+            for keyword in keyword_ids:
                 # loop over all users,
-                # and assign user to nosy when topic in nosy_keywords
+                # and assign user to nosy when keyword in nosy_keywords
                 for user_id in db.user.list():
                     nosy_kw = db.user.get(user_id, "nosy_keywords")
                     found = 0
                     for kw in nosy_kw:
-                        if kw == topic:
+                        if kw == keyword:
                             found = 1
                     if found:
                         current[user_id] = 1
@@ -4237,10 +4432,10 @@ A few problems with the design here can be noted:
 Multiple additions
     When a user, after automatic selection, is manually removed
     from the nosy list, he is added to the nosy list again when the
-    topic list of the issue is updated. A better design might be
-    to only check which topics are new compared to the old list
-    of topics, and only add users when they have indicated
-    interest on a new topic.
+    keyword list of the issue is updated. A better design might be
+    to only check which keywords are new compared to the old list
+    of keywords, and only add users when they have indicated
+    interest on a new keyword.
 
     The code could also be changed to only trigger on the ``create()``
     event, rather than also on the ``set()`` event, thus only setting
@@ -4250,8 +4445,8 @@ Scalability
     In the auditor, there is a loop over all users. For a site with
     only few users this will pose no serious problem; however, with
     many users this will be a serious performance bottleneck.
-    A way out would be to link from the topics to the users who
-    selected these topics as nosy topics. This will eliminate the
+    A way out would be to link from the keywords to the users who
+    selected these keywords as nosy keywords. This will eliminate the
     loop over all users.
 
 Changes to Security and Permissions

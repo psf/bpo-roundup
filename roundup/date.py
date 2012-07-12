@@ -15,7 +15,7 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: date.py,v 1.88 2006-09-09 05:50:17 richard Exp $
+# $Id: date.py,v 1.94 2007-12-23 00:23:23 richard Exp $
 
 """Date, time and time interval handling.
 """
@@ -32,15 +32,6 @@ except ImportError:
     pytz = None
 
 from roundup import i18n
-
-def _add_granularity(src, order, value = 1):
-    '''Increment first non-None value in src dictionary ordered by 'order'
-    parameter
-    '''
-    for gran in order:
-        if src[gran]:
-            src[gran] = int(src[gran]) + value
-            break
 
 # no, I don't know why we must anchor the date RE when we only ever use it
 # in a match()
@@ -243,7 +234,8 @@ class Date:
         <Date 2003-07-01.00:00:0.000000>
     '''
 
-    def __init__(self, spec='.', offset=0, add_granularity=0, translator=i18n):
+    def __init__(self, spec='.', offset=0, add_granularity=False,
+            translator=i18n):
         """Construct a date given a specification and a time zone offset.
 
         'spec'
@@ -263,7 +255,6 @@ class Date:
         elif isinstance(spec, datetime.datetime):
             # Python 2.3+ datetime object
             y,m,d,H,M,S,x,x,x = spec.timetuple()
-            if y < 1970: raise ValueError, 'year must be > 1970'
             S += spec.microsecond/1000000.
             spec = (y,m,d,H,M,S,x,x,x)
         elif hasattr(spec, 'tuple'):
@@ -272,17 +263,17 @@ class Date:
             spec = spec.get_tuple()
         try:
             y,m,d,H,M,S,x,x,x = spec
-            if y < 1970: raise ValueError, 'year must be > 1970'
             frac = S - int(S)
             self.year, self.month, self.day, self.hour, self.minute, \
                 self.second = _local_to_utc(y, m, d, H, M, S, offset)
             # we lost the fractional part
             self.second = self.second + frac
+            if str(self.second) == '60.0': self.second = 59.9
         except:
             raise ValueError, 'Unknown spec %r' % (spec,)
 
     def set(self, spec, offset=0, date_re=date_re,
-            serialised_re=serialised_date_re, add_granularity=0):
+            serialised_re=serialised_date_re, add_granularity=False):
         ''' set the date to the value in spec
         '''
 
@@ -304,15 +295,24 @@ class Date:
 
         info = m.groupdict()
 
+        # determine whether we need to add anything at the end
         if add_granularity:
-            _add_granularity(info, 'SMHdmyab')
+            for gran in 'SMHdmy':
+                if info[gran] is not None:
+                    if gran == 'S':
+                        raise ValueError
+                    elif gran == 'M':
+                        add_granularity = Interval('00:01')
+                    elif gran == 'H':
+                        add_granularity = Interval('01:00')
+                    else:
+                        add_granularity = Interval('+1%s'%gran)
+                    break
 
         # get the current date as our default
-        ts = time.time()
-        frac = ts - int(ts)
-        y,m,d,H,M,S,x,x,x = time.gmtime(ts)
-        # gmtime loses the fractional seconds
-        S = S + frac
+        dt = datetime.datetime.utcnow()
+        y,m,d,H,M,S,x,x,x = dt.timetuple()
+        S += dt.microsecond/1000000.
 
         # whether we need to convert to UTC
         adjust = False
@@ -320,7 +320,6 @@ class Date:
         if info['y'] is not None or info['a'] is not None:
             if info['y'] is not None:
                 y = int(info['y'])
-                if y < 1970: raise ValueError, 'year must be > 1970'
                 m,d = (1,1)
                 if info['m'] is not None:
                     m = int(info['m'])
@@ -342,19 +341,17 @@ class Date:
                 S = float(info['S'])
             adjust = True
 
-        if add_granularity:
-            S = S - 1
 
         # now handle the adjustment of hour
         frac = S - int(S)
-        ts = calendar.timegm((y,m,d,H,M,S,0,0,0))
-        y, m, d, H, M, S, x, x, x = time.gmtime(ts)
+        dt = datetime.datetime(y,m,d,H,M,int(S), int(frac * 1000000.))
+        y, m, d, H, M, S, x, x, x = dt.timetuple()
         if adjust:
             y, m, d, H, M, S = _local_to_utc(y, m, d, H, M, S, offset)
         self.year, self.month, self.day, self.hour, self.minute, \
             self.second = y, m, d, H, M, S
         # we lost the fractional part along the way
-        self.second = self.second + frac
+        self.second += dt.microsecond/1000000.
 
         if info.get('o', None):
             try:
@@ -363,6 +360,11 @@ class Date:
                 raise ValueError, self._('%r not a date / time spec '
                     '"yyyy-mm-dd", "mm-dd", "HH:MM", "HH:MM:SS" or '
                     '"yyyy-mm-dd.HH:MM:SS.SSS"')%(spec,)
+
+        # adjust by added granularity
+        if add_granularity:
+            self.applyInterval(add_granularity)
+            self.applyInterval(Interval('- 00:00:01'))
 
     def addInterval(self, interval):
         ''' Add the interval to this date, returning the date tuple
@@ -490,7 +492,7 @@ class Date:
         return self.formal()
 
     def formal(self, sep='.', sec='%02d'):
-        f = '%%4d-%%02d-%%02d%s%%02d:%%02d:%s'%(sep, sec)
+        f = '%%04d-%%02d-%%02d%s%%02d:%%02d:%s'%(sep, sec)
         return f%(self.year, self.month, self.day, self.hour, self.minute,
             self.second)
 
@@ -500,13 +502,10 @@ class Date:
             Note that if the day is zero, and the day appears first in the
             format, then the day number will be removed from output.
         '''
-        # Python2.4 strftime() enforces the non-zero-ness of the day-of-year
-        # component of the time tuple, so we need to figure it out
-        t = (self.year, self.month, self.day, self.hour, self.minute,
-            int(self.second), 0, 0, 0)
-        t = calendar.timegm(t)
-        t = time.gmtime(t)
-        str = time.strftime(format, t)
+        dt = datetime.datetime(self.year, self.month, self.day, self.hour,
+            self.minute, int(self.second),
+            int ((self.second - int (self.second)) * 1000000.))
+        str = dt.strftime(format)
 
         # handle zero day by removing it
         if format.startswith('%d') and str[0] == '0':
@@ -532,7 +531,7 @@ class Date:
             self.second, 0, 0, 0)
 
     def serialise(self):
-        return '%4d%02d%02d%02d%02d%06.3f'%(self.year, self.month,
+        return '%04d%02d%02d%02d%02d%06.3f'%(self.year, self.month,
             self.day, self.hour, self.minute, self.second)
 
     def timestamp(self):
@@ -554,6 +553,17 @@ class Date:
         self.translator = translator
         self._ = translator.gettext
         self.ngettext = translator.ngettext
+
+    def fromtimestamp(cls, ts):
+        """Create a date object from a timestamp.
+
+        The timestamp may be outside the gmtime year-range of
+        1902-2038.
+        """
+        usec = int((ts - int(ts)) * 1000000.)
+        delta = datetime.timedelta(seconds = int(ts), microseconds = usec)
+        return cls(datetime.datetime(1970, 1, 1) + delta)
+    fromtimestamp = classmethod(fromtimestamp)
 
 class Interval:
     '''
@@ -607,7 +617,7 @@ class Interval:
 
     TODO: more examples, showing the order of addition operation
     '''
-    def __init__(self, spec, sign=1, allowdate=1, add_granularity=0,
+    def __init__(self, spec, sign=1, allowdate=1, add_granularity=False,
         translator=i18n
     ):
         """Construct an interval given a specification."""
@@ -649,7 +659,7 @@ class Interval:
                )?''', re.VERBOSE), serialised_re=re.compile('''
             (?P<s>[+-])?1?(?P<y>([ ]{3}\d|\d{4}))(?P<m>\d{2})(?P<d>\d{2})
             (?P<H>\d{2})(?P<M>\d{2})(?P<S>\d{2})''', re.VERBOSE),
-            add_granularity=0):
+            add_granularity=False):
         ''' set the date to the value in spec
         '''
         self.year = self.month = self.week = self.day = self.hour = \
@@ -667,7 +677,10 @@ class Interval:
         # pull out all the info specified
         info = m.groupdict()
         if add_granularity:
-            _add_granularity(info, 'SMHdwmy', (info['s']=='-' and -1 or 1))
+            for gran in 'SMHdwmy':
+                if info[gran] is not None:
+                    info[gran] = int(info[gran]) + (info['s']=='-' and -1 or 1)
+                    break
 
         valid = 0
         for group, attr in {'y':'year', 'm':'month', 'w':'week', 'd':'day',
@@ -998,7 +1011,7 @@ class Range:
         <Range from None to 2003-03-09.20:00:00>
 
     """
-    def __init__(self, spec, Type, allow_granularity=1, **params):
+    def __init__(self, spec, Type, allow_granularity=True, **params):
         """Initializes Range of type <Type> from given <spec> string.
 
         Sets two properties - from_value and to_value. None assigned to any of
@@ -1007,20 +1020,19 @@ class Range:
 
         The Type parameter here should be class itself (e.g. Date), not a
         class instance.
-
         """
         self.range_type = Type
         re_range = r'(?:^|from(.+?))(?:to(.+?)$|$)'
         re_geek_range = r'(?:^|(.+?));(?:(.+?)$|$)'
         # Check which syntax to use
-        if  spec.find(';') == -1:
-            # Native english
-            mch_range = re.search(re_range, spec.strip(), re.IGNORECASE)
-        else:
+        if ';' in spec:
             # Geek
-            mch_range = re.search(re_geek_range, spec.strip())
-        if mch_range:
-            self.from_value, self.to_value = mch_range.groups()
+            m = re.search(re_geek_range, spec.strip())
+        else:
+            # Native english
+            m = re.search(re_range, spec.strip(), re.IGNORECASE)
+        if m:
+            self.from_value, self.to_value = m.groups()
             if self.from_value:
                 self.from_value = Type(self.from_value.strip(), **params)
             if self.to_value:
@@ -1028,7 +1040,7 @@ class Range:
         else:
             if allow_granularity:
                 self.from_value = Type(spec, **params)
-                self.to_value = Type(spec, add_granularity=1, **params)
+                self.to_value = Type(spec, add_granularity=True, **params)
             else:
                 raise ValueError, "Invalid range"
 

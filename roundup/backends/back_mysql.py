@@ -1,4 +1,4 @@
-#$Id: back_mysql.py,v 1.71 2006-08-29 04:20:50 richard Exp $
+#$Id: back_mysql.py,v 1.74 2007-10-26 01:34:43 richard Exp $
 #
 # Copyright (c) 2003 Martynas Sklyzmantas, Andrey Lebedev <andrey@micro.lt>
 #
@@ -13,7 +13,7 @@
 How to implement AUTO_INCREMENT:
 
 mysql> create table foo (num integer auto_increment primary key, name
-varchar(255)) AUTO_INCREMENT=1 type=InnoDB;
+varchar(255)) AUTO_INCREMENT=1 ENGINE=InnoDB;
 
 ql> insert into foo (name) values ('foo5');
 Query OK, 1 row affected (0.00 sec)
@@ -166,10 +166,10 @@ class Database(Database):
             if message[0] != ER.NO_SUCH_TABLE:
                 raise DatabaseError, message
             self.init_dbschema()
-            self.sql("CREATE TABLE `schema` (`schema` TEXT) TYPE=%s"%
+            self.sql("CREATE TABLE `schema` (`schema` TEXT) ENGINE=%s"%
                 self.mysql_backend)
             self.sql('''CREATE TABLE ids (name VARCHAR(255),
-                num INTEGER) TYPE=%s'''%self.mysql_backend)
+                num INTEGER) ENGINE=%s'''%self.mysql_backend)
             self.sql('create index ids_name_idx on ids(name)')
             self.create_version_2_tables()
 
@@ -194,23 +194,26 @@ class Database(Database):
         # OTK store
         self.sql('''CREATE TABLE otks (otk_key VARCHAR(255),
             otk_value TEXT, otk_time FLOAT(20))
-            TYPE=%s'''%self.mysql_backend)
+            ENGINE=%s'''%self.mysql_backend)
         self.sql('CREATE INDEX otks_key_idx ON otks(otk_key)')
 
         # Sessions store
         self.sql('''CREATE TABLE sessions (session_key VARCHAR(255),
             session_time FLOAT(20), session_value TEXT)
-            TYPE=%s'''%self.mysql_backend)
+            ENGINE=%s'''%self.mysql_backend)
         self.sql('''CREATE INDEX sessions_key_idx ON
             sessions(session_key)''')
 
         # full-text indexing store
         self.sql('''CREATE TABLE __textids (_class VARCHAR(255),
             _itemid VARCHAR(255), _prop VARCHAR(255), _textid INT)
-            TYPE=%s'''%self.mysql_backend)
+            ENGINE=%s'''%self.mysql_backend)
         self.sql('''CREATE TABLE __words (_word VARCHAR(30),
-            _textid INT) TYPE=%s'''%self.mysql_backend)
+            _textid INT) ENGINE=%s'''%self.mysql_backend)
         self.sql('CREATE INDEX words_word_ids ON __words(_word)')
+        self.sql('CREATE INDEX words_by_id ON __words (_textid)')
+        self.sql('CREATE UNIQUE INDEX __textids_by_props ON '
+                 '__textids (_class, _itemid, _prop)')
         sql = 'insert into ids (name, num) values (%s,%s)'%(self.arg, self.arg)
         self.sql(sql, ('__textids', 1))
 
@@ -389,7 +392,7 @@ class Database(Database):
 
         # create the base table
         scols = ','.join(['%s %s'%x for x in cols])
-        sql = 'create table _%s (%s) type=%s'%(spec.classname, scols,
+        sql = 'create table _%s (%s) ENGINE=%s'%(spec.classname, scols,
             self.mysql_backend)
         self.sql(sql)
 
@@ -450,7 +453,7 @@ class Database(Database):
             for x in 'nodeid date tag action params'.split()])
         sql = '''create table %s__journal (
             nodeid integer, date datetime, tag varchar(255),
-            action varchar(255), params text) type=%s'''%(
+            action varchar(255), params text) ENGINE=%s'''%(
             spec.classname, self.mysql_backend)
         self.sql(sql)
         self.create_journal_table_indexes(spec)
@@ -464,7 +467,7 @@ class Database(Database):
 
     def create_multilink_table(self, spec, ml):
         sql = '''CREATE TABLE `%s_%s` (linkid VARCHAR(255),
-            nodeid VARCHAR(255)) TYPE=%s'''%(spec.classname, ml,
+            nodeid VARCHAR(255)) ENGINE=%s'''%(spec.classname, ml,
                 self.mysql_backend)
         self.sql(sql)
         self.create_multilink_table_indexes(spec, ml)

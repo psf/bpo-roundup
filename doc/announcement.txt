@@ -1,24 +1,24 @@
-I'm proud to release version 1.3.2 of Roundup.
+I'm proud to release version 1.4.2 of Roundup.
 
-Fixed in 1.3.2:
+New Features in 1.4.2:
+- New config option in mail section: ignore_alternatives allows to
+  ignore alternatives besides the text/plain part used for the content
+  of a message in multipart/alternative attachments.
+- Admin copy of error email from mailgw includes traceback (thanks Ulrik
+  Mikaelsson)
+- Messages created through the web are now given an in-reply-to header
+  when email out to nosy (thanks Martin v. Löwis)
+- Nosy messages now include more information about issues (all link
+  properties with a "name" attribute) (thanks Martin v. Löwis)
 
-- relax rules for required fields in form_parser.py (sf bug 1599740)
-- documentation cleanup from Luke Ross (sf patch 1594860)
-- updated Spanish translation from Ramiro Morales (sf patch 1594718)
-- handle 8-bit untranslateable messages in tracker templates
-- handling of required for boolean False and numeric 0 (sf bug 1608200)
-- removed bogus args attr of ConfigurationError (sf bug 1608056)
-- implemented start_response in roundup.cgi (sf bug 1604304)
-- clarified windows service documentation (sf patch 1597713)
-- HTMLClass fixed to work with new item permissions check (sf bug 1602983)
-- support POP over SSL (sf patch 1597703)
-- clean up input field generation and quoting of values (sf bug 1615616)
-- allow use of roundup-server pidfile without forking (sf bug 1614753)
-- allow translation of status/priority menu options (sf bug 1613976)
-
-New Features in 1.3.0:
-
-- WSGI support via roundup.cgi.wsgi_handler
+And things fixed:
+- Searching date range by supplying just a date as the filter spec
+- Handle no time.tzset under Windows (sf #1825643)
+- Fix race condition in file storage transaction commit (sf #1883580)
+- Make user utils JS work with firstname/lastname again (sf #1868323)
+- Fix ZRoundup to work with Zope 2.8.5 (sf #1806125)
+- Fix race condition for key properties in rdbms backends (sf #1876683)
+- Handle Reject in mailgw final set/create (sf #1826425)
 
 If you're upgrading from an older version of Roundup you *must* follow
 the "Software Upgrade" guidelines given in the maintenance documentation.
@@ -62,6 +62,6 @@ doesn't even need to be "installed" to be operational, though a
 disutils-based install script is provided.
 
 It comes with two issue tracker templates (a classic bug/feature tracker and
-a minimal skeleton) and five database back-ends (anydbm, sqlite, metakit,
-mysql and postgresql).
+a minimal skeleton) and four database back-ends (anydbm, sqlite, mysql
+and postgresql).
 
