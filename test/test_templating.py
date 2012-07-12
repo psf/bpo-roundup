@@ -147,12 +147,13 @@ class HTMLClassTestCase(TemplatingTestCase) :
         p = StringHTMLProperty(self.client, 'test', '1', None, 'test', '')
         def t(s): return p.hyper_re.sub(p._hyper_repl, s)
         ae = self.assertEqual
+        ae(t('item123123123123'), 'item123123123123')
         ae(t('http://roundup.net/'),
            '<a href="http://roundup.net/">http://roundup.net/</a>')
         ae(t('&lt;HTTP://roundup.net/&gt;'),
            '&lt;<a href="HTTP://roundup.net/">HTTP://roundup.net/</a>&gt;')
         ae(t('&lt;http://roundup.net/&gt;.'),
-           '&lt;<a href="http://roundup.net/">http://roundup.net/</a>&gt;.')
+            '&lt;<a href="http://roundup.net/">http://roundup.net/</a>&gt;.')
         ae(t('&lt;www.roundup.net&gt;'),
            '&lt;<a href="http://www.roundup.net">www.roundup.net</a>&gt;')
         ae(t('(www.roundup.net)'),

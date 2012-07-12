@@ -32,31 +32,29 @@ def check_manifest():
         manifest = [l.strip() for l in f.readlines()]
     finally:
         f.close()
-    err = [line for line in manifest if not os.path.exists(line)]
-    err.sort()
+    err = set([line for line in manifest if not os.path.exists(line)])
     # ignore auto-generated files
-    if err == ['roundup-admin', 'roundup-demo', 'roundup-gettext',
-            'roundup-mailgw', 'roundup-server']:
-        err = []
+    err = err - set(['roundup-admin', 'roundup-demo', 'roundup-gettext',
+        'roundup-mailgw', 'roundup-server', 'roundup-xmlrpc-server'])
     if err:
         n = len(manifest)
         print '\n*** SOURCE WARNING: There are files missing (%d/%d found)!'%(
             n-len(err), n)
         print 'Missing:', '\nMissing: '.join(err)
 
+def build_message_files(command):
+    """For each locale/*.po, build .mo file in target locale directory"""
+    for (_src, _dst) in list_message_files():
+        _build_dst = os.path.join("build", _dst)
+        command.mkpath(os.path.dirname(_build_dst))
+        command.announce("Compiling %s -> %s" % (_src, _build_dst))
+        msgfmt.make(_src, _build_dst)
+
 
 class build(base):
 
-    def build_message_files(self):
-        """For each locale/*.po, build .mo file in target locale directory"""
-        for (_src, _dst) in list_message_files():
-            _build_dst = os.path.join("build", _dst)
-            self.mkpath(os.path.dirname(_build_dst))
-            self.announce("Compiling %s -> %s" % (_src, _build_dst))
-            msgfmt.make(_src, _build_dst)
-
     def run(self):
         check_manifest()
-        self.build_message_files()
+        build_message_files(self)
         base.run(self)
 

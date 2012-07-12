@@ -22,6 +22,7 @@ import unittest
 from roundup.hyperdb import DatabaseError
 
 from db_test_base import DBTest, ROTest, config, SchemaTest, ClassicInitTest
+from db_test_base import ConcurrentDBTest, FilterCacheTest
 
 from roundup.backends import get_backend, have_backend
 
@@ -55,6 +56,26 @@ class postgresqlROTest(postgresqlOpener, ROTest):
 
     def tearDown(self):
         ROTest.tearDown(self)
+        postgresqlOpener.tearDown(self)
+
+class postgresqlConcurrencyTest(postgresqlOpener, ConcurrentDBTest):
+    backend = 'postgresql'
+    def setUp(self):
+        postgresqlOpener.setUp(self)
+        ConcurrentDBTest.setUp(self)
+
+    def tearDown(self):
+        ConcurrentDBTest.tearDown(self)
+        postgresqlOpener.tearDown(self)
+
+class postgresqlFilterCacheTest(postgresqlOpener, FilterCacheTest):
+    backend = 'postgresql'
+    def setUp(self):
+        postgresqlOpener.setUp(self)
+        FilterCacheTest.setUp(self)
+
+    def tearDown(self):
+        FilterCacheTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
 class postgresqlSchemaTest(postgresqlOpener, SchemaTest):
@@ -102,6 +123,8 @@ def test_suite():
     suite.addTest(unittest.makeSuite(postgresqlSchemaTest))
     suite.addTest(unittest.makeSuite(postgresqlClassicInitTest))
     suite.addTest(unittest.makeSuite(postgresqlSessionTest))
+    suite.addTest(unittest.makeSuite(postgresqlConcurrencyTest))
+    suite.addTest(unittest.makeSuite(postgresqlFilterCacheTest))
     return suite
 
 # vim: set et sts=4 sw=4 :

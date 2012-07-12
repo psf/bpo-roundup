@@ -64,10 +64,12 @@ class Indexer(IndexerBase):
             self.db.cursor.execute(sql, (id, ))
 
         # ok, find all the unique words in the text
-        text = unicode(text, "utf-8", "replace").upper()
+        if not isinstance(text, unicode):
+            text = unicode(text, "utf-8", "replace")
+        text = text.upper()
         wordlist = [w.encode("utf-8")
-            for w in re.findall(r'(?u)\b\w{%d,%d}\b'
-                                % (self.minlength, self.maxlength), text)]
+                    for w in re.findall(r'(?u)\b\w{%d,%d}\b'
+                                        % (self.minlength, self.maxlength), text)]
         words = set()
         for word in wordlist:
             if self.is_stopword(word): continue
@@ -127,7 +129,7 @@ class Indexer(IndexerBase):
             sql = sql%(' '.join(join_list), self.db.arg, ' '.join(match_list))
             self.db.cursor.execute(sql, l)
 
-            r = map(lambda x: x[0], self.db.cursor.fetchall())
+            r = [x[0] for x in self.db.cursor.fetchall()]
             if not r:
                 return []
 

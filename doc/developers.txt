@@ -22,12 +22,34 @@ All development is coordinated through two resources:
 - The issue tracker running at
   http://issues.roundup-tracker.org/
 
-Website, wiki, issue tracker
-----------------------------
+Website, wiki
+-------------
 
-1. Log into <username>,roundup@shell.sourceforge.net
+1. ssh -t <username>,roundup@shell.sourceforge.net create
 2. cd /home/groups/r/ro/roundup
 3. follow instructions in README.txt
+
+
+Issue Tracker
+-------------
+
+The tracker resides on psf.upfronthosting.co.za. The roundup installation
+belongs to the user roundup. In ~roundup, all trackers are stored and
+the roundup code itself. roundup is started through /etc/init.d/roundup;
+other parts of the installation are started through
+/etc/init.d/{postgresql-8-1,spambayes,postfix}.
+
+The machine is operated by Upfronthosting in South Africa. The meta
+tracker is http://psf.upfronthosting.co.za/roundup/meta/
+In this tracker, Upfronthosting people are the users izak and roche.
+
+The Roundup tracker http://issues.roundup-tracker.org/ is in
+~roundup/trackers/roundup
+
+The configuration is in the "web/trunk/issues" section of Roundup's
+Subversion repository and copied manually to the live tracker.
+
+A checkout of the roundup sources is in ~roundup/src/roundup-src.
 
 
 Small Changes
@@ -75,19 +97,7 @@ directions that have not been agreed to.
 Debugging Aids
 --------------
 
-Try turning on logging of DEBUG level messages. This may be done a number
-of ways, depending on what it is you're testing:
-
-1. If you're testing the database unit tests, then set the environment
-   variable ``LOGGING_LEVEL=DEBUG``. This may be done like so:
-
-    LOGGING_LEVEL=DEBUG python run_tests.py
-
-   This variable replaces the older HYPERDBDEBUG environment var.
-
-2. If you're testing a particular tracker, then set the logging level in
-   your tracker's ``config.ini``.
-
+See `debugging.txt`_.
 
 Internationalization Notes
 --------------------------

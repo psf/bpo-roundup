@@ -10,6 +10,7 @@ from roundup.exceptions import UsageError
 from roundup.date import Date, Range, Interval
 from roundup import actions
 from SimpleXMLRPCServer import *
+from xmlrpclib import Binary
 
 def translate(value):
     """Translate value to becomes valid for XMLRPC transmission."""
@@ -32,12 +33,19 @@ def props_from_args(db, cl, args, itemid=None):
 
     props = {}
     for arg in args:
-        if arg.find('=') == -1:
+        if isinstance(arg, Binary):
+            arg = arg.data
+        try :
+            key, value = arg.split('=', 1)
+        except ValueError :
             raise UsageError, 'argument "%s" not propname=value'%arg
-        l = arg.split('=')
-        if len(l) < 2:
-            raise UsageError, 'argument "%s" not propname=value'%arg
-        key, value = l[0], '='.join(l[1:])
+        if isinstance(key, unicode):
+            try:
+                key = key.encode ('ascii')
+            except UnicodeEncodeError:
+                raise UsageError, 'argument %r is no valid ascii keyword'%key
+        if isinstance(value, unicode):
+            value = value.encode('utf-8')
         if value:
             try:
                 props[key] = hyperdb.rawToHyperdb(db, cl, itemid,
@@ -81,8 +89,24 @@ class RoundupInstance:
     def filter(self, classname, search_matches, filterspec,
                sort=[], group=[]):
         cl = self.db.getclass(classname)
+        uid = self.db.getuid()
+        security = self.db.security
+        filterspec = security.filterFilterspec (uid, classname, filterspec)
+        sort = security.filterSortspec (uid, classname, sort)
+        group = security.filterSortspec (uid, classname, group)
         result = cl.filter(search_matches, filterspec, sort=sort, group=group)
-        return result
+        check = security.hasPermission
+        x = [id for id in result if check('View', uid, classname, itemid=id)]
+        return x
+
+    def lookup(self, classname, key):
+        cl = self.db.getclass(classname)
+        uid = self.db.getuid()
+        prop = cl.getkey()
+        check = self.db.security.hasSearchPermission
+        if not check(uid, classname, 'id') or not check(uid, classname, prop):
+            raise Unauthorised('Permission to search %s denied'%classname)
+        return cl.lookup(key)
 
     def display(self, designator, *properties):
         classname, itemid = hyperdb.splitDesignator(designator)
@@ -113,9 +137,9 @@ class RoundupInstance:
             raise UsageError, 'you must provide the "%s" property.'%key
 
         for key in props:
-            if not self.db.security.hasPermission('Edit', self.db.getuid(), classname,
-                                                  property=key):
-                raise Unauthorised('Permission to set %s.%s denied'%(classname, key))
+            if not self.db.security.hasPermission('Create', self.db.getuid(),
+                classname, property=key):
+                raise Unauthorised('Permission to create %s.%s denied'%(classname, key))
 
         # do the actual create
         try:

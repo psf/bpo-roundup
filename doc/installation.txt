@@ -69,9 +69,7 @@ Xapian full-text indexer
   installed and used. You will need to run the "roundup-admin reindex"
   command if the tracker has existing data.
 
-  Roundup requires Xapian *newer* than 0.9.2 - it may be necessary for
-  you to install a snapshot. Snapshot "0.9.2_svn6532" has been tried
-  successfully.
+  Roundup requires Xapian 1.0.0 or newer.
 
 pyopenssl
   If pyopenssl_ is installed the roundup-server can be configured
@@ -85,7 +83,7 @@ pyme
   configured, you can require email to be cryptographically signed
   before roundup will allow it to make modifications to issues.
 
-.. _Xapian: http://www.xapian.org/
+.. _Xapian: http://xapian.org/
 .. _pytz: http://www.python.org/pypi/pytz
 .. _Olson tz database: http://www.twinsun.com/tz/tz-link.htm
 .. _pyopenssl: http://pyopenssl.sourceforge.net
@@ -101,7 +99,7 @@ Getting Roundup
     and if it runs you may skip the `Basic Installation Steps`_
     below and go straight to `configuring your first tracker`_.
 
-Download the latest version from http://roundup.sf.net/.
+Download the latest version from http://www.roundup-tracker.org/.
 
 If you're using WinZIP's "classic" interface, make sure the "Use
 folder names" check box is checked before you extract the files.
@@ -234,7 +232,7 @@ Configuring your first tracker
                  Confirm:
 
       Note: running this command will *destroy any existing data in the
-      database*. In the case of MySQL and PostgreSQL, any exsting database
+      database*. In the case of MySQL and PostgreSQL, any existing database
       will be dropped and re-created.
 
       Once this is done, the tracker has been created.
@@ -326,10 +324,11 @@ Configure a Web Interface
 There are five web interfaces to choose from:
 
 1. `web server cgi-bin`_
-2. `stand-alone web server`_
-3. `Zope product - ZRoundup`_
-4. `Apache HTTP Server with mod_python`_
-5. `WSGI handler`_
+2. `cgi-bin for limited-access hosting`_
+3. `stand-alone web server`_
+4. `Zope product - ZRoundup`_
+5. `Apache HTTP Server with mod_python`_
+6. `WSGI handler`_
 
 You may need to give the web server user permission to access the tracker home
 - see the `UNIX environment steps`_ for information. You may also need to
@@ -385,6 +384,48 @@ couple lines to your Apache configuration::
  <Location /path/to/roundup>
    SetHandler cgi-script
  </Location>
+
+
+CGI-bin for Limited-Access Hosting
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you are running in a shared-hosting environment or otherwise don't have
+permissiong to edit the system web server's configuration, but can create a
+``.htaccess`` file then you may be able to use this approach.
+
+1. Install flup_
+2. Create a script ``roundup_stub`` in your server's ``cgi-bin`` directory
+   containing::
+
+    #!/usr/bin/env python
+
+    # if necessary modify the Python path to include the place you
+    # installed Roundup
+    #import sys
+    #sys.path.append('...')
+
+    # cgitb is needed for debugging in browser only
+    #import cgitb
+    #cgitb.enable()
+
+    # obtain the WSGI request dispatcher
+    from roundup.cgi.wsgi_handler import RequestDispatcher
+    tracker_home = '/path/to/tracker/home'
+    app = RequestDispatcher(tracker_home)
+
+    from flup.server.cgi import WSGIServer
+    WSGIServer(app).run()
+
+3. Modify or created the ``.htaccess`` file in the desired (sub-)domain
+   directory to contain::
+
+    RewriteEngine On
+    RewriteBase /
+    RewriteRule ^(.*)$      /cgi-bin/roundup_stub/$1 [L]
+
+Now loading the (sub-)domain in a browser should load the tracker web
+interface. If you get a "500" error then enable the "cgitb" lines in the
+stub to get some debugging information.
 
 
 Stand-alone Web Server
@@ -998,14 +1039,23 @@ Problems? Testing your Python...
    - users of the Windows installer, other binary distributions or
    pre-installed Roundup will need to download the source to use it.
 
+   Remember to have a database user 'rounduptest' prepared (with
+   password 'rounduptest'). This user
+   must have at least the rights to create and drop databases.
+   Documentation: details on `adding MySQL users`_,
+   for PostgreSQL you want to call the ``createuser`` command with the
+   ``-d`` option to allow database creation.
+
 Once you've unpacked roundup's source, run ``python run_tests.py`` in the
 source directory and make sure there are no errors. If there are errors,
 please let us know!
 
 If the above fails, you may be using the wrong version of python. Try
-``python2 run_tests.py``. If that works, you will need to substitute
-``python2`` for ``python`` in all further commands you use in relation to
-Roundup -- from installation and scripts.
+``python2 run_tests.py`` or ``python2.X run_tests.py`` where ``X`` is in
+the set 3,4,5,6 depending on the version(s) of python installed.
+If that works, you will need to substitute ``python2`` or ``python2.X``
+for ``python`` in all further commands you use in relation to Roundup --
+from installation and scripts.
 
 
 .. _`table of contents`: index.html
@@ -1025,7 +1075,10 @@ Roundup -- from installation and scripts.
 .. _External hyperlink targets:
 
 .. _apache: http://httpd.apache.org/
+.. _flup: http://pypi.python.org/pypi/flup
 .. _mod_python: http://www.modpython.org/
 .. _MySQLdb: http://sourceforge.net/projects/mysql-python
 .. _Psycopg: http://initd.org/software/initd/psycopg
 .. _pysqlite: http://pysqlite.org/
+.. _`adding MySQL users`:
+    http://dev.mysql.com/doc/refman/5.1/en/adding-users.html

@@ -75,11 +75,11 @@ class Database(rdbms_common.Database):
 
     def sqlite_busy_handler(self, data, table, count):
         """invoked whenever SQLite tries to access a database that is locked"""
+        now = time.time()
         if count == 1:
-            # use a 30 second timeout (extraordinarily generous)
-            # for handling locked database
-            self._busy_handler_endtime = time.time() + 30
-        elif time.time() > self._busy_handler_endtime:
+            # Timeout for handling locked database (default 30s)
+            self._busy_handler_endtime = now + self.config.RDBMS_SQLITE_TIMEOUT
+        elif now > self._busy_handler_endtime:
             # timeout expired - no more retries
             return 0
         # sleep adaptively as retry count grows,
@@ -99,14 +99,14 @@ class Database(rdbms_common.Database):
             os.makedirs(self.config.DATABASE)
 
         db = os.path.join(self.config.DATABASE, 'db')
-        logging.getLogger('hyperdb').info('open database %r'%db)
-        # set a 30 second timeout (extraordinarily generous) for handling
-        # locked database
+        logging.getLogger('roundup.hyperdb').info('open database %r'%db)
+        # set timeout (30 second default is extraordinarily generous)
+        # for handling locked database
         if sqlite_version == 1:
             conn = sqlite.connect(db=db)
             conn.db.sqlite_busy_handler(self.sqlite_busy_handler)
         else:
-            conn = sqlite.connect(db, timeout=30)
+            conn = sqlite.connect(db, timeout=self.config.RDBMS_SQLITE_TIMEOUT)
             conn.row_factory = sqlite.Row
 
         # pysqlite2 / sqlite3 want us to store Unicode in the db but
@@ -160,7 +160,7 @@ class Database(rdbms_common.Database):
         # update existing tables to have the new actor column
         tables = self.database_schema['tables']
         for classname, spec in self.classes.items():
-            if tables.has_key(classname):
+            if classname in tables:
                 dbspec = tables[classname]
                 self.update_class(spec, dbspec, force=1, adding_v2=1)
                 # we've updated - don't try again
@@ -179,7 +179,6 @@ class Database(rdbms_common.Database):
             SQLite doesn't have ALTER TABLE, so we have to copy and
             regenerate the tables with the new schema.
         """
-        new_has = spec.properties.has_key
         new_spec = spec.schema()
         new_spec[1].sort()
         old_spec[1].sort()
@@ -187,20 +186,20 @@ class Database(rdbms_common.Database):
             # no changes
             return 0
 
-        logging.getLogger('hyperdb').info('update_class %s'%spec.classname)
+        logging.getLogger('roundup.hyperdb').info(
+            'update_class %s'%spec.classname)
 
         # detect multilinks that have been removed, and drop their table
         old_has = {}
         for name, prop in old_spec[1]:
             old_has[name] = 1
-            if new_has(name) or not isinstance(prop, hyperdb.Multilink):
+            if name in spec.properties or not isinstance(prop, hyperdb.Multilink):
                 continue
             # it's a multilink, and it's been removed - drop the old
             # table. First drop indexes.
             self.drop_multilink_table_indexes(spec.classname, name)
             sql = 'drop table %s_%s'%(spec.classname, prop)
             self.sql(sql)
-        old_has = old_has.has_key
 
         # now figure how we populate the new table
         if adding_v2:
@@ -211,7 +210,7 @@ class Database(rdbms_common.Database):
         for propname,x in new_spec[1]:
             prop = properties[propname]
             if isinstance(prop, hyperdb.Multilink):
-                if not old_has(propname):
+                if propname not in old_has:
                     # we need to create the new table
                     self.create_multilink_table(spec, propname)
                 elif force:
@@ -232,7 +231,7 @@ class Database(rdbms_common.Database):
                         (%s, %s)"""%(tn, self.arg, self.arg)
                     for linkid, nodeid in rows:
                         self.sql(sql, (int(linkid), int(nodeid)))
-            elif old_has(propname):
+            elif propname in old_has:
                 # we copy this col over from the old table
                 fetch.append('_'+propname)
 
@@ -263,7 +262,7 @@ class Database(rdbms_common.Database):
                 elif isinstance(prop, hyperdb.Interval):
                     inscols.append('_'+propname)
                     inscols.append('__'+propname+'_int__')
-                elif old_has(propname):
+                elif propname in old_has:
                     # we copy this col over from the old table
                     inscols.append('_'+propname)
 
@@ -283,7 +282,7 @@ class Database(rdbms_common.Database):
                                 v = hyperdb.Interval(entry[name]).as_seconds()
                             except IndexError:
                                 v = None
-                        elif entry.has_key(name):
+                        elif name in entry:
                             v = hyperdb.Interval(entry[name]).as_seconds()
                         else:
                             v = None
@@ -292,7 +291,7 @@ class Database(rdbms_common.Database):
                             v = entry[name]
                         except IndexError:
                             v = None
-                    elif (sqlite_version == 1 and entry.has_key(name)):
+                    elif (sqlite_version == 1 and name in entry):
                         v = entry[name]
                     else:
                         v = None
@@ -397,8 +396,8 @@ class sqliteClass:
         """ If there's NO matches to a fetch, sqlite returns NULL
             instead of nothing
         """
-        return filter(None, rdbms_common.Class.filter(self, search_matches,
-            filterspec, sort=sort, group=group))
+        return [f for f in rdbms_common.Class.filter(self, search_matches,
+            filterspec, sort=sort, group=group) if f]
 
 class Class(sqliteClass, rdbms_common.Class):
     pass

@@ -10,7 +10,7 @@ import weakref
 
 import roundup.instance
 from roundup.cgi import TranslationService
-from BaseHTTPServer import BaseHTTPRequestHandler
+from BaseHTTPServer import BaseHTTPRequestHandler, DEFAULT_ERROR_MESSAGE
 
 
 class Writer(object):
@@ -43,6 +43,14 @@ class RequestDispatcher(object):
         request.wfile = Writer(request)
         request.__wfile = None
 
+        if environ ['REQUEST_METHOD'] == 'OPTIONS':
+            code = 501
+            message, explain = BaseHTTPRequestHandler.responses[code]
+            request.start_response([('Content-Type', 'text/html'),
+                ('Connection', 'close')], code)
+            request.wfile.write(DEFAULT_ERROR_MESSAGE % locals())
+            return []
+
         tracker = roundup.instance.open(self.home, not self.debug)
 
         # need to strip the leading '/'
@@ -65,9 +73,9 @@ class RequestDispatcher(object):
 
     def start_response(self, headers, response_code):
         """Set HTTP response code"""
-        description = BaseHTTPRequestHandler.responses[response_code]
+        message, explain = BaseHTTPRequestHandler.responses[response_code]
         self.__wfile = self.__start_response('%d %s'%(response_code,
-            description), headers)
+            message), headers)
 
     def get_wfile(self):
         if self.__wfile is None:

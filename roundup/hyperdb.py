@@ -35,11 +35,15 @@ from roundup.i18n import _
 #
 class _Type(object):
     """A roundup property type."""
-    def __init__(self, required=False):
+    def __init__(self, required=False, default_value = None):
         self.required = required
+        self.__default_value = default_value
     def __repr__(self):
         ' more useful for dumps '
         return '<%s.%s>'%(self.__class__.__module__, self.__class__.__name__)
+    def get_default_value(self):
+        """The default value when creating a new instance of this property.""" 
+        return self.__default_value
     def sort_repr (self, cls, val, name):
         """Representation used for sorting. This should be a python
         built-in type, otherwise sorting will take ages. Note that
@@ -50,8 +54,8 @@ class _Type(object):
 
 class String(_Type):
     """An object designating a String property."""
-    def __init__(self, indexme='no', required=False):
-        super(String, self).__init__(required)
+    def __init__(self, indexme='no', required=False, default_value = ""):
+        super(String, self).__init__(required, default_value)
         self.indexme = indexme == 'yes'
     def from_raw(self, value, propname='', **kw):
         """fix the CRLF/CR -> LF stuff"""
@@ -72,24 +76,12 @@ class Password(_Type):
     def from_raw(self, value, **kw):
         if not value:
             return None
-        m = password.Password.pwre.match(value)
-        if m:
-            # password is being given to us encrypted
-            p = password.Password()
-            p.scheme = m.group(1)
-            if p.scheme not in 'SHA crypt plaintext'.split():
-                raise HyperdbValueError, \
-                        ('property %s: unknown encryption scheme %r') %\
-                        (kw['propname'], p.scheme)
-            p.password = m.group(2)
-            value = p
-        else:
-            try:
-                value = password.Password(value)
-            except password.PasswordValueError, message:
-                raise HyperdbValueError, \
-                        _('property %s: %s')%(kw['propname'], message)
-        return value
+        try:
+            return password.Password(encrypted=value, strict=True)
+        except password.PasswordValueError, message:
+            raise HyperdbValueError, \
+                    _('property %s: %s')%(kw['propname'], message)
+
     def sort_repr (self, cls, val, name):
         if not val:
             return val
@@ -97,8 +89,9 @@ class Password(_Type):
 
 class Date(_Type):
     """An object designating a Date property."""
-    def __init__(self, offset=None, required=False):
-        super(Date, self).__init__(required)
+    def __init__(self, offset=None, required=False, default_value = None):
+        super(Date, self).__init__(required = required,
+                                   default_value = default_value)
         self._offset = offset
     def offset(self, db):
         if self._offset is not None:
@@ -136,10 +129,11 @@ class Interval(_Type):
 class _Pointer(_Type):
     """An object designating a Pointer property that links or multilinks
     to a node in a specified class."""
-    def __init__(self, classname, do_journal='yes', required=False):
+    def __init__(self, classname, do_journal='yes', required=False,
+                 default_value = None):
         """ Default is to journal link and unlink events
         """
-        super(_Pointer, self).__init__(required)
+        super(_Pointer, self).__init__(required, default_value)
         self.classname = classname
         self.do_journal = do_journal == 'yes'
     def __repr__(self):
@@ -175,6 +169,14 @@ class Multilink(_Pointer):
        "do_journal" indicates whether the linked-to nodes should have
                     'link' and 'unlink' events placed in their journal
     """
+
+    def __init__(self, classname, do_journal = 'yes', required = False):
+
+        super(Multilink, self).__init__(classname,
+                                        do_journal,
+                                        required = required,
+                                        default_value = [])        
+
     def from_raw(self, value, db, klass, propname, itemid, **kw):
         if not value:
             return []
@@ -284,18 +286,17 @@ class Proptree(object):
     """ Simple tree data structure for optimizing searching of
     properties. Each node in the tree represents a roundup Class
     Property that has to be navigated for finding the given search
-    or sort properties. The sort_type attribute is used for
-    distinguishing nodes in the tree used for sorting or searching: If
-    it is 0 for a node, that node is not used for sorting. If it is 1,
-    it is used for both, sorting and searching. If it is 2 it is used
-    for sorting only.
+    or sort properties. The need_for attribute is used for
+    distinguishing nodes in the tree used for sorting, searching or
+    retrieval: The attribute is a dictionary containing one or several
+    of the values 'sort', 'search', 'retrieve'.
 
     The Proptree is also used for transitively searching attributes for
     backends that do not support transitive search (e.g. anydbm). The
     _val attribute with set_val is used for this.
     """
 
-    def __init__(self, db, cls, name, props, parent = None):
+    def __init__(self, db, cls, name, props, parent=None, retr=False):
         self.db = db
         self.name = name
         self.props = props
@@ -308,7 +309,7 @@ class Proptree(object):
         self.children = []
         self.sortattr = []
         self.propdict = {}
-        self.sort_type = 0
+        self.need_for = {'search' : True}
         self.sort_direction = None
         self.sort_ids = None
         self.sort_ids_needed = False
@@ -317,6 +318,7 @@ class Proptree(object):
         self.tree_sort_done = False
         self.propclass = None
         self.orderby = []
+        self.sql_idx = None # index of retrieved column in sql result
         if parent:
             self.root = parent.root
             self.depth = parent.depth + 1
@@ -324,7 +326,7 @@ class Proptree(object):
             self.root = self
             self.seqno = 1
             self.depth = 0
-            self.sort_type = 1
+            self.need_for['sort'] = True
         self.id = self.root.seqno
         self.root.seqno += 1
         if self.cls:
@@ -332,15 +334,18 @@ class Proptree(object):
             self.uniqname = '%s%s' % (self.cls.classname, self.id)
         if not self.parent:
             self.uniqname = self.cls.classname
+        if retr:
+            self.append_retr_props()
 
-    def append(self, name, sort_type = 0):
+    def append(self, name, need_for='search', retr=False):
         """Append a property to self.children. Will create a new
         propclass for the child.
         """
         if name in self.propdict:
             pt = self.propdict[name]
-            if sort_type and not pt.sort_type:
-                pt.sort_type = 1
+            pt.need_for[need_for] = True
+            if retr and isinstance(pt.propclass, Link):
+                pt.append_retr_props()
             return pt
         propclass = self.props[name]
         cls = None
@@ -349,15 +354,24 @@ class Proptree(object):
             cls = self.db.getclass(propclass.classname)
             props = cls.getprops()
         child = self.__class__(self.db, cls, name, props, parent = self)
-        child.sort_type = sort_type
+        child.need_for = {need_for : True}
         child.propclass = propclass
         self.children.append(child)
         self.propdict[name] = child
+        if retr and isinstance(child.propclass, Link):
+            child.append_retr_props()
         return child
+
+    def append_retr_props(self):
+        """Append properties for retrieval."""
+        for name, prop in self.cls.getprops(protected=1).iteritems():
+            if isinstance(prop, Multilink):
+                continue
+            self.append(name, need_for='retrieve')
 
     def compute_sort_done(self, mlseen=False):
         """ Recursively check if attribute is needed for sorting
-        (self.sort_type > 0) or all children have tree_sort_done set and
+        ('sort' in self.need_for) or all children have tree_sort_done set and
         sort_ids_needed unset: set self.tree_sort_done if one of the conditions
         holds. Also remove sort_ids_needed recursively once having seen a
         Multilink.
@@ -371,7 +385,7 @@ class Proptree(object):
             p.compute_sort_done(mlseen)
             if not p.tree_sort_done:
                 self.tree_sort_done = False
-        if not self.sort_type:
+        if 'sort' not in self.need_for:
             self.tree_sort_done = True
         if mlseen:
             self.tree_sort_done = False
@@ -389,7 +403,7 @@ class Proptree(object):
         """
         filterspec = {}
         for p in self.children:
-            if p.sort_type < 2:
+            if 'search' in p.need_for:
                 if p.children:
                     p.search(sort = False)
                 filterspec[p.name] = p.val
@@ -413,7 +427,7 @@ class Proptree(object):
         too.
         """
         return [p for p in self.children
-                if p.sort_type > 0 and (intermediate or p.sort_direction)]
+                if 'sort' in p.need_for and (intermediate or p.sort_direction)]
 
     def __iter__(self):
         """ Yield nodes in depth-first order -- visited nodes first """
@@ -534,7 +548,6 @@ class Proptree(object):
                 curdir = sa.sort_direction
             idx += 1
         sortattr.append (val)
-        #print >> sys.stderr, "\nsortattr", sortattr
         sortattr = zip (*sortattr)
         for dir, i in reversed(zip(directions, dir_idx)):
             rev = dir == '-'
@@ -760,6 +773,16 @@ All methods except __repr__ must be implemented by a concrete backend Database.
 
         """
 
+def iter_roles(roles):
+    ''' handle the text processing of turning the roles list
+        into something python can use more easily
+    '''
+    if not roles or not roles.strip():
+        raise StopIteration, "Empty roles given"
+    for role in [x.lower().strip() for x in roles.split(',')]:
+        yield role
+
+
 #
 # The base Class class
 #
@@ -928,7 +951,9 @@ class Class:
         'date' is a Timestamp object specifying the time of the change and
         'tag' is the journaltag specified when the database was opened.
         """
-        raise NotImplementedError
+        if not self.do_journal:
+            raise ValueError('Journalling is disabled for this class')
+        return self.db.getjournal(self.classname, nodeid)
 
     # Locating nodes:
     def hasnode(self, nodeid):
@@ -1045,27 +1070,40 @@ class Class:
         """
         raise NotImplementedError
 
-    def _proptree(self, filterspec, sortattr=[]):
+    def _proptree(self, filterspec, sortattr=[], retr=False):
         """Build a tree of all transitive properties in the given
         filterspec.
+        If we retrieve (retr is True) linked items we don't follow
+        across multilinks. We also don't follow if the searched value
+        can contain NULL values.
         """
-        proptree = Proptree(self.db, self, '', self.getprops())
+        proptree = Proptree(self.db, self, '', self.getprops(), retr=retr)
         for key, v in filterspec.iteritems():
             keys = key.split('.')
             p = proptree
+            mlseen = False
             for k in keys:
-                p = p.append(k)
+                if isinstance (p.propclass, Multilink):
+                    mlseen = True
+                isnull = v == '-1' or v is None
+                nullin = isinstance(v, type([])) and ('-1' in v or None in v)
+                r = retr and not mlseen and not isnull and not nullin
+                p = p.append(k, retr=r)
             p.val = v
         multilinks = {}
         for s in sortattr:
             keys = s[1].split('.')
             p = proptree
+            mlseen = False
             for k in keys:
-                p = p.append(k, sort_type = 2)
+                if isinstance (p.propclass, Multilink):
+                    mlseen = True
+                r = retr and not mlseen
+                p = p.append(k, need_for='sort', retr=r)
                 if isinstance (p.propclass, Multilink):
                     multilinks[p] = True
             if p.cls:
-                p = p.append(p.cls.orderprop(), sort_type = 2)
+                p = p.append(p.cls.orderprop(), need_for='sort')
             if p.sort_direction: # if an orderprop is also specified explicitly
                 continue
             p.sort_direction = s[0]
@@ -1091,7 +1129,7 @@ class Class:
         for k in propname_path.split('.'):
             try:
                 prop = props[k]
-            except KeyError, TypeError:
+            except (KeyError, TypeError):
                 return default
             cl = getattr(prop, 'classname', None)
             props = None
@@ -1148,13 +1186,20 @@ class Class:
         This implements a non-optimized version of Transitive search
         using _filter implemented in a backend class. A more efficient
         version can be implemented in the individual backends -- e.g.,
-        an SQL backen will want to create a single SQL statement and
+        an SQL backend will want to create a single SQL statement and
         override the filter method instead of implementing _filter.
         """
         sortattr = self._sortattr(sort = sort, group = group)
         proptree = self._proptree(filterspec, sortattr)
         proptree.search(search_matches)
         return proptree.sort()
+
+    # non-optimized filter_iter, a backend may chose to implement a
+    # better version that provides a real iterator that pre-fills the
+    # cache for each id returned. Note that the filter_iter doesn't
+    # promise to correctly sort by multilink (which isn't sane to do
+    # anyway).
+    filter_iter = filter
 
     def count(self):
         """Get the number of nodes in this class.
@@ -1227,6 +1272,83 @@ class Class:
         propnames = self.getprops().keys()
         propnames.sort()
         return propnames
+
+    def import_journals(self, entries):
+        """Import a class's journal.
+
+        Uses setjournal() to set the journal for each item.
+        Strategy for import: Sort first by id, then import journals for
+        each id, this way the memory footprint is a lot smaller than the
+        initial implementation which stored everything in a big hash by
+        id and then proceeded to import journals for each id."""
+        properties = self.getprops()
+        a = []
+        for l in entries:
+            # first element in sorted list is the (numeric) id
+            # in python2.4 and up we would use sorted with a key...
+            a.append ((int (l [0].strip ("'")), l))
+        a.sort ()
+
+
+        last = 0
+        r = []
+        for n, l in a:
+            nodeid, jdate, user, action, params = map(eval, l)
+            assert (str(n) == nodeid)
+            if n != last:
+                if r:
+                    self.db.setjournal(self.classname, str(last), r)
+                last = n
+                r = []
+
+            if action == 'set':
+                for propname, value in params.iteritems():
+                    prop = properties[propname]
+                    if value is None:
+                        pass
+                    elif isinstance(prop, Date):
+                        value = date.Date(value)
+                    elif isinstance(prop, Interval):
+                        value = date.Interval(value)
+                    elif isinstance(prop, Password):
+                        value = password.JournalPassword(encrypted=value)
+                    params[propname] = value
+            elif action == 'create' and params:
+                # old tracker with data stored in the create!
+                params = {}
+            r.append((nodeid, date.Date(jdate), user, action, params))
+        if r:
+            self.db.setjournal(self.classname, nodeid, r)
+
+    #
+    # convenience methods
+    #
+    def get_roles(self, nodeid):
+        """Return iterator for all roles for this nodeid.
+
+           Yields string-processed roles.
+           This method can be overridden to provide a hook where we can
+           insert other permission models (e.g. get roles from database)
+           In standard schemas only a user has a roles property but
+           this may be different in customized schemas.
+           Note that this is the *central place* where role
+           processing happens!
+        """
+        node = self.db.getnode(self.classname, nodeid)
+        return iter_roles(node['roles'])
+
+    def has_role(self, nodeid, *roles):
+        '''See if this node has any roles that appear in roles.
+
+           For convenience reasons we take a list.
+           In standard schemas only a user has a roles property but
+           this may be different in customized schemas.
+        '''
+        roles = dict.fromkeys ([r.strip().lower() for r in roles])
+        for role in self.get_roles(nodeid):
+            if role in roles:
+                return True
+        return False
 
 
 class HyperdbValueError(ValueError):

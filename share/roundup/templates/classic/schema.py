@@ -112,6 +112,8 @@ p = db.security.addPermission(name='View', klass='user', check=own_record,
     description="User is allowed to view their own user details")
 db.security.addPermissionToRole('User', p)
 p = db.security.addPermission(name='Edit', klass='user', check=own_record,
+    properties=('username', 'password', 'address', 'realname', 'phone',
+        'organisation', 'alternate_addresses', 'queries', 'timezone'),
     description="User is allowed to edit their own user details")
 db.security.addPermissionToRole('User', p)
 
@@ -126,6 +128,8 @@ def edit_query(db, userid, itemid):
     return userid == db.query.get(itemid, 'creator')
 p = db.security.addPermission(name='View', klass='query', check=view_query,
     description="User is allowed to view their own and public queries")
+db.security.addPermissionToRole('User', p)
+p = db.security.addPermission(name='Search', klass='query')
 db.security.addPermissionToRole('User', p)
 p = db.security.addPermission(name='Edit', klass='query', check=edit_query,
     description="User is allowed to edit their queries")

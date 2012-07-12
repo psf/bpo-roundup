@@ -29,8 +29,6 @@ try:
 except ImportError:
     SSL = None
 
-from time import sleep
-
 # python version check
 from roundup import configuration, version_check
 from roundup import __version__ as roundup_version
@@ -76,7 +74,7 @@ DEFAULT_MULTIPROCESS = MULTIPROCESS_TYPES[-1]
 
 def auto_ssl():
     print _('WARNING: generating temporary SSL certificate')
-    import OpenSSL, time, random, sys
+    import OpenSSL, random
     pkey = OpenSSL.crypto.PKey()
     pkey.generate_key(OpenSSL.crypto.TYPE_RSA, 768)
     cert = OpenSSL.crypto.X509()
@@ -124,14 +122,11 @@ class SecureHTTPServer(BaseHTTPServer.HTTPServer):
 
                 def readline(self, *args):
                     """ SSL.Connection can return WantRead """
-                    line = None
-                    while not line:
+                    while True:
                         try:
-                            line = self.__fileobj.readline(*args)
+                            return self.__fileobj.readline(*args)
                         except SSL.WantReadError:
-                            sleep (.1)
-                            line = None
-                    return line
+                            time.sleep(.1)
 
                 def read(self, *args):
                     """ SSL.Connection can return WantRead """
@@ -139,7 +134,7 @@ class SecureHTTPServer(BaseHTTPServer.HTTPServer):
                         try:
                             return self.__fileobj.read(*args)
                         except SSL.WantReadError:
-                            sleep (.1)
+                            time.sleep(.1)
 
                 def __getattr__(self, attrib):
                     return getattr(self.__fileobj, attrib)
@@ -193,8 +188,6 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         """ Execute the CGI command. Wrap an innner call in an error
             handler so all errors can be caught.
         """
-        save_stdin = sys.stdin
-        sys.stdin = self.rfile
         try:
             self.inner_run_cgi()
         except client.NotFound:
@@ -231,7 +224,6 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                     # out to the logfile
                     print 'EXCEPTION AT', ts
                     traceback.print_exc()
-        sys.stdin = save_stdin
 
     def run_cgi_outer(self):
         "Log requests that are in progress"
@@ -377,10 +369,16 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         env['SCRIPT_NAME'] = ''
         env['SERVER_NAME'] = self.server.server_name
         env['SERVER_PORT'] = str(self.server.server_port)
-        env['HTTP_HOST'] = self.headers['host']
+        try:
+            env['HTTP_HOST'] = self.headers ['host']
+        except KeyError:
+            env['HTTP_HOST'] = ''
         if os.environ.has_key('CGI_SHOW_TIMING'):
             env['CGI_SHOW_TIMING'] = os.environ['CGI_SHOW_TIMING']
         env['HTTP_ACCEPT_LANGUAGE'] = self.headers.get('accept-language')
+        range = self.headers.getheader('range')
+        if range:
+            env['HTTP_RANGE'] = range
 
         # do the roundup thing
         tracker = self.get_tracker(tracker_name)
@@ -481,9 +479,16 @@ class ServerConfig(configuration.Config):
 
     SETTINGS = (
             ("main", (
-            (configuration.Option, "host", "",
+            (configuration.Option, "host", "localhost",
                 "Host name of the Roundup web server instance.\n"
-                "If empty, listen on all network interfaces."),
+                "If left unconfigured (no 'host' setting) the default\n"
+                "will be used.\n"
+                "If empty, listen on all network interfaces.\n"
+                "If you want to explicitly listen on all\n"
+                "network interfaces, the address 0.0.0.0 is a more\n"
+                "explicit way to achieve this, the use of an empty\n"
+                "string for this purpose is deprecated and will go away\n"
+                "in a future release."),
             (configuration.IntegerNumberOption, "port", DEFAULT_PORT,
                 "Port to listen on."),
             (configuration.NullableFilePathOption, "favicon", "favicon.ico",
@@ -607,9 +612,28 @@ class ServerConfig(configuration.Config):
             DEBUG_MODE = self["MULTIPROCESS"] == "debug"
             CONFIG = self
 
+            def setup(self):
+                if self.CONFIG["SSL"]:
+                    # perform initial ssl handshake. This will set
+                    # internal state correctly so that later closing SSL
+                    # socket works (with SSL end-handshake started)
+                    self.request.do_handshake()
+                RoundupRequestHandler.setup(self)
+
+            def finish(self):
+                RoundupRequestHandler.finish(self)
+                if self.CONFIG["SSL"]:
+                    self.request.shutdown()
+                    self.request.close()
+
         if self["SSL"]:
             base_server = SecureHTTPServer
         else:
+            # time out after a minute if we can
+            # This sets the socket to non-blocking. SSL needs a blocking
+            # socket, so we do this only for non-SSL connections.
+            if hasattr(socket, 'setdefaulttimeout'):
+                socket.setdefaulttimeout(60)
             base_server = BaseHTTPServer.HTTPServer
 
         # obtain request server class
@@ -731,7 +755,10 @@ Options:
  -h            print this text and exit
  -S            create or update configuration file and exit
  -C <fname>    use configuration file <fname>
- -n <name>     set the host name of the Roundup web server instance
+ -n <name>     set the host name of the Roundup web server instance,
+               specifies on which network interfaces to listen for
+               connections, defaults to localhost, use 0.0.0.0 to bind
+               to all network interfaces
  -p <port>     set the port to listen on (default: %(port)s)
  -l <fname>    log to the file indicated by fname instead of stderr/stdout
  -N            log client machine names instead of IP addresses (much slower)
@@ -831,10 +858,6 @@ undefined = []
 def run(port=undefined, success_message=None):
     ''' Script entry point - handle args and figure out what to to.
     '''
-    # time out after a minute if we can
-    if hasattr(socket, 'setdefaulttimeout'):
-        socket.setdefaulttimeout(60)
-
     config = ServerConfig()
     # additional options
     short_options = "hvS"

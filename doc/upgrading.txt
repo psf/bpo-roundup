@@ -13,6 +13,212 @@ steps.
 
 .. contents::
 
+Migrating from 1.4.17 to 1.4.18
+===============================
+
+There was a bug in 1.4.17 where files were unlinked from issues if a
+mail without attachment was received via the mail interface. The
+following script will list likely issues being affected by the bug.
+The date in the script is the date of the 1.4.17 release. If you have
+installed 1.4.17 later than this date, you can change the date
+appropriately to your installation date. Run the script in the directory
+of your tracker.
+
+#!/usr/bin/python
+import os
+from roundup import instance
+from roundup.date import Date
+dir     = os.getcwd ()
+tracker = instance.open (dir)
+db      = tracker.open ('admin')
+# you may want to change this to your install date to find less candidates
+last_release = Date('2011-05-13')
+affected = {}
+for i in db.issue.getnodeids():
+    for j in db.issue.history(i):
+        if i in affected:
+            break
+        if j[1] < last_release or j[3] != 'set' or 'files' not in j[4]:
+            continue
+        for op, p in j[4]['files']:
+            if op == '-':
+                affected [i] = 1
+                break
+print ', '.join(sorted(affected.iterkeys()))
+
+To find out which files where attached before you can look in the
+history of the affected issue.  For fixing issues you can re-attach the
+files in question using the "set" command of roundup-admin, e.g., if the
+list of files attached to an issue should be files 5, 17, 23 for issue42
+you will set this using
+
+roundup-admin -i /path/to/your/tracker set issue42 files=5,17,23
+
+Migrating from 1.4.x to 1.4.17
+==============================
+
+There is a new config-option `migrate_passwords` in section `web` to
+auto-migrate passwords at web-login time to a more secure storage
+scheme. Default for the new option is "yes" so if you don't want that
+passwords are auto-migrated to a more secure password scheme on user
+login, set this to "no" before running your tracker(s) after the
+upgrade.
+
+The standalone roundup-server now defaults to listening on localhost (no
+longer on all network interfaces). This will not affect you if you're
+already using a configuration file for roundup-server. If you are using
+an empty setting for the `host` parameter in the config-file you should
+explicitly put 0.0.0.0 there as the use of an empty string to specify
+listening to all interfaces is deprecated and will go away in a future
+version.  If you are starting the server without a configuration file
+and want to explicitly listen to all network interface, you should
+specify the -n option with the address `0.0.0.0`.
+
+Searching now requires either read-permission without a check method, or
+you will have to add a "Search" permission for a class or a list of
+properties for a class (if you want to allow searching). For the classic
+template (or other templates derived from it) you want to add the
+following lines to your `schema.py` file::
+
+  p = db.security.addPermission(name='Search', klass='query')
+  db.security.addPermissionToRole('User', p)
+
+This is needed, because for the `query` class users may view only their
+own queries (or public queries). This is implemented with a `check`
+method, therefore the default search permissions will not allow
+searching and you'll have to add an explicit search permission.
+If you have modified your schema, you can check if you're missing any
+search permissions with the following script, run it in your tracker
+directory, it will list for each Class and Property the roles that may
+search for this property::
+
+    #!/usr/bin/python
+    import os
+    from roundup import instance
+    
+    tracker = instance.open(os.getcwd ())
+    db = tracker.open('admin')
+    
+    for cl in sorted(db.getclasses()):
+        print "Class:", cl
+        for p in sorted(db.getclass(cl).properties.keys()):
+            print "    Property:", p
+            roles = []
+            for role in sorted(db.security.role.iterkeys()):
+                if db.security.roleHasSearchPermission(cl,p,role):
+                    roles.append(role)
+            print "        roles may search:", ', '.join(roles)
+
+
+Migrating from 1.4.x to 1.4.12
+==============================
+
+Item creation now checks the "Create" permission instead of the "Edit"
+permission for individual properties. If you have modified your tracker
+permissions from the default distribution, you should check that
+"Create" permissions exist for all properties you want users to be able
+to create.
+
+
+Fixing some potential security holes
+------------------------------------
+
+Enhanced checking was added to the user registration auditor. If you
+run a public tracker you should update your tracker's
+``detectors/userauditor.py`` using the new code from
+``share/roundup/templates/classic/detectors/userauditor.py``. In most
+cases you may just copy the file over, but if you've made changes to
+the auditor in your tracker then you'll need to manually integrate
+the new code.
+
+Some HTML templates were found to have formatting security problems:
+
+``html/page.html``::
+
+  -tal:replace="request/user/username">username</span></b><br>
+  +tal:replace="python:request.user.username.plain(escape=1)">username</span></b><br>
+
+``html/_generic.help-list.html``::
+
+  -tal:content="structure python:item[prop]"></label>
+  +tal:content="python:item[prop]"></label>
+
+The lines marked "+" should be added and lines marked "-" should be
+deleted (minus the "+"/"-" signs).
+
+
+Some HTML interface tweaks
+--------------------------
+
+You may wish to copy the ``user_utils.js`` and ``style.css` files from the
+source distribution ``share/roundup/templates/classic/html/`` directory to the
+``html`` directory of your trackers as it includes a small improvement.
+
+If you have made local changes to those files you'll need to manually work
+the differences in to your versions or ignore the changes.
+
+
+Migrating from 1.4.x to 1.4.11
+==============================
+
+Close potential security hole
+-----------------------------
+
+If your tracker has untrusted users you should examine its ``schema.py``
+file and look for the section granting the "Edit" permission to your users.
+This should look something like::
+
+    p = db.security.addPermission(name='Edit', klass='user', check=own_record,
+        description="User is allowed to edit their own user details")
+
+and should be modified to restrict the list of properties they are allowed
+to edit by adding the ``properties=`` section like::
+
+    p = db.security.addPermission(name='Edit', klass='user', check=own_record,
+        properties=('username', 'password', 'address', 'realname', 'phone',
+            'organisation', 'alternate_addresses', 'queries', 'timezone'),
+        description="User is allowed to edit their own user details")
+
+Most importantly the "roles" property should not be editable - thus not
+appear in that list of properties.
+
+
+Grant the "Register" permission to the Anonymous role
+-----------------------------------------------------
+
+A separate "Register" permission has been introduced to allow
+anonymous users to register. This means you will need to add the
+following to your tracker's ``schema.py`` to add the permission and
+assign it to the Anonymous role (replacing any previously assigned
+"Create user" permission for the Anonymous role)::
+
+  +db.security.addPermission(name='Register', klass='user',
+  +     description='User is allowed to register new user')
+ 
+   # Assign the appropriate permissions to the anonymous user's Anonymous
+   # Role. Choices here are:
+   # - Allow anonymous users to register
+  -db.security.addPermissionToRole('Anonymous', 'Create', 'user')
+  +db.security.addPermissionToRole('Anonymous', 'Register', 'user')
+
+The lines marked "+" should be added and lines marked "-" should be
+deleted (minus the "+"/"-" signs).
+
+You should also modify the ``html/page.html`` template to change the
+permission tested there::
+
+   -tal:condition="python:request.user.hasPermission('Create', 'user')"
+   +tal:condition="python:request.user.hasPermission('Register', 'user')"
+
+
+Generic class editor may now restore retired items
+--------------------------------------------------
+
+The instructions for doing so won't be present in your tracker unless you copy
+the ``_generic.index.html`` template from the roundup distribution in
+``share/roundup/templates/classic/html`` to your tracker's ``html`` directory.
+
+
 Migrating from 1.4.x to 1.4.9
 =============================
 
@@ -106,7 +312,7 @@ The lines marked "+" should be added, minus the "+" sign.
 Fix the "retire" link in the users list for admin users
 -------------------------------------------------------
 
-The "retire" link found in the file ``html/users.index.html``::
+The "retire" link found in the file ``html/user.index.html``::
 
   <td tal:condition="context/is_edit_ok">
    <a tal:attributes="href string:user${user/id}?@action=retire&@template=index"
@@ -210,8 +416,8 @@ SQL-backends (mysql, postgresql, sqlite) for speeding up building the
 roundup-index for full-text search. We recommend that you create the
 following database indexes on the database by hand::
 
- CREATE INDEX words_by_id ON __words (_textid)
- CREATE UNIQUE INDEX __textids_by_props ON __textids (_class, _itemid, _prop)
+ CREATE INDEX words_by_id ON __words (_textid);
+ CREATE UNIQUE INDEX __textids_by_props ON __textids (_class, _itemid, _prop);
 
 Migrating from 1.2.x to 1.3.0
 =============================
@@ -1216,8 +1422,8 @@ should then copy the html directory from the Roundup source "classic" template
 and modify it according to your local schema changes.
 
 If you need help with the new templating system, please ask questions on the
-roundup-users mailing list (available through the roundup project page on
-sourceforge, http://roundup.sf.net/)
+roundup-users mailing list (available through the roundup web page on
+sourceforge, http://www.roundup-tracker.org/.
 
 
 0.5.0 Detectors

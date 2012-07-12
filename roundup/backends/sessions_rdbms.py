@@ -36,7 +36,7 @@ class BasicDatabase:
         if not res:
             if default != self._marker:
                 return default
-            raise KeyError, 'No such %s "%s"'%(self.name, infoid)
+            raise KeyError('No such %s "%s"'%(self.name, infoid))
         values = eval(res[0])
         return values.get(value, None)
 
@@ -46,7 +46,7 @@ class BasicDatabase:
             n, n, self.db.arg), (infoid,))
         res = self.cursor.fetchone()
         if not res:
-            raise KeyError, 'No such %s "%s"'%(self.name, infoid)
+            raise KeyError('No such %s "%s"'%(self.name, infoid))
         return eval(res[0])
 
     def set(self, infoid, **newvalues):
@@ -71,6 +71,12 @@ class BasicDatabase:
                 'values (%s, %s, %s)'%(n, n, n, n, a, a, a)
             args = (infoid, time.time(), repr(values))
         c.execute(sql, args)
+
+    def list(self):
+        c = self.cursor
+        n = self.name
+        c.execute('select %s_key from %ss'%(n, n))
+        return [res[0] for res in c.fetchall()]
 
     def destroy(self, infoid):
         self.cursor.execute('delete from %ss where %s_key=%s'%(self.name,

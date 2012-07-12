@@ -31,11 +31,14 @@ from email.Header import Header
 from email.MIMEText import MIMEText
 from email.MIMEBase import MIMEBase
 
+from anypy.email_ import FeedParser
+
 from roundup import password, date, hyperdb
 from roundup.i18n import _
 
 # MessageSendError is imported for backwards compatibility
-from roundup.mailer import Mailer, MessageSendError, encode_quopri
+from roundup.mailer import Mailer, MessageSendError, encode_quopri, \
+    nice_sender_header
 
 class Database:
 
@@ -100,8 +103,7 @@ class Database:
             elif isinstance(proptype, hyperdb.Interval):
                 props[propname] = date.Interval(value)
             elif isinstance(proptype, hyperdb.Password):
-                props[propname] = password.Password()
-                props[propname].unpack(value)
+                props[propname] = password.Password(encrypted=value)
 
         # tag new user creation with 'admin'
         self.journaltag = 'admin'
@@ -136,7 +138,7 @@ class Database:
         # Because getting a logger requires acquiring a lock, we want
         # to do it only once.
         if not hasattr(self, '__logger'):
-            self.__logger = logging.getLogger('hyperdb')
+            self.__logger = logging.getLogger('roundup.hyperdb')
 
         return self.__logger
 
@@ -178,7 +180,7 @@ class IssueClass:
     )
 
     # New methods:
-    def addmessage(self, nodeid, summary, text):
+    def addmessage(self, issueid, summary, text):
         """Add a message to an issue's mail spool.
 
         A new "msg" node is constructed using the current date, the user that
@@ -191,8 +193,8 @@ class IssueClass:
         appended to the "messages" field of the specified issue.
         """
 
-    def nosymessage(self, nodeid, msgid, oldvalues, whichnosy='nosy',
-            from_address=None, cc=[], bcc=[]):
+    def nosymessage(self, issueid, msgid, oldvalues, whichnosy='nosy',
+            from_address=None, cc=[], bcc=[], cc_emails = [], bcc_emails = []):
         """Send a message to the members of an issue's nosy list.
 
         The message is sent only to users on the nosy list who are not
@@ -211,6 +213,12 @@ class IssueClass:
         message to that may not be specified in the message's recipients
         list. These recipients will not be included in the To: or Cc:
         address lists.
+
+        The cc_emails and bcc_emails arguments take a list of additional
+        recipient email addresses (just the mail address not roundup users)
+        this can be useful for sending to additional email addresses which are no
+        roundup users. These arguments are currently not used by roundups
+        nosyreaction but can be used by customized (nosy-)reactors.
         """
         if msgid:
             authid = self.db.msg.get(msgid, 'author')
@@ -227,18 +235,29 @@ class IssueClass:
             seen_message[recipient] = 1
 
         def add_recipient(userid, to):
-            # make sure they have an address
+            """ make sure they have an address """
             address = self.db.user.get(userid, 'address')
             if address:
                 to.append(address)
                 recipients.append(userid)
 
         def good_recipient(userid):
-            # Make sure we don't send mail to either the anonymous
-            # user or a user who has already seen the message.
+            """ Make sure we don't send mail to either the anonymous
+                user or a user who has already seen the message.
+                Also check permissions on the message if not a system
+                message: A user must have view permission on content and
+                files to be on the receiver list. We do *not* check the
+                author etc. for now.
+            """
+            allowed = True
+            if msgid:
+                for prop in 'content', 'files':
+                    if prop in self.db.msg.properties:
+                        allowed = allowed and self.db.security.hasPermission(
+                            'View', userid, 'msg', prop, msgid)
             return (userid and
                     (self.db.user.get(userid, 'username') != 'anonymous') and
-                    not seen_message.has_key(userid))
+                    allowed and not seen_message.has_key(userid))
 
         # possibly send the message to the author, as long as they aren't
         # anonymous
@@ -251,34 +270,36 @@ class IssueClass:
             seen_message[authid] = 1
 
         # now deal with the nosy and cc people who weren't recipients.
-        for userid in cc + self.get(nodeid, whichnosy):
+        for userid in cc + self.get(issueid, whichnosy):
             if good_recipient(userid):
                 add_recipient(userid, sendto)
+        sendto.extend (cc_emails)
 
         # now deal with bcc people.
         for userid in bcc:
             if good_recipient(userid):
                 add_recipient(userid, bcc_sendto)
+        bcc_sendto.extend (bcc_emails)
 
         if oldvalues:
-            note = self.generateChangeNote(nodeid, oldvalues)
+            note = self.generateChangeNote(issueid, oldvalues)
         else:
-            note = self.generateCreateNote(nodeid)
+            note = self.generateCreateNote(issueid)
 
         # If we have new recipients, update the message's recipients
         # and send the mail.
         if sendto or bcc_sendto:
             if msgid is not None:
                 self.db.msg.set(msgid, recipients=recipients)
-            self.send_message(nodeid, msgid, note, sendto, from_address,
+            self.send_message(issueid, msgid, note, sendto, from_address,
                 bcc_sendto)
 
     # backwards compatibility - don't remove
     sendmessage = nosymessage
 
-    def send_message(self, nodeid, msgid, note, sendto, from_address=None,
+    def send_message(self, issueid, msgid, note, sendto, from_address=None,
             bcc_sendto=[], authid=None):
-        '''Actually send the nominated message from this node to the sendto
+        '''Actually send the nominated message from this issue to the sendto
            recipients, with the note appended.
         '''
         users = self.db.user
@@ -297,14 +318,14 @@ class IssueClass:
             # this is an old message that didn't get a messageid, so
             # create one
             messageid = "<%s.%s.%s%s@%s>"%(time.time(), random.random(),
-                                           self.classname, nodeid,
+                                           self.classname, issueid,
                                            self.db.config.MAIL_DOMAIN)
             if msgid is not None:
                 messages.set(msgid, messageid=messageid)
 
         # compose title
         cn = self.classname
-        title = self.get(nodeid, 'title') or '%s message copy'%cn
+        title = self.get(issueid, 'title') or '%s message copy'%cn
 
         # figure author information
         if authid:
@@ -331,11 +352,11 @@ class IssueClass:
 
         # put in roundup's signature
         if self.db.config.EMAIL_SIGNATURE_POSITION == 'top':
-            m.append(self.email_signature(nodeid, msgid))
+            m.append(self.email_signature(issueid, msgid))
 
         # add author information
         if authid and self.db.config.MAIL_ADD_AUTHORINFO:
-            if msgid and len(self.get(nodeid, 'messages')) == 1:
+            if msgid and len(self.get(issueid, 'messages')) == 1:
                 m.append(_("New submission from %(authname)s:")
                     % locals())
             elif msgid:
@@ -358,8 +379,7 @@ class IssueClass:
         if msgid :
             for fileid in messages.get(msgid, 'files') :
                 # check the attachment size
-                filename = self.db.filename('file', fileid, None)
-                filesize = os.path.getsize(filename)
+                filesize = self.db.filesize('file', fileid, None)
                 if filesize <= self.db.config.NOSY_MAX_ATTACHMENT_SIZE:
                     message_files.append(fileid)
                 else:
@@ -375,7 +395,7 @@ class IssueClass:
 
         # put in roundup's signature
         if self.db.config.EMAIL_SIGNATURE_POSITION == 'bottom':
-            m.append(self.email_signature(nodeid, msgid))
+            m.append(self.email_signature(issueid, msgid))
 
         # figure the encoding
         charset = getattr(self.db.config, 'EMAIL_CHARSET', 'utf-8')
@@ -395,7 +415,7 @@ class IssueClass:
         if from_tag:
             from_tag = ' ' + from_tag
 
-        subject = '[%s%s] %s'%(cn, nodeid, title)
+        subject = '[%s%s] %s'%(cn, issueid, title)
         author = (authname + from_tag, from_address)
 
         # send an individual message per recipient?
@@ -404,9 +424,10 @@ class IssueClass:
         else:
             sendto = [sendto]
 
+        # tracker sender info
         tracker_name = unicode(self.db.config.TRACKER_NAME, 'utf-8')
-        tracker_name = formataddr((tracker_name, from_address))
-        tracker_name = Header(tracker_name, charset)
+        tracker_name = nice_sender_header(tracker_name, from_address,
+            charset)
 
         # now send one or more messages
         # TODO: I believe we have to create a new message each time as we
@@ -441,12 +462,12 @@ class IssueClass:
                 if not 'name' in cl.getprops():
                     continue
                 if isinstance(prop, hyperdb.Link):
-                    value = self.get(nodeid, propname)
+                    value = self.get(issueid, propname)
                     if value is None:
                         continue
                     values = [value]
                 else:
-                    values = self.get(nodeid, propname)
+                    values = self.get(issueid, propname)
                     if not values:
                         continue
                 values = [cl.get(v, 'name') for v in values]
@@ -459,11 +480,11 @@ class IssueClass:
 
             if not inreplyto:
                 # Default the reply to the first message
-                msgs = self.get(nodeid, 'messages')
+                msgs = self.get(issueid, 'messages')
                 # Assume messages are sorted by increasing message number here
                 # If the issue is just being created, and the submitter didn't
                 # provide a message, then msgs will be empty.
-                if msgs and msgs[0] != nodeid:
+                if msgs and msgs[0] != msgid:
                     inreplyto = messages.get(msgs[0], 'messageid')
                     if inreplyto:
                         message['In-Reply-To'] = inreplyto
@@ -473,6 +494,7 @@ class IssueClass:
             if message_files:
                 # first up the text as a part
                 part = MIMEText(body)
+                part.set_charset(charset)
                 encode_quopri(part)
                 message.attach(part)
 
@@ -492,6 +514,12 @@ class IssueClass:
                         else:
                             part = MIMEText(content)
                             part['Content-Transfer-Encoding'] = '7bit'
+                    elif mime_type == 'message/rfc822':
+                        main, sub = mime_type.split('/')
+                        p = FeedParser()
+                        p.feed(content)
+                        part = MIMEBase(main, sub)
+                        part.set_payload([p.close()])
                     else:
                         # some other type, so encode it
                         if not mime_type:
@@ -503,7 +531,8 @@ class IssueClass:
                         part = MIMEBase(main, sub)
                         part.set_payload(content)
                         Encoders.encode_base64(part)
-                    part['Content-Disposition'] = 'attachment;\n filename="%s"'%name
+                    cd = 'Content-Disposition'
+                    part[cd] = 'attachment;\n filename="%s"'%name
                     message.attach(part)
 
             else:
@@ -516,7 +545,7 @@ class IssueClass:
                 mailer.smtp_send(sendto, message.as_string())
             first = False
 
-    def email_signature(self, nodeid, msgid):
+    def email_signature(self, issueid, msgid):
         ''' Add a signature to the e-mail with some useful information
         '''
         # simplistic check to see if the url is valid,
@@ -529,7 +558,7 @@ class IssueClass:
         else:
             if not base.endswith('/'):
                 base = base + '/'
-            web = base + self.classname + nodeid
+            web = base + self.classname + issueid
 
         # ensure the email address is properly quoted
         email = formataddr((self.db.config.TRACKER_NAME,
@@ -539,7 +568,7 @@ class IssueClass:
         return '\n%s\n%s\n<%s>\n%s'%(line, email, web, line)
 
 
-    def generateCreateNote(self, nodeid):
+    def generateCreateNote(self, issueid):
         """Generate a create note that lists initial property values
         """
         cn = self.classname
@@ -551,7 +580,7 @@ class IssueClass:
         prop_items = props.items()
         prop_items.sort()
         for propname, prop in prop_items:
-            value = cl.get(nodeid, propname, None)
+            value = cl.get(issueid, propname, None)
             # skip boring entries
             if not value:
                 continue
@@ -581,7 +610,7 @@ class IssueClass:
         m.insert(0, '')
         return '\n'.join(m)
 
-    def generateChangeNote(self, nodeid, oldvalues):
+    def generateChangeNote(self, issueid, oldvalues):
         """Generate a change note that lists property changes
         """
         if not isinstance(oldvalues, type({})):
@@ -602,7 +631,7 @@ class IssueClass:
             # not all keys from oldvalues might be available in database
             # this happens when property was deleted
             try:
-                new_value = cl.get(nodeid, key)
+                new_value = cl.get(issueid, key)
             except KeyError:
                 continue
             # the old value might be non existent
@@ -623,7 +652,7 @@ class IssueClass:
         changed_items.sort()
         for propname, oldvalue in changed_items:
             prop = props[propname]
-            value = cl.get(nodeid, propname, None)
+            value = cl.get(issueid, propname, None)
             if isinstance(prop, hyperdb.Link):
                 link = self.db.classes[prop.classname]
                 key = link.labelprop(default_to_id=1)

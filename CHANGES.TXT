@@ -1,12 +1,356 @@
-This file contains the changes to the Roundup system over time. The entries
-are given with the most recent entry first.
+This file contains the changes to the Roundup system over time. 
+The entries are given with the most recent entry first. 
+Each entry has the deveoper who committed the change in brackets.
+Entries without name were done by Richard Jones.
+
+2011-07-15 1.4.19 (r4638)
+
+Features:
+
+- Xapian indexing improved: Slightly faster and slightly smaller database. 
+  Closes issue2550687. Thanks to Olly Betts for the patch. (Bernhard Reiter)
+- PostgreSQL backend minor improvement: database creation less likely to fail
+  for PostgreSQL versions >= 8.1 as the table "postgres" is used by default.
+  Closes issue2550543. Thanks to Kai Storbeck for the patch. (Bernhard Reiter)
+- Allow HTMLRequest.batch to filter on other permissions than "View"
+  (e.g. on the new "Search" permission") by adding a "permission"
+  parameter. Thanks to Eli Collins for the patch. Closes issue2550699. (Ralf)
+
+Fixed:
+
+- Installation: Fixed an issue that prevented to use EasyInstall 
+  and a Python egg. Thanks to Satchidanand Haridas for the patch and
+  John Kristensen for testing it. (Bernhard Reiter)
+- The PostgreSQL backend quotes database names now for CREATE and DROP, 
+  enabling more exotic tracker names. Closes issue2550497. 
+  Thanks to Sebastian Harl for providing the patch. (Bernhard Reiter)
+- Updated the url to point to www.roundup-tracker.org in two places in the
+  docs. (Bernhard Reiter)
+- Do not depend on a CPython implementation detail anymore to make Roundup 
+  more compatible with other Python implementations like PyPy.
+  Closes issue2550707. Thanks to Christof Meerwald. (Bernhard Reiter, Richard)
+- Yet another fix to the mail gateway, messages got *all* files of
+  an issue, not just the new ones. Thanks to Rafal Bisingier for
+  reporting and proposing a fix. The regression test was updated.
+  (Ralf)
+- Fix version numbers in upgrade documentation, the file-unlink defect
+  was in 1.4.17 not 1.4.16. Thanks to Rafal Bisingier. (Ralf)
+- Fix encoded email header parsing if multiple encoded and non-encoded
+  parts are present. RFC2047 specifies that spacing is removed only
+  between encoded parts, we always removed the space. Note that this bug
+  was present before mail gateway refactoring :-) Thanks for thorough
+  testing of mail gateway code by Rafal Bisingier. (Ralf)
+- The "Retire" permission was not being registered. (Richard)
+- Fix StringIO issue2550713: io.StringIO in newer versions of python
+  returns unicode strings and expects a unicode string in the
+  constructor. Unfortunately csv  doesn't handle unicode (yet). So we
+  need to use a BytesIO which gets the utf-8 string from the
+  web-interface. Compatibility for old versions by using
+  StringIO.StringIO for emulating a io.BytesIO also works.
+  Thanks to Cédric Krier for reporting. Closes issue2550713.
+  Added a regression test for EditCSVAction (Ralf)
+- Fix issue2550691 where a Unix From-Header was sometimes inserted in
+  outgoing emails, thanks to Joseph Myers for the patch. (Ralf)
+
+
+2011-05-29 1.4.18 (r4610)
+
+Features:
+
+- Norwegian Bokmal translation by Christian Aastorp (Ralf)
+- Allow to specify additional cc and bcc emails (not roundup users) for
+  nosymessage used by the nosyreaction reactor. (Ralf)
+
+Fixed:
+
+- File-unlink defect in mailgw fixed! If an email was received
+  that contained no attachments, all previous files of the issue were unlinked. 
+  This defect was introduced with the 1.4.17 release as an unwanted result 
+  of the mail gate code refactoring. Thanks to Rafal Bisingier for reporting 
+  and proposing a fix. There is now a regression test in place. (Ralf)
+
+2011-05-13 1.4.17 (r4605)
+
+Features:
+
+- Allow declaration of default_values for properties in schema.
+- Add explicit "Search" permissions, see Security Fix below.
+- Add "lookup" method to xmlrpc interface (Ralf Schlatterbeck)
+- Multilinks can be filtered by combining elements with AND, OR and NOT
+  operators now. A javascript gui was added for "keywords", see issue2550648.
+  Developed by Sascha Teichmann; funded by Intevation. (Bernhard Reiter)
+- Factor MailGW message parsing into a separate class, thanks to John
+  Kristensen who did the major work in issue2550576 -- I wouldn't
+  have attempted it without this. Fixes issue2550576. (Ralf)
+- Now if the -C option to roundup-mailgw specifies "issue" this refers
+  to an issue-like class. The real class is determined from the
+  configured default class, or the -c option to the mailgw, or the class
+  resulting from mail subject parsing. We also accept multiple -S
+  options for the same class now. (Ralf)
+- Optimisation: Late evaluation of Multilinks (only in rdbms backends):
+  previously we materialized each multilink in a Node -- this creates an
+  SQL query for each multilink (e.g. 'files' and 'messages' for each
+  line in the issue index display) -- even if the multilinks aren't
+  displayed. Now we compute multilinks only if they're accessed (and
+  keep them cached).
+- Add a filter_iter similar to the existing filter call. This feature is
+  considered experimental. This is currently not used in the
+  web-interface but passes all tests for the filter call except sorting
+  by Multilinks (which isn't supported by SQL and isn't a sane concept
+  anyway). When using filter_iter instead of filter this saves a *lot*
+  of SQL queries: Filter returns only the IDs of Nodes in the database,
+  the additional content of a Node has to be fetched in a separate SQL
+  call. The new filter_iter also returns the IDs of Nodes (one by one,
+  it's an iterator) but pre-seeds the cache with the content of the
+  Node. The information needed for seeding the cache is retrieved in the
+  same SQL query as the ids.
+
+Fixed:
+
+- Security Fix: Add a check for search-permissions: now we allow
+  searching for properties only if the property is readable without a
+  check method or if an explicit search permission (see above unter
+  "Features) is given for the property. This fixes cases where a user
+  doesn't have access to a property but can deduce the content by
+  crafting a clever search, group or sort query.
+  see doc/upgrading.txt for how to fix your trackers! (Ralf Schlatterbeck).
+- Range support in roundup-server so large files can be served, 
+  e.g. media files on iOS/iPads; issue2550694. (Bernhard Reiter; 
+  Thanks to Jon C. Thomason for the patch.)
+- Fix search for xapian 1.2 issue2550676 
+  (Bernhard Reiter; Thanks to Olly Betts for providing the patch.)
+- Some minor typos fixed in doc/customizing.txt (Thanks Ralf Hemmecke).
+- XML-RPC documentation now linked from the docs/index (Bernhard Reiter).
+- Fix setting of sys.path when importing schema.py, fixes issue2550675,
+  thanks to Bryce L Nordgren for reporting. (Ralf Schlatterbeck)
+- clear the cache on commit for rdbms backends: Don't carry over cached
+  values from one transaction to the next (there may be other changes
+  from other transactions) see new ConcurrentDBTest for a
+  read-modify-update cycle that fails with the old caching behavior.
+  (Ralf Schlatterbeck)
+- Fix incorrect setting of template in customizing.txt example action,
+  patch via issue2550682 (thanks John Kristensen)
+- Configuration issue: On some postgresql 8.4 installations (notably on
+  debian squeeze) the default template database used for database
+  creation doesn't match the needed character encoding UTF8 -- a new
+  config option 'template' in the rdbms section now allows specification
+  of the template. You know you need this option if you get the error
+  message:
+  psycopg2.DataError: new encoding (UTF8) is incompatible with the
+  encoding of the template database (SQL_ASCII)
+  HINT:  Use the same encoding as in the template database, or use
+  template0 as template.
+  (Ralf Schlatterbeck)
+- Fixed bug in mailgw refactoring, patch issue2550697 (thanks Hubert
+  Touvet)
+- Fix Password handling security issue2550688 (thanks Joseph Myers for
+  reporting and Eli Collins for fixing) -- this fixes all observations
+  by Joseph Myers except for auto-migration of existing passwords.
+- Add new config-option 'migrate_passwords' in section 'web' to
+  auto-migrate passwords at web-login time. Default for the new option
+  is "yes" so if you don't want that passwords are auto-migrated to a
+  more secure password scheme on user login, set this to "no" before
+  running your tracker(s) after the upgrade.
+- Add new config-option 'password_pbkdf2_default_rounds' in 'main'
+  section to configure the default parameter for new password
+  generation. Set this to a higher value on faster systems which want
+  more security. Thanks to Eli Collins for implementing this (see
+  issue2550688).
+- Fix documentation for roundup-server about the 'host' parameter as
+  suggested in issue2550693, fixes the first part of this issue. Make
+  'localhost' the new default for this parameter, note the upgrading
+  documentation of changed behaviour.  We also deprecate the empty host
+  parameter for binding to all interfaces now (still left in for
+  compatibility). Thanks to Toni Mueller for providing the first version
+  of this patch and discussing implementations.
+- Fixed bug in filter_iter refactoring (lazy multilinks), in rare cases
+  this would result in duplicate multilinks to the same node. We're now
+  going the safe route and doing lazy evaluation only for read-only
+  access, whenever updates are done we fetch everything.
+
+2010-10-08 1.4.16 (r4541)
+
+Features:
+
+- allow trackers to override the classes used to render properties in
+  templating per issue2550659 (thanks Ezio Melotti)
+- new mailgw configuration item "subject_updates_title": If set to "no"
+  a changed subject in a reply to an issue will not update the issue
+  title with the changed subject. Thanks to Arkadiusz Kita and Peter
+  Funk for requesting the feature and discussing the implementation.
+  http://thread.gmane.org/gmane.comp.bug-tracking.roundup.user/10169
+- new rdbms config item sqlite_timeout makes the previously hard-coded
+  timeout of 30 seconds configurable. This is the time a client waits
+  for the locked database to become free before giving up. Used only for
+  SQLite backend.
+- new mailgw config item unpack_rfc822 that unpacks message attachments
+  of type message/rfc822 and attaches the individual parts instead of
+  attaching the whole message/rfc822 attachment to the roundup issue.
+
+Fixed:
+
+- fixed reporting of source missing warnings
+- relevant tests made locale independent, issue2550660 (thanks
+  Benni Bärmann for reporting).
+- fix for incorrect except: syntax, issue2550661 (thanks Jakub Wilk)
+- No longer use the root logger, use a logger with prefix "roundup",
+  see http://thread.gmane.org/gmane.comp.bug-tracking.roundup.devel/5356
+- improve handling of '&gt;' when URLs are converted to links, issue2550664
+  (thanks Ezio Melotti)
+- fixed registration, issue2550665 (thanks Timo Paulssen)
+- make sorting of multilinks in the web interface more robust, issue2550663
+- Fix charset of first text-part of outgoing multipart messages, thanks Dirk
+  Geschke for reporting, see
+  http://thread.gmane.org/gmane.comp.bug-tracking.roundup.user/10223
+- Fix handling of incoming message/rfc822 attachments. These resulted in
+  a weird mail usage error because the email module threw a TypeError
+  which roundup interprets as a Reject exception. Fixes issue2550667.
+  Added regression tests for message/rfc822 attachments with and without
+  configured unpacking (mailgw unpack_rfc822, see Features above)
+  Thanks to Benni Bärmann for reporting.
+- Allow search_popup macro to work with all db classes, issue2550567
+  (thanks John Kristensen)
+- lower memory footprint for (journal-) import
+
+
+2010-07-12 1.4.15
+
+Fixed:
+
+- A bunch of regressions were introduced in the last release making Roundup
+  no longer work in Python releases prior to 2.6
+- make URL detection a little smarter about brackets per issue2550657
+  (thanks Ezio Melotti)
+
+
+2010-07-01 1.4.14
+
+Features:
+
+- Preparations for getting 2to3 work, not completed yet. (Richard Jones)
+
+Fixed:
+
+- User input not escaped when a bad template name is supplied (thanks
+  Benjamin Pollack)
+- The email for the first message on an issue was having its In-Reply-To
+  set to itself (thanks Eric Kow)
+- Handle multiple @action values from broken trackers.
+- Accept single-character subject lines
+- xmlrpc handling of unicode characters and binary values, see
+  http://thread.gmane.org/gmane.comp.bug-tracking.roundup.user/10040
+  thanks to Hauke Duden for reporting these.
+- frontends/roundup.cgi got out of sync with the roundup.cgi.Client API
+- Default to "text/plain" if no Content-Type header is present in email
+  (thanks Hauke Duden)
+- Small documentation update regarding debugging aids (Bernhard Reiter)
+- Indexer Xapian, made Xapian 1.2 compatible. Needs at least Xapian 1.0.0 now.
+  (Bernhard Reiter; Thanks to Olly Betts for providing the patch Issue2550647.)
+
+
+2010-02-19 1.4.13
+
+Fixed:
+- Multilink edit fields lose their values (thanks Will Maier)
+
+
+2010-02-09 1.4.12 (r4455)
+
+Features:
+- Support IMAP CRAM-MD5, thanks Jochen Maes
+
+Fixes:
+- Proper handling of 'Create' permissions in both mail gateway (earlier
+  commit r4405 by Richard), web interface, and xmlrpc. This used to
+  check 'Edit' permission previously. See
+  http://thread.gmane.org/gmane.comp.bug-tracking.roundup.devel/5133
+  Add regression tests for proper handling of 'Create' and 'Edit'
+  permissions.
+- Fix handling of non-ascii in realname in the nosy mailer, this used to
+  mangle the email address making it unusable when replying. Thanks to
+  intevation for funding the fix.
+- Fix documentation on user required to run the tests, fixes 
+  issue2550618, thanks to Chris aka 'radioking'
+- Add simple doc about translating customised tracker content
+- Add "flup" setup documentation, thanks Christian Glass
+- Fix "Web Access" permission check to allow serving of static files to
+  Anonymous again
+- Add check for "Web Access" permission in all web templating permission
+  checks
+- Improvements in upgrading documentation, thanks Christian Glass
+- Display 'today' in the account user's timezone, thanks David Wolever
+- Fix file handle leak in some web interfaces with logging turned on,
+  fixes issue1675845
+- Attempt to generate more human-readable addresses in email, fixes
+  issue2550632
+- Allow value to be specified to multilink form element templating, fixes
+  issue2550613, thanks David Wolever
+- Fix thread safety with stdin in roundup-server, fixes issue2550596
+  (thanks Werner Hunger)
+
+
+2009-12-21 1.4.11 (r4413)
+
+Features:
+- Generic class editor may now restore retired items (thanks Ralf Hemmecke)
+
+Fixes:
+- Fix security hole allowing user permission escalation (thanks Ralf
+  Schlatterbeck)
+- More SSL fixes. SSL wants the underlying socket non-blocking. So we
+  don't call socket.setdefaulttimeout in case of SSL. This apparently
+  never raises a WantReadError from SSL.
+  This also fixes a case where a WantReadError is raised and apparently
+  the bytes already read are dropped (seems the WantReadError is really
+  an error, not just an indication to retry).
+- Correct initial- and end-handshakes for SSL
+- Update FAQ to mention infinite redirects with pathological settings of
+  the tracker->web variable. Closes issue2537286, thanks to "stuidge"
+  for reporting.
+- Fix some format errors in italian translation file
+- Some bugs issue classifiers were causing database lookup errors
+- Fix security-problem: If user hasn't permission on a message (notably
+  files and content properties) and is on the nosy list, the content was
+  sent via email. We now check that user has permission on the message
+  content and files properties. Thanks to Intevation for funding this
+  fix.
+- Fix traceback on .../msgN/ url, this requests the file content and for
+  apache mod_wsgi produced a traceback because the mime type is None for
+  messages, fixes issue2550586, thanks to Thomas Arendsen Hein for
+  reporting and to Intevation for funding the fix.
+- Handle OPTIONS http request method in wsgi handler, fixes issue2550587.
+  Thanks to Thomas Arendsen Hein for reporting and to Intevation for
+  funding the fix.
+- Add documentation for migrating to the Register permission and
+  fix mailgw to use Register permission, fixes issue2550599
+- Fix styling of calendar to make it more usable, fixes issue2550608
+- Fix typo in email section of user guide, fixes issue2550607
+- Fix WSGI response code (thanks Peter Pöml)
+- Fix linking of an existing item to a newly created item, e.g.
+  edit action in web template is name="issue-1@link@msg" value="msg1"
+  would trigger a traceback about an unbound variable.
+  Add new regression test for this case. May be related to (now closed)
+  issue1177477. Thanks to Intevation for funding the fix.
+- Clean up all the places where role processing occurs. This is now in a
+  central place in hyperdb.Class and is used consistently throughout.
+  This also means now a template can override the way role processing
+  occurs (e.g. for elaborate permission schemes). Thanks to intevation
+  for funding the change.
+- Fix issue2550606 (german translation bug) "an hour" is only used in
+  the context "in an hour" or "an hour ago" which translates to german
+  "in einer Stunde" or "vor einer Stunde".  So "an hour" is translated
+  "einer Stunde" (which sounds wrong at first).  Also note that date.py
+  already has a comment saying "XXX this is internationally broken" --
+  but at least there's a workaround for german :-) Thanks to Chris
+  (radioking) for reporting.
+
 
 2009-10-09 1.4.10 (r4374)
 
 Fixes:
 - Minor update of doc/developers.txt to point to the new resources
   on www.roundup-tracker.org (Bernhard Reiter)
-- Small CSS improvements regaring the search box (thanks Thomas Arendsan Hein)
+- Small CSS improvements regaring the search box (thanks Thomas Arendsen Hein)
   (issue 2550589)
 - Indexers behaviour made more consistent regarding length of indexed words
   and stopwords (thanks Thomas Arendsen Hein, Bernhard Reiter)(issue 2550584)
@@ -16,12 +360,13 @@ Fixes:
   for export/import) has a new field size limit starting with python2.5.
   We now issue a warning during export if the limit is too small and use
   the csv_field_size configuration during import to set the limit for
-  the csv module.
+  the csv module. (Ralf Schlatterbeck)
 - Small fix for CGI-handling of XMLRPC requests for python2.4, this
   worked only for 2.5 and beyond due to a change in the xmlrpc interface
-  in python
-- Document filter method of xmlrpc interface
-- Fix interaction of SSL and XMLRPC, now XMLRPC works with SSL
+  in python (Ralf Schlatterbeck)
+- Document filter method of xmlrpc interface (Ralf Schlatterbeck)
+- Fix interaction of SSL and XMLRPC, now XMLRPC works with SSL 
+  (Ralf Schlatterbeck)
 
 2009-08-10 1.4.9 (r4346)
 

@@ -9,7 +9,7 @@ from cStringIO import StringIO
 from roundup import __version__
 from roundup.date import get_timezone
 
-from email.Utils import formatdate, formataddr
+from email.Utils import formatdate, formataddr, specialsre, escapesre
 from email.Message import Message
 from email.Header import Header
 from email.Charset import Charset
@@ -25,6 +25,25 @@ def encode_quopri(msg):
     msg.set_payload(encdata)
     del msg['Content-Transfer-Encoding']
     msg['Content-Transfer-Encoding'] = 'quoted-printable'
+
+def nice_sender_header(name, address, charset):
+    # construct an address header so it's as human-readable as possible
+    # even in the presence of a non-ASCII name part
+    if not name:
+        return address
+    try:
+        encname = name.encode('ASCII')
+    except UnicodeEncodeError:
+        # use Header to encode correctly.
+        encname = Header(name, charset=charset).encode()
+
+    # the important bits of formataddr()
+    if specialsre.search(encname):
+        encname = '"%s"'%escapesre.sub(r'\\\g<0>', encname)
+
+    # now format the header as a string - don't return a Header as anonymous
+    # headers play poorly with Messages (eg. won't get wrapped properly)
+    return '%s <%s>'%(encname, address)
 
 class Mailer:
     """Roundup-specific mail sending."""
@@ -62,14 +81,15 @@ class Mailer:
         charset = getattr(self.config, 'EMAIL_CHARSET', 'utf-8')
         tracker_name = unicode(self.config.TRACKER_NAME, 'utf-8')
         if not author:
-            author = formataddr((tracker_name, self.config.ADMIN_EMAIL))
+            author = (tracker_name, self.config.ADMIN_EMAIL)
+            name = author[0]
         else:
             name = unicode(author[0], 'utf-8')
             try:
                 name.encode('ascii')
             except UnicodeError:
                 name = Charset(charset).header_encode(name.encode(charset))
-            author = formataddr((name, author[1]))
+            author = nice_sender_header(name, author[1], charset)
 
         if multipart:
             message = MIMEMultipart()
@@ -82,9 +102,7 @@ class Mailer:
         except UnicodeError:
             message['Subject'] = Header(subject, charset)
         message['To'] = ', '.join(to)
-        # This should not fail, since we already encoded non-ASCII
-        # name characters
-        message['From'] = author.encode('ascii')
+        message['From'] = author
         message['Date'] = formatdate(localtime=True)
 
         # add a Precedence header so autoresponders ignore us
@@ -181,17 +199,22 @@ class Mailer:
         content = '\n'.join(traceback.format_exception(*sys.exc_info()))
         self.standard_message(to, subject, data+content)
 
-    def smtp_send(self, to, message):
+    def smtp_send(self, to, message, sender=None):
         """Send a message over SMTP, using roundup's config.
 
         Arguments:
         - to: a list of addresses usable by rfc822.parseaddr().
         - message: a StringIO instance with a full message.
+        - sender: if not 'None', the email address to use as the
+        envelope sender.  If 'None', the admin email is used.
         """
+
+        if not sender:
+            sender = self.config.ADMIN_EMAIL
         if self.debug:
             # don't send - just write to a file
             open(self.debug, 'a').write('FROM: %s\nTO: %s\n%s\n' %
-                                        (self.config.ADMIN_EMAIL,
+                                        (sender,
                                          ', '.join(to), message))
         else:
             # now try to send the message
@@ -199,7 +222,7 @@ class Mailer:
                 # send the message as admin so bounces are sent there
                 # instead of to roundup
                 smtp = SMTPConnection(self.config)
-                smtp.sendmail(self.config.ADMIN_EMAIL, to, message)
+                smtp.sendmail(sender, to, message)
             except socket.error, value:
                 raise MessageSendError("Error: couldn't send email: "
                                        "mailhost %s"%value)

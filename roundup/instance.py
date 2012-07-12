@@ -16,9 +16,15 @@
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
 
-"""Tracker handling (open tracker).
+"""Top-level tracker interface.
 
-Backwards compatibility for the old-style "imported" trackers.
+Open a tracker with:
+
+    >>> from roundup import instance
+    >>> db = instance.open('path to tracker home')
+
+The "db" handle you get back is the tracker's hyperdb which has the interface
+described in `roundup.hyperdb.Database`.
 """
 __docformat__ = 'restructuredtext'
 
@@ -80,8 +86,7 @@ class Tracker:
                 sys.path.remove(libdir)
 
     def get_backend_name(self):
-        o = __builtins__['open']
-        f = o(os.path.join(self.tracker_home, 'db', 'backend_name'))
+        f = file(os.path.join(self.config.DATABASE, 'backend_name'))
         name = f.readline().strip()
         f.close()
         return name
@@ -107,6 +112,9 @@ class Tracker:
             'db': backend.Database(self.config, name)
         }
 
+        libdir = os.path.join(self.tracker_home, 'lib')
+        if os.path.isdir(libdir):
+            sys.path.insert(1, libdir)
         if self.optimize:
             # execute preloaded schema object
             exec(self.schema, vars)
@@ -115,9 +123,6 @@ class Tracker:
             # use preloaded detectors
             detectors = self.detectors
         else:
-            libdir = os.path.join(self.tracker_home, 'lib')
-            if os.path.isdir(libdir):
-                sys.path.insert(1, libdir)
             # execute the schema file
             self._load_python('schema.py', vars)
             if callable (self.schema_hook):
@@ -126,8 +131,8 @@ class Tracker:
             for extension in self.get_extensions('extensions'):
                 extension(self)
             detectors = self.get_extensions('detectors')
-            if libdir in sys.path:
-                sys.path.remove(libdir)
+        if libdir in sys.path:
+            sys.path.remove(libdir)
         db = vars['db']
         # apply the detectors
         for detector in detectors:

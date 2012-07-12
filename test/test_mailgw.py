@@ -21,12 +21,14 @@ if not os.environ.has_key('SENDMAILDEBUG'):
     os.environ['SENDMAILDEBUG'] = 'mail-test.log'
 SENDMAILDEBUG = os.environ['SENDMAILDEBUG']
 
+from roundup import mailgw, i18n, roundupdb
 from roundup.mailgw import MailGW, Unauthorized, uidFromAddress, \
     parseContent, IgnoreLoop, IgnoreBulk, MailUsageError, MailUsageHelp
 from roundup import init, instance, password, rfc2822, __version__
 from roundup.anypy.sets_ import set
 
-import db_test_base
+#import db_test_base
+import memorydb
 
 class Message(rfc822.Message):
     """String-based Message class with equivalence test."""
@@ -36,6 +38,10 @@ class Message(rfc822.Message):
     def __eq__(self, other):
         return (self.dict == other.dict and
                 self.fp.read() == other.fp.read())
+
+class Tracker(object):
+    def open(self, journaltag):
+        return self.db
 
 class DiffHelper:
     def compareMessages(self, new, old):
@@ -78,7 +84,7 @@ class DiffHelper:
                 res.extend(body_diff)
 
             if res:
-                res.insert(0, 'Generated message not correct (diff follows):')
+                res.insert(0, 'Generated message not correct (diff follows, expected vs. actual):')
                 raise AssertionError, '\n'.join(res)
 
     def compareStrings(self, s2, s1, replace={}):
@@ -114,13 +120,17 @@ class MailgwTestCase(unittest.TestCase, DiffHelper):
     count = 0
     schema = 'classic'
     def setUp(self):
+        self.old_translate_ = mailgw._
+        roundupdb._ = mailgw._ = i18n.get_translation(language='C').gettext
         MailgwTestCase.count = MailgwTestCase.count + 1
-        self.dirname = '_test_mailgw_%s'%self.count
-        # set up and open a tracker
-        self.instance = db_test_base.setupTracker(self.dirname)
 
-        # and open the database
-        self.db = self.instance.open('admin')
+        # and open the database / "instance"
+        self.db = memorydb.create('admin')
+        self.instance = Tracker()
+        self.instance.db = self.db
+        self.instance.config = self.db.config
+        self.instance.MailGW = MailGW
+
         self.chef_id = self.db.user.create(username='Chef',
             address='chef@bork.bork.bork', realname='Bork, Chef', roles='User')
         self.richard_id = self.db.user.create(username='richard',
@@ -130,27 +140,27 @@ class MailgwTestCase(unittest.TestCase, DiffHelper):
         self.john_id = self.db.user.create(username='john',
             address='john@test.test', roles='User', realname='John Doe',
             alternate_addresses='jondoe@test.test\njohn.doe@test.test')
+        self.rgg_id = self.db.user.create(username='rgg',
+            address='rgg@test.test', roles='User')
 
     def tearDown(self):
+        roundupdb._ = mailgw._ = self.old_translate_
         if os.path.exists(SENDMAILDEBUG):
             os.remove(SENDMAILDEBUG)
         self.db.close()
-        try:
-            shutil.rmtree(self.dirname)
-        except OSError, error:
-            if error.errno not in (errno.ENOENT, errno.ESRCH): raise
 
-    def _handle_mail(self, message):
-        # handler will open a new db handle. On single-threaded
-        # databases we'll have to close our current connection
-        self.db.commit()
-        self.db.close()
-        handler = self.instance.MailGW(self.instance)
+    def _create_mailgw(self, message, args=()):
+        class MailGW(self.instance.MailGW):
+            def handle_message(self, message):
+                return self._handle_message(message)
+        handler = MailGW(self.instance, args)
+        handler.db = self.db
+        return handler
+
+    def _handle_mail(self, message, args=()):
+        handler = self._create_mailgw(message, args)
         handler.trapExceptions = 0
-        ret = handler.main(StringIO(message))
-        # handler had its own database, open new connection
-        self.db = self.instance.open('admin')
-        return ret
+        return handler.main(StringIO(message))
 
     def _get_mail(self):
         f = open(SENDMAILDEBUG)
@@ -172,6 +182,99 @@ Subject: [issue] Testing...
 ''')
         assert not os.path.exists(SENDMAILDEBUG)
         self.assertEqual(self.db.issue.get(nodeid, 'title'), 'Testing...')
+
+    def testMessageWithFromInIt(self):
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Cc: richard@test.test
+Reply-To: chef@bork.bork.bork
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Testing...
+
+From here to there!
+''')
+        assert not os.path.exists(SENDMAILDEBUG)
+        msgid = self.db.issue.get(nodeid, 'messages')[0]
+        self.assertEqual(self.db.msg.get(msgid, 'content'), 'From here to there!')
+
+    def testNoMessageId(self):
+        self.instance.config['MAIL_DOMAIN'] = 'example.com'
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Cc: richard@test.test
+Reply-To: chef@bork.bork.bork
+Subject: [issue] Testing...
+
+Hi there!
+''')
+        assert not os.path.exists(SENDMAILDEBUG)
+        msgid = self.db.issue.get(nodeid, 'messages')[0]
+        messageid = self.db.msg.get(msgid, 'messageid')
+        x1, x2 = messageid.split('@')
+        self.assertEqual(x2, 'example.com>')
+        x = x1.split('.')[-1]
+        self.assertEqual(x, 'issueNone')
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Subject: [issue%(nodeid)s] Testing...
+
+Just a test reply
+'''%locals())
+        msgid = self.db.issue.get(nodeid, 'messages')[-1]
+        messageid = self.db.msg.get(msgid, 'messageid')
+        x1, x2 = messageid.split('@')
+        self.assertEqual(x2, 'example.com>')
+        x = x1.split('.')[-1]
+        self.assertEqual(x, "issue%s"%nodeid)
+
+    def testOptions(self):
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Reply-To: chef@bork.bork.bork
+Subject: [issue] Testing...
+
+Hi there!
+''', (('-C', 'issue'), ('-S', 'status=chatting;priority=critical')))
+        self.assertEqual(self.db.issue.get(nodeid, 'status'), '3')
+        self.assertEqual(self.db.issue.get(nodeid, 'priority'), '1')
+
+    def testOptionsMulti(self):
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Reply-To: chef@bork.bork.bork
+Subject: [issue] Testing...
+
+Hi there!
+''', (('-C', 'issue'), ('-S', 'status=chatting'), ('-S', 'priority=critical')))
+        self.assertEqual(self.db.issue.get(nodeid, 'status'), '3')
+        self.assertEqual(self.db.issue.get(nodeid, 'priority'), '1')
+
+    def testOptionClass(self):
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Reply-To: chef@bork.bork.bork
+Subject: [issue] Testing... [status=chatting;priority=critical]
+
+Hi there!
+''', (('-c', 'issue'),))
+        self.assertEqual(self.db.issue.get(nodeid, 'title'), 'Testing...')
+        self.assertEqual(self.db.issue.get(nodeid, 'status'), '3')
+        self.assertEqual(self.db.issue.get(nodeid, 'priority'), '1')
 
     def doNewIssue(self):
         nodeid = self._handle_mail('''Content-Type: text/plain;
@@ -257,7 +360,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, mary@test.test, richard@test.test
 From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <dummy_test_message_id>
 X-Roundup-Name: Roundup issue tracker
@@ -301,7 +405,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: mary@test.test, richard@test.test
 From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <dummy_test_message_id>
 X-Roundup-Name: Roundup issue tracker
@@ -342,7 +447,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: mary@test.test, richard@test.test
 From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <dummy_test_message_id>
 X-Roundup-Name: Roundup issue tracker
@@ -431,6 +537,77 @@ SnVzdCBhIHRlc3QK
 --bxyzzy--
 '''
 
+    multipart_msg_latin1 = '''From: mary <mary@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: [issue1] Testing...
+Content-Type: multipart/alternative; boundary=001485f339f8f361fb049188dbba
+
+
+--001485f339f8f361fb049188dbba
+Content-Type: text/plain; charset=ISO-8859-1
+Content-Transfer-Encoding: quoted-printable
+
+umlaut =E4=F6=FC=C4=D6=DC=DF
+
+--001485f339f8f361fb049188dbba
+Content-Type: text/html; charset=ISO-8859-1
+Content-Transfer-Encoding: quoted-printable
+
+<html>umlaut =E4=F6=FC=C4=D6=DC=DF</html>
+
+--001485f339f8f361fb049188dbba--
+'''
+
+    multipart_msg_rfc822 = '''From: mary <mary@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: [issue1] Testing...
+Content-Type: multipart/mixed; boundary=001485f339f8f361fb049188dbba
+
+This is a multi-part message in MIME format.
+--001485f339f8f361fb049188dbba
+Content-Type: text/plain; charset=ISO-8859-15
+Content-Transfer-Encoding: 7bit
+
+First part: Text
+
+--001485f339f8f361fb049188dbba
+Content-Type: message/rfc822; name="Fwd: Original email subject.eml"
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="Fwd: Original email subject.eml"
+
+Message-Id: <followup_dummy_id_2>
+In-Reply-To: <dummy_test_message_id_2>
+MIME-Version: 1.0
+Subject: Fwd: Original email subject
+Date: Mon, 23 Aug 2010 08:23:33 +0200
+Content-Type: multipart/alternative; boundary="090500050101020406060002"
+
+This is a multi-part message in MIME format.
+--090500050101020406060002
+Content-Type: text/plain; charset=ISO-8859-15; format=flowed
+Content-Transfer-Encoding: 7bit
+
+some text in inner email
+========================
+
+--090500050101020406060002
+Content-Type: text/html; charset=ISO-8859-15
+Content-Transfer-Encoding: 7bit
+
+<html>
+some text in inner email
+========================
+</html>
+
+--090500050101020406060002--
+
+--001485f339f8f361fb049188dbba--
+'''
+
     def testMultipartKeepAlternatives(self):
         self.doNewIssue()
         self._handle_mail(self.multipart_msg)
@@ -448,6 +625,68 @@ SnVzdCBhIHRlc3QK
                 self.assertEqual(f.content, content [n])
         self.assertEqual(msg.content, 'test attachment second text/plain')
 
+    def testMultipartSeveralAttachmentMessages(self):
+        self.doNewIssue()
+        self._handle_mail(self.multipart_msg)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        self.assertEqual(messages[-1], '2')
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(len(msg.files), 5)
+        issue = self.db.issue.getnode ('1')
+        self.assertEqual(len(issue.files), 5)
+        names = {0 : 'first.dvi', 4 : 'second.dvi'}
+        content = {3 : 'test attachment third text/plain\n',
+                   4 : 'Just a test\n'}
+        for n, id in enumerate (msg.files):
+            f = self.db.file.getnode (id)
+            self.assertEqual(f.name, names.get (n, 'unnamed'))
+            if n in content :
+                self.assertEqual(f.content, content [n])
+        self.assertEqual(msg.content, 'test attachment second text/plain')
+        self.assertEqual(msg.files, ['1', '2', '3', '4', '5'])
+        self.assertEqual(issue.files, ['1', '2', '3', '4', '5'])
+
+        self._handle_mail(self.multipart_msg)
+        issue = self.db.issue.getnode ('1')
+        self.assertEqual(len(issue.files), 10)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        self.assertEqual(messages[-1], '3')
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(issue.files, [str(i+1) for i in range(10)])
+        self.assertEqual(msg.files, ['6', '7', '8', '9', '10'])
+
+    def testMultipartKeepFiles(self):
+        self.doNewIssue()
+        self._handle_mail(self.multipart_msg)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(len(msg.files), 5)
+        issue = self.db.issue.getnode ('1')
+        self.assertEqual(len(issue.files), 5)
+        names = {0 : 'first.dvi', 4 : 'second.dvi'}
+        content = {3 : 'test attachment third text/plain\n',
+                   4 : 'Just a test\n'}
+        for n, id in enumerate (msg.files):
+            f = self.db.file.getnode (id)
+            self.assertEqual(f.name, names.get (n, 'unnamed'))
+            if n in content :
+                self.assertEqual(f.content, content [n])
+        self.assertEqual(msg.content, 'test attachment second text/plain')
+        self._handle_mail('''From: mary <mary@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id2>
+In-Reply-To: <dummy_test_message_id>
+Subject: [issue1] Testing...
+
+This ist a message without attachment
+''')
+        issue = self.db.issue.getnode ('1')
+        self.assertEqual(len(issue.files), 5)
+        self.assertEqual(issue.files, ['1', '2', '3', '4', '5'])
+
     def testMultipartDropAlternatives(self):
         self.doNewIssue()
         self.db.config.MAILGW_IGNORE_ALTERNATIVES = True
@@ -455,7 +694,7 @@ SnVzdCBhIHRlc3QK
         messages = self.db.issue.get('1', 'messages')
         messages.sort()
         msg = self.db.msg.getnode (messages[-1])
-        assert(len(msg.files) == 2)
+        self.assertEqual(len(msg.files), 2)
         names = {1 : 'second.dvi'}
         content = {0 : 'test attachment third text/plain\n',
                    1 : 'Just a test\n'}
@@ -465,6 +704,333 @@ SnVzdCBhIHRlc3QK
             if n in content :
                 self.assertEqual(f.content, content [n])
         self.assertEqual(msg.content, 'test attachment second text/plain')
+
+    def testMultipartCharsetUTF8NoAttach(self):
+        c = 'umlaut \xc3\xa4\xc3\xb6\xc3\xbc\xc3\x84\xc3\x96\xc3\x9c\xc3\x9f'
+        self.doNewIssue()
+        self.db.config.NOSY_MAX_ATTACHMENT_SIZE = 0
+        self._handle_mail(self.multipart_msg_latin1)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(len(msg.files), 1)
+        name = 'unnamed'
+        content = '<html>' + c + '</html>\n'
+        for n, id in enumerate (msg.files):
+            f = self.db.file.getnode (id)
+            self.assertEqual(f.name, name)
+            self.assertEqual(f.content, content)
+        self.assertEqual(msg.content, c)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, richard@test.test
+From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+X-Roundup-Issue-Files: unnamed
+Content-Transfer-Encoding: quoted-printable
+
+
+Contrary, Mary <mary@test.test> added the comment:
+
+umlaut =C3=A4=C3=B6=C3=BC=C3=84=C3=96=C3=9C=C3=9F
+File 'unnamed' not attached - you can download it from http://tracker.examp=
+le/cgi-bin/roundup.cgi/bugs/file1.
+
+----------
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+
+    def testMultipartCharsetLatin1NoAttach(self):
+        c = 'umlaut \xc3\xa4\xc3\xb6\xc3\xbc\xc3\x84\xc3\x96\xc3\x9c\xc3\x9f'
+        self.doNewIssue()
+        self.db.config.NOSY_MAX_ATTACHMENT_SIZE = 0
+        self.db.config.MAIL_CHARSET = 'iso-8859-1'
+        self._handle_mail(self.multipart_msg_latin1)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(len(msg.files), 1)
+        name = 'unnamed'
+        content = '<html>' + c + '</html>\n'
+        for n, id in enumerate (msg.files):
+            f = self.db.file.getnode (id)
+            self.assertEqual(f.name, name)
+            self.assertEqual(f.content, content)
+        self.assertEqual(msg.content, c)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, richard@test.test
+Content-Type: text/plain; charset="iso-8859-1"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, richard@test.test
+From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+X-Roundup-Issue-Files: unnamed
+Content-Transfer-Encoding: quoted-printable
+
+
+Contrary, Mary <mary@test.test> added the comment:
+
+umlaut =E4=F6=FC=C4=D6=DC=DF
+File 'unnamed' not attached - you can download it from http://tracker.examp=
+le/cgi-bin/roundup.cgi/bugs/file1.
+
+----------
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+
+    def testMultipartCharsetUTF8AttachFile(self):
+        c = 'umlaut \xc3\xa4\xc3\xb6\xc3\xbc\xc3\x84\xc3\x96\xc3\x9c\xc3\x9f'
+        self.doNewIssue()
+        self._handle_mail(self.multipart_msg_latin1)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(len(msg.files), 1)
+        name = 'unnamed'
+        content = '<html>' + c + '</html>\n'
+        for n, id in enumerate (msg.files):
+            f = self.db.file.getnode (id)
+            self.assertEqual(f.name, name)
+            self.assertEqual(f.content, content)
+        self.assertEqual(msg.content, c)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, richard@test.test
+Content-Type: multipart/mixed; boundary="utf-8"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, richard@test.test
+From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+X-Roundup-Issue-Files: unnamed
+Content-Transfer-Encoding: quoted-printable
+
+
+--utf-8
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+
+Contrary, Mary <mary@test.test> added the comment:
+
+umlaut =C3=A4=C3=B6=C3=BC=C3=84=C3=96=C3=9C=C3=9F
+
+----------
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+--utf-8
+Content-Type: text/html
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment;
+ filename="unnamed"
+
+PGh0bWw+dW1sYXV0IMOkw7bDvMOEw5bDnMOfPC9odG1sPgo=
+
+--utf-8--
+''')
+
+    def testMultipartCharsetLatin1AttachFile(self):
+        c = 'umlaut \xc3\xa4\xc3\xb6\xc3\xbc\xc3\x84\xc3\x96\xc3\x9c\xc3\x9f'
+        self.doNewIssue()
+        self.db.config.MAIL_CHARSET = 'iso-8859-1'
+        self._handle_mail(self.multipart_msg_latin1)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(len(msg.files), 1)
+        name = 'unnamed'
+        content = '<html>' + c + '</html>\n'
+        for n, id in enumerate (msg.files):
+            f = self.db.file.getnode (id)
+            self.assertEqual(f.name, name)
+            self.assertEqual(f.content, content)
+        self.assertEqual(msg.content, c)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, richard@test.test
+Content-Type: multipart/mixed; boundary="utf-8"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, richard@test.test
+From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+X-Roundup-Issue-Files: unnamed
+Content-Transfer-Encoding: quoted-printable
+
+
+--utf-8
+MIME-Version: 1.0
+Content-Type: text/plain; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+
+Contrary, Mary <mary@test.test> added the comment:
+
+umlaut =E4=F6=FC=C4=D6=DC=DF
+
+----------
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+--utf-8
+Content-Type: text/html
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment;
+ filename="unnamed"
+
+PGh0bWw+dW1sYXV0IMOkw7bDvMOEw5bDnMOfPC9odG1sPgo=
+
+--utf-8--
+''')
+
+    def testMultipartRFC822(self):
+        self.doNewIssue()
+        self._handle_mail(self.multipart_msg_rfc822)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(len(msg.files), 1)
+        name = "Fwd: Original email subject.eml"
+        for n, id in enumerate (msg.files):
+            f = self.db.file.getnode (id)
+            self.assertEqual(f.name, name)
+        self.assertEqual(msg.content, 'First part: Text')
+        self.compareMessages(self._get_mail(),
+'''TO: chef@bork.bork.bork, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, richard@test.test
+From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+X-Roundup-Issue-Files: Fwd: Original email subject.eml
+Content-Transfer-Encoding: quoted-printable
+
+
+--utf-8
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+
+Contrary, Mary <mary@test.test> added the comment:
+
+First part: Text
+
+----------
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+--utf-8
+Content-Type: message/rfc822
+MIME-Version: 1.0
+Content-Disposition: attachment;
+ filename="Fwd: Original email subject.eml"
+
+Message-Id: <followup_dummy_id_2>
+In-Reply-To: <dummy_test_message_id_2>
+MIME-Version: 1.0
+Subject: Fwd: Original email subject
+Date: Mon, 23 Aug 2010 08:23:33 +0200
+Content-Type: multipart/alternative; boundary="090500050101020406060002"
+
+This is a multi-part message in MIME format.
+--090500050101020406060002
+Content-Type: text/plain; charset=ISO-8859-15; format=flowed
+Content-Transfer-Encoding: 7bit
+
+some text in inner email
+========================
+
+--090500050101020406060002
+Content-Type: text/html; charset=ISO-8859-15
+Content-Transfer-Encoding: 7bit
+
+<html>
+some text in inner email
+========================
+</html>
+
+--090500050101020406060002--
+
+--utf-8--
+''')
+
+    def testMultipartRFC822Unpack(self):
+        self.doNewIssue()
+        self.db.config.MAILGW_UNPACK_RFC822 = True
+        self._handle_mail(self.multipart_msg_rfc822)
+        messages = self.db.issue.get('1', 'messages')
+        messages.sort()
+        msg = self.db.msg.getnode (messages[-1])
+        self.assertEqual(len(msg.files), 2)
+        t = 'some text in inner email\n========================\n'
+        content = {0 : t, 1 : '<html>\n' + t + '</html>\n'}
+        for n, id in enumerate (msg.files):
+            f = self.db.file.getnode (id)
+            self.assertEqual(f.name, 'unnamed')
+            if n in content :
+                self.assertEqual(f.content, content [n])
+        self.assertEqual(msg.content, 'First part: Text')
 
     def testSimpleFollowup(self):
         self.doNewIssue()
@@ -485,7 +1051,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
 From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -533,7 +1100,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, john@test.test, mary@test.test
 From: richard <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -558,6 +1126,154 @@ Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
 _______________________________________________________________________
 ''')
 
+    def testFollowupNoSubjectChange(self):
+        self.db.config.MAILGW_SUBJECT_UPDATES_TITLE = 'no'
+        self.doNewIssue()
+
+        self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: richard <richard@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: [issue1] Wrzlbrmft... [assignedto=mary; nosy=+john]
+
+This is a followup
+''')
+        l = self.db.issue.get('1', 'nosy')
+        l.sort()
+        self.assertEqual(l, [self.chef_id, self.richard_id, self.mary_id,
+            self.john_id])
+
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, john@test.test, mary@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, john@test.test, mary@test.test
+From: richard <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+Content-Transfer-Encoding: quoted-printable
+
+
+richard <richard@test.test> added the comment:
+
+This is a followup
+
+----------
+assignedto:  -> mary
+nosy: +john, mary
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+        self.assertEqual(self.db.issue.get('1','title'), 'Testing...')
+
+    def testFollowupExplicitSubjectChange(self):
+        self.doNewIssue()
+
+        self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: richard <richard@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: [issue1] Wrzlbrmft... [assignedto=mary; nosy=+john; title=new title]
+
+This is a followup
+''')
+        l = self.db.issue.get('1', 'nosy')
+        l.sort()
+        self.assertEqual(l, [self.chef_id, self.richard_id, self.mary_id,
+            self.john_id])
+
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, john@test.test, mary@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] new title
+To: chef@bork.bork.bork, john@test.test, mary@test.test
+From: richard <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+Content-Transfer-Encoding: quoted-printable
+
+
+richard <richard@test.test> added the comment:
+
+This is a followup
+
+----------
+assignedto:  -> mary
+nosy: +john, mary
+status: unread -> chatting
+title: Testing... -> new title
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+
+    def testNosyGeneration(self):
+        self.db.issue.create(title='test')
+
+        # create a nosy message
+        msg = self.db.msg.create(content='This is a test',
+            author=self.richard_id, messageid='<dummy_test_message_id>')
+        self.db.journaltag = 'richard'
+        l = self.db.issue.create(title='test', messages=[msg],
+            nosy=[self.chef_id, self.mary_id, self.john_id])
+
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, john@test.test, mary@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue2] test
+To: chef@bork.bork.bork, john@test.test, mary@test.test
+From: richard <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: unread
+Content-Transfer-Encoding: quoted-printable
+
+
+New submission from richard <richard@test.test>:
+
+This is a test
+
+----------
+messages: 1
+nosy: Chef, john, mary, richard
+status: unread
+title: test
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue2>
+_______________________________________________________________________
+''')
+
     def testPropertyChangeOnly(self):
         self.doNewIssue()
         oldvalues = self.db.getnode('issue', '1').copy()
@@ -565,7 +1281,7 @@ _______________________________________________________________________
         # reconstruct old behaviour: This would reuse the
         # database-handle from the doNewIssue above which has committed
         # as user "Chef". So we close and reopen the db as that user.
-        self.db.close()
+        #self.db.close() actually don't close 'cos this empties memorydb
         self.db = self.instance.open('Chef')
         self.db.issue.set('1', assignedto=self.chef_id)
         self.db.commit()
@@ -590,8 +1306,10 @@ X-Roundup-Name: Roundup issue tracker
 X-Roundup-Loop: hello
 X-Roundup-Issue-Status: unread
 X-Roundup-Version: 1.3.3
+In-Reply-To: <dummy_test_message_id>
 MIME-Version: 1.0
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 Content-Transfer-Encoding: quoted-printable
 
 
@@ -629,7 +1347,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, john@test.test, mary@test.test
 From: richard <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -742,7 +1461,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
 From: John Doe <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -788,7 +1508,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork
 From: richard <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -834,7 +1555,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, john@test.test, richard@test.test
 From: John Doe <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -879,7 +1601,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
 From: John Doe <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -924,7 +1647,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork
 From: richard <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -1008,7 +1732,7 @@ Subject: [issue1] Testing... [nosy=-richard]
         assert not os.path.exists(SENDMAILDEBUG)
 
     def testNewUserAuthor(self):
-
+        self.db.commit()
         l = self.db.user.list()
         l.sort()
         message = '''Content-Type: text/plain;
@@ -1020,12 +1744,9 @@ Subject: [issue] Testing...
 
 This is a test submission of a new issue.
 '''
-        def hook (db, **kw):
-            ''' set up callback for db open '''
-            db.security.role['anonymous'].permissions=[]
-            anonid = db.user.lookup('anonymous')
-            db.user.set(anonid, roles='Anonymous')
-        self.instance.schema_hook = hook
+        self.db.security.role['anonymous'].permissions=[]
+        anonid = self.db.user.lookup('anonymous')
+        self.db.user.set(anonid, roles='Anonymous')
         try:
             self._handle_mail(message)
         except Unauthorized, value:
@@ -1034,23 +1755,17 @@ You are not a registered user.
 
 Unknown address: fubar@bork.bork.bork
 """)
-
             assert not body_diff, body_diff
-
         else:
             raise AssertionError, "Unathorized not raised when handling mail"
 
-
-        def hook (db, **kw):
-            ''' set up callback for db open '''
-            # Add Web Access role to anonymous, and try again to make sure
-            # we get a "please register at:" message this time.
-            p = [
-                db.security.getPermission('Create', 'user'),
-                db.security.getPermission('Web Access', None),
-            ]
-            db.security.role['anonymous'].permissions=p
-        self.instance.schema_hook = hook
+        # Add Web Access role to anonymous, and try again to make sure
+        # we get a "please register at:" message this time.
+        p = [
+            self.db.security.getPermission('Register', 'user'),
+            self.db.security.getPermission('Web Access', None),
+        ]
+        self.db.security.role['anonymous'].permissions=p
         try:
             self._handle_mail(message)
         except Unauthorized, value:
@@ -1063,9 +1778,7 @@ http://tracker.example/cgi-bin/roundup.cgi/bugs/user?template=register
 
 Unknown address: fubar@bork.bork.bork
 """)
-
             assert not body_diff, body_diff
-
         else:
             raise AssertionError, "Unathorized not raised when handling mail"
 
@@ -1074,21 +1787,18 @@ Unknown address: fubar@bork.bork.bork
         m.sort()
         self.assertEqual(l, m)
 
-        def hook (db, **kw):
-            ''' set up callback for db open '''
-            # now with the permission
-            p = [
-                db.security.getPermission('Create', 'user'),
-                db.security.getPermission('Email Access', None),
-            ]
-            db.security.role['anonymous'].permissions=p
-        self.instance.schema_hook = hook
+        # now with the permission
+        p = [
+            self.db.security.getPermission('Register', 'user'),
+            self.db.security.getPermission('Email Access', None),
+        ]
+        self.db.security.role['anonymous'].permissions=p
         self._handle_mail(message)
         m = self.db.user.list()
         m.sort()
         self.assertNotEqual(l, m)
 
-    def testNewUserAuthorHighBit(self):
+    def testNewUserAuthorEncodedName(self):
         l = set(self.db.user.list())
         # From: name has Euro symbol in it
         message = '''Content-Type: text/plain;
@@ -1100,19 +1810,47 @@ Subject: [issue] Testing...
 
 This is a test submission of a new issue.
 '''
-        def hook (db, **kw):
-            ''' set up callback for db open '''
-            p = [
-                db.security.getPermission('Create', 'user'),
-                db.security.getPermission('Email Access', None),
-            ]
-            db.security.role['anonymous'].permissions=p
-        self.instance.schema_hook = hook
+        p = [
+            self.db.security.getPermission('Register', 'user'),
+            self.db.security.getPermission('Email Access', None),
+            self.db.security.getPermission('Create', 'issue'),
+            self.db.security.getPermission('Create', 'msg'),
+        ]
+        self.db.security.role['anonymous'].permissions = p
         self._handle_mail(message)
         m = set(self.db.user.list())
         new = list(m - l)[0]
         name = self.db.user.get(new, 'realname')
         self.assertEquals(name, 'H€llo')
+
+    def testNewUserAuthorMixedEncodedName(self):
+        l = set(self.db.user.list())
+        # From: name has Euro symbol in it
+        message = '''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Firstname =?utf-8?b?w6TDtsOf?= Last <fubar@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Test =?utf-8?b?w4TDlsOc?= umlauts
+ X1
+ X2
+
+This is a test submission of a new issue.
+'''
+        p = [
+            self.db.security.getPermission('Register', 'user'),
+            self.db.security.getPermission('Email Access', None),
+            self.db.security.getPermission('Create', 'issue'),
+            self.db.security.getPermission('Create', 'msg'),
+        ]
+        self.db.security.role['anonymous'].permissions = p
+        self._handle_mail(message)
+        title = self.db.issue.get('1', 'title')
+        self.assertEquals(title, 'Test \xc3\x84\xc3\x96\xc3\x9c umlauts X1 X2')
+        m = set(self.db.user.list())
+        new = list(m - l)[0]
+        name = self.db.user.get(new, 'realname')
+        self.assertEquals(name, 'Firstname \xc3\xa4\xc3\xb6\xc3\x9f Last')
 
     def testUnknownUser(self):
         l = set(self.db.user.list())
@@ -1125,8 +1863,7 @@ Subject: [issue] Testing nonexisting user...
 
 This is a test submission of a new issue.
 '''
-        self.db.close()
-        handler = self.instance.MailGW(self.instance)
+        handler = self._create_mailgw(message)
         # we want a bounce message:
         handler.trapExceptions = 1
         ret = handler.main(StringIO(message))
@@ -1153,7 +1890,11 @@ Content-Transfer-Encoding: 7bit
 
 
 
-You are not a registered user.
+You are not a registered user. Please register at:
+
+http://tracker.example/cgi-bin/roundup.cgi/bugs/user?template=register
+
+...before sending mail to the tracker.
 
 Unknown address: nonexisting@bork.bork.bork
 
@@ -1175,6 +1916,9 @@ This is a test submission of a new issue.
 ''')
 
     def testEnc01(self):
+        self.db.user.set(self.mary_id,
+            realname='\xe4\xf6\xfc\xc4\xd6\xdc\xdf, Mary'.decode
+            ('latin-1').encode('utf-8'))
         self.doNewIssue()
         self._handle_mail('''Content-Type: text/plain;
   charset="iso-8859-1"
@@ -1196,8 +1940,10 @@ TO: chef@bork.bork.bork, richard@test.test
 Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
-From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+From: =?utf-8?b?w6TDtsO8w4TDlsOcw58sIE1hcnk=?=
+ <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -1207,7 +1953,8 @@ X-Roundup-Issue-Status: chatting
 Content-Transfer-Encoding: quoted-printable
 
 
-Contrary, Mary <mary@test.test> added the comment:
+=C3=A4=C3=B6=C3=BC=C3=84=C3=96=C3=9C=C3=9F, Mary <mary@test.test> added the=
+ comment:
 
 A message with encoding (encoded oe =C3=B6)
 
@@ -1244,7 +1991,8 @@ Content-Type: text/plain; charset="iso-8859-1"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
 From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -1298,7 +2046,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
 From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -1375,7 +2124,8 @@ Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork
 From: richard <issue_tracker@your.tracker.email.domain.example>
-Reply-To: Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
 MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
@@ -1877,6 +2627,22 @@ Message-Id: <dummy_test_message_id>
         assert not os.path.exists(SENDMAILDEBUG)
         self.assertEqual(self.db.keyword.get('1', 'name'), 'Bar')
 
+    def testOneCharSubject(self):
+        message = '''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Subject: b
+Cc: richard@test.test
+Reply-To: chef@bork.bork.bork
+Message-Id: <dummy_test_message_id>
+
+'''
+        try:
+            self._handle_mail(message)
+        except MailUsageError:
+            self.fail('MailUsageError raised')
+
     def testIssueidLast(self):
         nodeid1 = self.doNewIssue()
         nodeid2 = self._handle_mail('''Content-Type: text/plain;
@@ -1893,6 +2659,290 @@ This is a second followup
         assert nodeid1 == nodeid2
         self.assertEqual(self.db.issue.get(nodeid2, 'title'), "Testing...")
 
+    def testSecurityMessagePermissionContent(self):
+        id = self.doNewIssue()
+        issue = self.db.issue.getnode (id)
+        self.db.security.addRole(name='Nomsg')
+        self.db.security.addPermissionToRole('Nomsg', 'Email Access')
+        for cl in 'issue', 'file', 'keyword':
+            for p in 'View', 'Edit', 'Create':
+                self.db.security.addPermissionToRole('Nomsg', p, cl)
+        self.db.user.set(self.mary_id, roles='Nomsg')
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id_2>
+Subject: [issue%(id)s] Testing... [nosy=+mary]
+
+Just a test reply
+'''%locals())
+        assert os.path.exists(SENDMAILDEBUG)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: richard@test.test
+From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <dummy_test_message_id_2>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+Content-Transfer-Encoding: quoted-printable
+
+
+Bork, Chef <chef@bork.bork.bork> added the comment:
+
+Just a test reply
+
+----------
+nosy: +mary
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+
+    def testOutlookAttachment(self):
+        message = '''X-MimeOLE: Produced By Microsoft Exchange V6.5
+Content-class: urn:content-classes:message
+MIME-Version: 1.0
+Content-Type: multipart/mixed;
+	boundary="----_=_NextPart_001_01CACA65.40A51CBC"
+Subject: Example of a failed outlook attachment e-mail
+Date: Tue, 23 Mar 2010 01:43:44 -0700
+Message-ID: <CA37F17219784343816CA6613D2E339205E7D0F9@nrcwstexb1.nrc.ca>
+X-MS-Has-Attach: yes
+X-MS-TNEF-Correlator: 
+Thread-Topic: Example of a failed outlook attachment e-mail
+Thread-Index: AcrKJo/t3pUBBwTpSwWNE3LE67UBDQ==
+From: "Hugh" <richard@test.test>
+To: <richard@test.test>
+X-OriginalArrivalTime: 23 Mar 2010 08:45:57.0350 (UTC) FILETIME=[41893860:01CACA65]
+
+This is a multi-part message in MIME format.
+
+------_=_NextPart_001_01CACA65.40A51CBC
+Content-Type: multipart/alternative;
+	boundary="----_=_NextPart_002_01CACA65.40A51CBC"
+
+
+------_=_NextPart_002_01CACA65.40A51CBC
+Content-Type: text/plain;
+	charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+
+Hi Richard,
+
+I suppose this isn't the exact message that was sent but is a resend of
+one of my trial messages that failed.  For your benefit I changed the
+subject line and am adding these words to the message body.  Should
+still be as problematic, but if you like I can resend an exact copy of a
+failed message changing nothing except putting your address instead of
+our tracker.
+
+Thanks very much for taking time to look into this.  Much appreciated.
+
+ <<battery backup>>=20
+
+------_=_NextPart_002_01CACA65.40A51CBC
+Content-Type: text/html;
+	charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<META HTTP-EQUIV=3D"Content-Type" CONTENT=3D"text/html; =
+charset=3Dus-ascii">
+<META NAME=3D"Generator" CONTENT=3D"MS Exchange Server version =
+6.5.7654.12">
+<TITLE>Example of a failed outlook attachment e-mail</TITLE>
+</HEAD>
+<BODY>
+<!-- Converted from text/rtf format -->
+<BR>
+
+<P><FONT SIZE=3D2 FACE=3D"Arial">Hi Richard,</FONT>
+</P>
+
+<P><FONT SIZE=3D2 FACE=3D"Arial">I suppose this isn't the exact message =
+that was sent but is a resend of one of my trial messages that =
+failed.&nbsp; For your benefit I changed the subject line and am adding =
+these words to the message body.&nbsp; Should still be as problematic, =
+but if you like I can resend an exact copy of a failed message changing =
+nothing except putting your address instead of our tracker.</FONT></P>
+
+<P><FONT SIZE=3D2 FACE=3D"Arial">Thanks very much for taking time to =
+look into this.&nbsp; Much appreciated.</FONT>
+</P>
+<BR>
+
+<P><FONT FACE=3D"Arial" SIZE=3D2 COLOR=3D"#000000"> &lt;&lt;battery =
+backup&gt;&gt; </FONT>
+</P>
+
+</BODY>
+</HTML>
+------_=_NextPart_002_01CACA65.40A51CBC--
+
+------_=_NextPart_001_01CACA65.40A51CBC
+Content-Type: message/rfc822
+Content-Transfer-Encoding: 7bit
+
+X-MimeOLE: Produced By Microsoft Exchange V6.5
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+	boundary="----_=_NextPart_003_01CAC15A.29717800"
+X-OriginalArrivalTime: 11 Mar 2010 20:33:51.0249 (UTC) FILETIME=[28FEE010:01CAC15A]
+Content-class: urn:content-classes:message
+Subject: battery backup
+Date: Thu, 11 Mar 2010 13:33:43 -0700
+Message-ID: <p06240809c7bf02f9624c@[128.114.22.203]>
+X-MS-Has-Attach: 
+X-MS-TNEF-Correlator: 
+Thread-Topic: battery backup
+Thread-Index: AcrBWimtulTrSvBdQ2CcfZ8lyQdxmQ==
+From: "Jerry" <jerry@test.test>
+To: "Hugh" <hugh@test.test>
+
+This is a multi-part message in MIME format.
+
+------_=_NextPart_003_01CAC15A.29717800
+Content-Type: text/plain;
+	charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+Dear Hugh,
+	A car batter has an energy capacity of ~ 500Wh.  A UPS=20
+battery is worse than this.
+
+if we need to provied 100kW for 30 minutes that will take 100 car=20
+batteries.  This seems like an awful lot of batteries.
+
+Of course I like your idea of making the time 1 minute, so we get to=20
+a more modest number of batteries
+
+Jerry
+
+
+------_=_NextPart_003_01CAC15A.29717800
+Content-Type: text/html;
+	charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<META HTTP-EQUIV=3D"Content-Type" CONTENT=3D"text/html; =
+charset=3Diso-8859-1">
+<META NAME=3D"Generator" CONTENT=3D"MS Exchange Server version =
+6.5.7654.12">
+<TITLE>battery backup</TITLE>
+</HEAD>
+<BODY>
+<!-- Converted from text/plain format -->
+
+<P><FONT SIZE=3D2>Dear Hugh,</FONT>
+
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <FONT SIZE=3D2>A car =
+batter has an energy capacity of ~ 500Wh.&nbsp; A UPS </FONT>
+
+<BR><FONT SIZE=3D2>battery is worse than this.</FONT>
+</P>
+
+<P><FONT SIZE=3D2>if we need to provied 100kW for 30 minutes that will =
+take 100 car </FONT>
+
+<BR><FONT SIZE=3D2>batteries.&nbsp; This seems like an awful lot of =
+batteries.</FONT>
+</P>
+
+<P><FONT SIZE=3D2>Of course I like your idea of making the time 1 =
+minute, so we get to </FONT>
+
+<BR><FONT SIZE=3D2>a more modest number of batteries</FONT>
+</P>
+
+<P><FONT SIZE=3D2>Jerry</FONT>
+</P>
+
+</BODY>
+</HTML>
+------_=_NextPart_003_01CAC15A.29717800--
+
+------_=_NextPart_001_01CACA65.40A51CBC--
+'''
+        nodeid = self._handle_mail(message)
+        assert not os.path.exists(SENDMAILDEBUG)
+        msgid = self.db.issue.get(nodeid, 'messages')[0]
+        self.assert_(self.db.msg.get(msgid, 'content').startswith('Hi Richard'))
+        self.assertEqual(self.db.msg.get(msgid, 'files'), ['1', '2'])
+        fileid = self.db.msg.get(msgid, 'files')[0]
+        self.assertEqual(self.db.file.get(fileid, 'type'), 'text/html')
+        fileid = self.db.msg.get(msgid, 'files')[1]
+        self.assertEqual(self.db.file.get(fileid, 'type'), 'message/rfc822')
+
+    def testForwardedMessageAttachment(self):
+        message = '''Return-Path: <rgg@test.test>
+Received: from localhost(127.0.0.1), claiming to be "[115.130.26.69]"
+via SMTP by localhost, id smtpdAAApLaWrq; Tue Apr 13 23:10:05 2010
+Message-ID: <4BC4F9C7.50409@test.test>
+Date: Wed, 14 Apr 2010 09:09:59 +1000
+From: Rupert Goldie <rgg@test.test>
+User-Agent: Thunderbird 2.0.0.24 (Windows/20100228)
+MIME-Version: 1.0
+To: ekit issues <issues@test.test>
+Subject: [Fwd: PHP ERROR (fb)] post limit reached
+Content-Type: multipart/mixed; boundary="------------000807090608060304010403"
+
+This is a multi-part message in MIME format.
+--------------000807090608060304010403
+Content-Type: text/plain; charset=ISO-8859-1; format=flowed
+Content-Transfer-Encoding: 7bit
+
+Catch this exception and log it without emailing.
+
+--------------000807090608060304010403
+Content-Type: message/rfc822; name="PHP ERROR (fb).eml"
+Content-Transfer-Encoding: 7bit
+Content-Disposition: inline; filename="PHP ERROR (fb).eml"
+
+Return-Path: <ektravj@test.test>
+X-Sieve: CMU Sieve 2.2
+via SMTP by crown.off.ekorp.com, id smtpdAAA1JaW1o; Tue Apr 13 23:01:04 2010
+X-Virus-Scanned: by amavisd-new at ekit.com
+To: facebook-errors@test.test
+From: ektravj@test.test
+Subject: PHP ERROR (fb)
+Message-Id: <20100413230100.D601D27E84@mail2.elax3.ekorp.com>
+Date: Tue, 13 Apr 2010 23:01:00 +0000 (UTC)
+
+[13-Apr-2010 22:49:02] PHP Fatal error:  Uncaught exception 'Exception' with message 'Facebook Error Message: Feed action request limit reached' in /app/01/www/virtual/fb.ekit.com/htdocs/includes/functions.php:280
+Stack trace:
+#0 /app/01/www/virtual/fb.ekit.com/htdocs/gateway/ekit/feed/index.php(178): fb_exceptions(Object(FacebookRestClientException))
+#1 {main}
+ thrown in /app/01/www/virtual/fb.ekit.com/htdocs/includes/functions.php on line 280
+
+
+--------------000807090608060304010403--
+'''
+        nodeid = self._handle_mail(message)
+        assert not os.path.exists(SENDMAILDEBUG)
+        msgid = self.db.issue.get(nodeid, 'messages')[0]
+        self.assertEqual(self.db.msg.get(msgid, 'content'),
+            'Catch this exception and log it without emailing.')
+        self.assertEqual(self.db.msg.get(msgid, 'files'), ['1'])
+        fileid = self.db.msg.get(msgid, 'files')[0]
+        self.assertEqual(self.db.file.get(fileid, 'type'), 'message/rfc822')
 
 def test_suite():
     suite = unittest.TestSuite()
@@ -1904,3 +2954,7 @@ if __name__ == '__main__':
     unittest.main(testRunner=runner)
 
 # vim: set filetype=python sts=4 sw=4 et si :
+
+
+
+

@@ -537,6 +537,22 @@ SETTINGS = (
             "starting with python 2.5. Set this to a higher value if you\n"
             "get the error 'Error: field larger than field limit' during\n"
             "import."),
+        (IntegerNumberOption, 'password_pbkdf2_default_rounds', '10000',
+            "Sets the default number of rounds used when encoding passwords\n"
+            "using the PBKDF2 scheme. Set this to a higher value on faster\n"
+            "systems which want more security.\n"
+            "PBKDF2 (Password-Based Key Derivation Function) is a\n"
+            "password hashing mechanism that derives hash from the\n"
+            "password and a random salt. For authentication this process\n"
+            "is repeated with the same salt as in the stored hash.\n"
+            "If both hashes match, the authentication succeeds.\n"
+            "PBKDF2 supports a variable 'rounds' parameter which varies\n"
+            "the time-cost of calculating the hash - doubling the number\n"
+            "of rounds doubles the cpu time required to calculate it. The\n"
+            "purpose of this is to periodically adjust the rounds as CPUs\n"
+            "become faster. The currently enforced minimum number of\n"
+            "rounds is 1000.\n"
+            "See: http://en.wikipedia.org/wiki/PBKDF2 and RFC2898"),
     )),
     ("tracker", (
         (Option, "name", "Roundup issue tracker",
@@ -579,6 +595,10 @@ SETTINGS = (
             "Setting this option makes Roundup display error tracebacks\n"
             "in the user's browser rather than emailing them to the\n"
             "tracker admin."),
+        (BooleanOption, "migrate_passwords", "yes",
+            "Setting this option makes Roundup migrate passwords with\n"
+            "an insecure password-scheme to a more secure scheme\n"
+            "when the user logs in via the web-interface."),
     )),
     ("rdbms", (
         (Option, 'name', 'roundup',
@@ -604,8 +624,30 @@ SETTINGS = (
         (NullableOption, 'read_default_group', 'roundup',
             "Name of the group to use in the MySQL defaults file (.my.cnf).\n"
             "Only used in MySQL connections."),
+        (IntegerNumberOption, 'sqlite_timeout', '30',
+            "Number of seconds to wait when the SQLite database is locked\n"
+            "Default: use a 30 second timeout (extraordinarily generous)\n"
+            "Only used in SQLite connections."),
         (IntegerNumberOption, 'cache_size', '100',
             "Size of the node cache (in elements)"),
+        (BooleanOption, "allow_create", "yes",
+            "Setting this option to 'no' protects the database against table creations."),
+        (BooleanOption, "allow_alter", "yes",
+            "Setting this option to 'no' protects the database against table alterations."),
+        (BooleanOption, "allow_drop", "yes",
+            "Setting this option to 'no' protects the database against table drops."),
+        (NullableOption, 'template', '',
+            "Name of the PostgreSQL template for database creation.\n"
+            "For database creation the template used has to match\n"
+            "the character encoding used (UTF8), there are different\n"
+            "PostgreSQL installations using different templates with\n"
+            "different encodings. If you get an error:\n"
+            "  new encoding (UTF8) is incompatible with the encoding of\n"
+            "  the template database (SQL_ASCII)\n"
+            "  HINT:  Use the same encoding as in the template database,\n"
+            "  or use template0 as template.\n"
+            "then set this option to the template name given in the\n"
+            "error message."),
     ), "Settings in this section are used"
         " by RDBMS backends only"
     ),
@@ -725,6 +767,10 @@ SETTINGS = (
             "will match an issue for the interval after the issue's\n"
             "creation or last activity. The interval is a standard\n"
             "Roundup interval."),
+        (BooleanOption, "subject_updates_title", "yes",
+            "Update issue title if incoming subject of email is different.\n"
+            "Setting this to \"no\" will ignore the title part of"
+            " the subject\nof incoming email messages.\n"),
         (RegExpOption, "refwd_re", "(\s*\W?\s*(fw|fwd|re|aw|sv|ang)\W)+",
             "Regular expression matching a single reply or forward\n"
             "prefix prepended by the mailer. This is explicitly\n"
@@ -740,6 +786,10 @@ SETTINGS = (
             "Regular expression matching end of line."),
         (RegExpOption, "blankline_re", r"[\r\n]+\s*[\r\n]+",
             "Regular expression matching a blank line."),
+        (BooleanOption, "unpack_rfc822", "no",
+            "Unpack attached messages (encoded as message/rfc822 in MIME)\n"
+            "as multiple parts attached as files to the issue, if not\n"
+            "set we handle message/rfc822 attachments as a single file."),
         (BooleanOption, "ignore_alternatives", "no",
             "When parsing incoming mails, roundup uses the first\n"
             "text/plain part it finds. If this part is inside a\n"
@@ -1249,6 +1299,14 @@ class CoreConfig(Config):
         if home_dir is None:
             self.init_logging()
 
+    def copy(self):
+        new = CoreConfig()
+        new.sections = list(self.sections)
+        new.section_descriptions = dict(self.section_descriptions)
+        new.section_options = dict(self.section_options)
+        new.options = dict(self.options)
+        return new
+
     def _get_unset_options(self):
         need_set = Config._get_unset_options(self)
         # remove MAIL_PASSWORD if MAIL_USER is empty
@@ -1278,8 +1336,8 @@ class CoreConfig(Config):
             return
 
         _file = self["LOGGING_FILENAME"]
-        # set file & level on the root logger
-        logger = logging.getLogger()
+        # set file & level on the roundup logger
+        logger = logging.getLogger('roundup')
         if _file:
             hdlr = logging.FileHandler(_file)
         else:
@@ -1288,6 +1346,9 @@ class CoreConfig(Config):
             '%(asctime)s %(levelname)s %(message)s')
         hdlr.setFormatter(formatter)
         # no logging API to remove all existing handlers!?!
+        for h in logger.handlers:
+            h.close()
+            logger.removeHandler(hdlr)
         logger.handlers = [hdlr]
         logger.setLevel(logging._levelNames[self["LOGGING_LEVEL"] or "ERROR"])
 

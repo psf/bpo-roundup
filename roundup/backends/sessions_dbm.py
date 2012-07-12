@@ -7,9 +7,11 @@ class. It's now also used for One Time Key handling too.
 """
 __docformat__ = 'restructuredtext'
 
-import anydbm, whichdb, os, marshal, time
+import os, marshal, time
+
 from roundup import hyperdb
 from roundup.i18n import _
+from roundup.anypy.dbm_ import anydbm, whichdb, key_in
 
 class BasicDatabase:
     ''' Provide a nice encapsulation of an anydbm store.
@@ -26,7 +28,7 @@ class BasicDatabase:
     def exists(self, infoid):
         db = self.opendb('c')
         try:
-            return db.has_key(infoid)
+            return key_in(db, infoid)
         finally:
             db.close()
 
@@ -44,10 +46,10 @@ class BasicDatabase:
         '''
         db_type = ''
         if os.path.exists(path):
-            db_type = whichdb.whichdb(path)
+            db_type = whichdb(path)
             if not db_type:
-                raise hyperdb.DatabaseError, \
-                    _("Couldn't identify database type")
+                raise hyperdb.DatabaseError(
+                    _("Couldn't identify database type"))
         elif os.path.exists(path+'.db'):
             # if the path ends in '.db', it's a dbm database, whether
             # anydbm says it's dbhash or not!
@@ -58,12 +60,12 @@ class BasicDatabase:
     def get(self, infoid, value, default=_marker):
         db = self.opendb('c')
         try:
-            if db.has_key(infoid):
+            if key_in(db, infoid):
                 values = marshal.loads(db[infoid])
             else:
                 if default != self._marker:
                     return default
-                raise KeyError, 'No such %s "%s"'%(self.name, infoid)
+                raise KeyError('No such %s "%s"'%(self.name, infoid))
             return values.get(value, None)
         finally:
             db.close()
@@ -76,14 +78,14 @@ class BasicDatabase:
                 del d['__timestamp']
                 return d
             except KeyError:
-                raise KeyError, 'No such %s "%s"'%(self.name, infoid)
+                raise KeyError('No such %s "%s"'%(self.name, infoid))
         finally:
             db.close()
 
     def set(self, infoid, **newvalues):
         db = self.opendb('c')
         try:
-            if db.has_key(infoid):
+            if key_in(db, infoid):
                 values = marshal.loads(db[infoid])
             else:
                 values = {'__timestamp': time.time()}
@@ -95,14 +97,14 @@ class BasicDatabase:
     def list(self):
         db = self.opendb('r')
         try:
-            return db.keys()
+            return list(db.keys())
         finally:
             db.close()
 
     def destroy(self, infoid):
         db = self.opendb('c')
         try:
-            if db.has_key(infoid):
+            if key_in(db, infoid):
                 del db[infoid]
         finally:
             db.close()

@@ -362,6 +362,11 @@ Section **mailgw**
   an issue for the interval after the issue's creation or last activity.
   The interval is a standard Roundup interval.
 
+ subject_updates_title -- ``yes``
+  Update issue title if incoming subject of email is different.
+  Setting this to ``no`` will ignore the title part of
+  the subject of incoming email messages.
+
  refwd_re -- ``(\s*\W?\s*(fw|fwd|re|aw|sv|ang)\W)+``
   Regular expression matching a single reply or forward prefix
   prepended by the mailer. This is explicitly stripped from the
@@ -383,6 +388,13 @@ Section **mailgw**
  blankline_re -- ``[\r\n]+\s*[\r\n]+``
   Regular expression matching a blank line.  Value is Python Regular
   Expression (UTF8-encoded).
+
+ ignore_alternatives -- ``no``
+  When parsing incoming mails, roundup uses the first
+  text/plain part it finds. If this part is inside a
+  multipart/alternative, and this option is set, all other
+  parts of the multipart/alternative are ignored. The default
+  is to keep all parts and attach them to the issue.
 
 Section **pgp**
  OpenPGP mail processing options
@@ -496,7 +508,7 @@ The ``schema.py`` module contains two functions:
   them.
 **init**
   This function is responsible for setting up the initial state of your
-  tracker. It's called exactly once - but the ``roundup-admin initialise``
+  tracker. It's called exactly once - by the ``roundup-admin initialise``
   command.  See the start of the section on `database content`_ for more
   info about how this works.
 
@@ -958,6 +970,7 @@ A set of Permissions is built into the security module by default:
 - Create (everything)
 - Edit (everything)
 - View (everything)
+- Register (User class only)
 
 These are assigned to the "Admin" Role by default, and allow a user to do
 anything. Every Class you define in your `tracker schema`_ also gets an
@@ -995,7 +1008,7 @@ For the "User" Role, the "classic" tracker defines:
 And the "Anonymous" Role is defined as:
 
 - Web interface access
-- Create user (for registration)
+- Register user (for registration)
 - View issue, file, msg, query, keyword, priority, status
 
 Put together, these settings appear in the tracker's ``schema.py`` file::
@@ -1166,7 +1179,7 @@ See the `examples`_ section for longer examples of customisation.
  - they're *anonymous*.
 
 **automatic registration of users in the e-mail gateway**
- By giving the "anonymous" user the ("Create", "user") Permission, any
+ By giving the "anonymous" user the ("Register", "user") Permission, any
  unidentified user will automatically be registered with the tracker
  (with no password, so they won't be able to log in through
  the web until an admin sets their password). By default new Roundup
@@ -1610,7 +1623,7 @@ of files in there. The *minimal* template includes:
 **user.register.html**
   a special page just for the user class, that renders the registration
   page
-**style.css.html**
+**style.css**
   a static file that is served up as-is
 
 The *classic* template has a number of additional templates.
@@ -1971,7 +1984,7 @@ Hyperdb class wrapper
 This is implemented by the ``roundup.cgi.templating.HTMLClass``
 class.
 
-This wrapper object provides access to a hyperb class. It is used
+This wrapper object provides access to a hyperdb class. It is used
 primarily in both index view and new item views, but it's also usable
 anywhere else that you wish to access information about a class, or the
 items of a class, when you don't have a specific item of that class in
@@ -2071,7 +2084,7 @@ Hyperdb item wrapper
 This is implemented by the ``roundup.cgi.templating.HTMLItem``
 class.
 
-This wrapper object provides access to a hyperb item.
+This wrapper object provides access to a hyperdb item.
 
 We allow access to properties. There will be no "id" property. The value
 accessed through the property will be the current value of the same name
@@ -2545,6 +2558,15 @@ An example of batching::
 
 ... which will produce a table with four columns containing the items of
 the "keyword" class (well, their "name" anyway).
+
+
+Translations
+~~~~~~~~~~~~
+
+Should you wish to enable multiple languages in template content that you
+create you'll need to add new locale files in the tracker home under a
+``locale`` directory. Use the instructions in the ``developer's guide`` to
+create the locale files.
 
 
 Displaying Properties
@@ -4605,6 +4627,22 @@ for the "issue", "file" and "msg" classes with the following::
         db.security.addPermissionToRole('User', 'Create', cl)
 
 
+Moderating user registration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You could set up new-user moderation in a public tracker by:
+
+1. creating a new highly-restricted user role "Pending",
+2. set the config new_web_user_roles and/or new_email_user_roles to that
+   role,
+3. have an auditor that emails you when new users are created with that
+   role using roundup.mailer
+4. edit the role to "User" for valid users.
+
+Some simple javascript might help in the last step. If you have high volume
+you could search for all currently-Pending users and do a bulk edit of all
+their roles at once (again probably with some simple javascript help).
+
 
 Changes to the Web User Interface
 ---------------------------------
@@ -4831,10 +4869,10 @@ Setting up a "wizard" (or "druid") for controlled adding of issues
             '''
             category = self.form['category'].value
             if category == '-1':
-                self.error_message.append('You must select a category of report')
+                self.client.error_message.append('You must select a category of report')
                 return
             # everything's ok, move on to the next page
-            self.template = 'add_page2'
+            self.client.template = 'add_page2'
 
     def init(instance):
         instance.registerAction('page1_submit', Page1SubmitAction)
@@ -4862,3 +4900,4 @@ rather than requiring a web server restart.
 
 
 .. _`design documentation`: design.html
+.. _`developer's guide`: developers.html

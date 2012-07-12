@@ -27,38 +27,46 @@ from roundup.backends import sessions_rdbms
 def connection_dict(config, dbnamestr=None):
     ''' read_default_group is MySQL-specific, ignore it '''
     d = rdbms_common.connection_dict(config, dbnamestr)
-    if d.has_key('read_default_group'):
+    if 'read_default_group' in d:
         del d['read_default_group']
-    if d.has_key('read_default_file'):
+    if 'read_default_file' in d:
         del d['read_default_file']
     return d
 
 def db_create(config):
     """Clear all database contents and drop database itself"""
-    command = "CREATE DATABASE %s WITH ENCODING='UNICODE'"%config.RDBMS_NAME
-    logging.getLogger('hyperdb').info(command)
+    command = "CREATE DATABASE \"%s\" WITH ENCODING='UNICODE'"%config.RDBMS_NAME
+    if config.RDBMS_TEMPLATE :
+        command = command + " TEMPLATE=%s" % config.RDBMS_TEMPLATE
+    logging.getLogger('roundup.hyperdb').info(command)
     db_command(config, command)
 
 def db_nuke(config, fail_ok=0):
     """Clear all database contents and drop database itself"""
-    command = 'DROP DATABASE %s'% config.RDBMS_NAME
-    logging.getLogger('hyperdb').info(command)
+    command = 'DROP DATABASE "%s"'% config.RDBMS_NAME
+    logging.getLogger('roundup.hyperdb').info(command)
     db_command(config, command)
 
     if os.path.exists(config.DATABASE):
         shutil.rmtree(config.DATABASE)
 
-def db_command(config, command):
+def db_command(config, command, database='postgres'):
     '''Perform some sort of database-level command. Retry 10 times if we
     fail by conflicting with another user.
+
+    Since PostgreSQL version 8.1 there is a database "postgres",
+    before "template1" seems to habe been used, so we fall back to it. 
+    Compare to issue2550543.
     '''
     template1 = connection_dict(config)
-    template1['database'] = 'template1'
+    template1['database'] = database
 
     try:
         conn = psycopg.connect(**template1)
     except psycopg.OperationalError, message:
-        raise hyperdb.DatabaseError, message
+        if str(message).find('database "postgres" does not exist') >= 0:
+            return db_command(config, command, database='template1')
+        raise hyperdb.DatabaseError(message)
 
     conn.set_isolation_level(0)
     cursor = conn.cursor()
@@ -68,7 +76,7 @@ def db_command(config, command):
                 return
     finally:
         conn.close()
-    raise RuntimeError, '10 attempts to create database failed'
+    raise RuntimeError('10 attempts to create database failed')
 
 def pg_command(cursor, command):
     '''Execute the postgresql command, which may be blocked by some other
@@ -81,7 +89,7 @@ def pg_command(cursor, command):
     except psycopg.ProgrammingError, err:
         response = str(err).split('\n')[0]
         if response.find('FATAL') != -1:
-            raise RuntimeError, response
+            raise RuntimeError(response)
         else:
             msgs = [
                 'is being accessed by other users',
@@ -94,7 +102,7 @@ def pg_command(cursor, command):
             if can_retry:
                 time.sleep(1)
                 return 0
-            raise RuntimeError, response
+            raise RuntimeError(response)
     return 1
 
 def db_exists(config):
@@ -131,11 +139,12 @@ class Database(rdbms_common.Database):
 
     def sql_open_connection(self):
         db = connection_dict(self.config, 'database')
-        logging.getLogger('hyperdb').info('open database %r'%db['database'])
+        logging.getLogger('roundup.hyperdb').info(
+            'open database %r'%db['database'])
         try:
             conn = psycopg.connect(**db)
         except psycopg.OperationalError, message:
-            raise hyperdb.DatabaseError, message
+            raise hyperdb.DatabaseError(message)
 
         cursor = conn.cursor()
 
@@ -209,7 +218,7 @@ class Database(rdbms_common.Database):
     def add_actor_column(self):
         # update existing tables to have the new actor column
         tables = self.database_schema['tables']
-        for name in tables.keys():
+        for name in tables:
             self.sql('ALTER TABLE _%s add __actor VARCHAR(255)'%name)
 
     def __repr__(self):
@@ -218,7 +227,7 @@ class Database(rdbms_common.Database):
     def sql_commit(self, fail_ok=False):
         ''' Actually commit to the database.
         '''
-        logging.getLogger('hyperdb').info('commit')
+        logging.getLogger('roundup.hyperdb').info('commit')
 
         try:
             self.conn.commit()
@@ -226,7 +235,8 @@ class Database(rdbms_common.Database):
             # we've been instructed that this commit is allowed to fail
             if fail_ok and str(message).endswith('could not serialize '
                     'access due to concurrent update'):
-                logging.getLogger('hyperdb').info('commit FAILED, but fail_ok')
+                logging.getLogger('roundup.hyperdb').info(
+                    'commit FAILED, but fail_ok')
             else:
                 raise
 
@@ -271,7 +281,7 @@ class Database(rdbms_common.Database):
         rdbms_common.Database.clear(self)
 
         # reset the sequences
-        for cn in self.classes.keys():
+        for cn in self.classes:
             self.cursor.execute('DROP SEQUENCE _%s_ids'%cn)
             self.cursor.execute('CREATE SEQUENCE _%s_ids'%cn)
 
