@@ -8,12 +8,19 @@
 # This module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-#
-# $Id: test_mailgw.py,v 1.96 2008-08-19 01:40:59 richard Exp $
 
 # TODO: test bcc
 
 import unittest, tempfile, os, shutil, errno, imp, sys, difflib, rfc822, time
+import gpgmelib
+from email.parser import FeedParser
+
+
+try:
+    import pyme, pyme.core
+except ImportError:
+    pyme = None
+
 
 from cStringIO import StringIO
 
@@ -29,6 +36,12 @@ from roundup.anypy.sets_ import set
 
 #import db_test_base
 import memorydb
+
+def expectedFailure(method):
+    """ For marking a failing test.
+        This will *not* run the test and return success instead.
+    """
+    return lambda x: 0
 
 class Message(rfc822.Message):
     """String-based Message class with equivalence test."""
@@ -116,13 +129,13 @@ class DiffHelper:
 
         return res
 
-class MailgwTestCase(unittest.TestCase, DiffHelper):
+class MailgwTestAbstractBase(unittest.TestCase, DiffHelper):
     count = 0
     schema = 'classic'
     def setUp(self):
         self.old_translate_ = mailgw._
         roundupdb._ = mailgw._ = i18n.get_translation(language='C').gettext
-        MailgwTestCase.count = MailgwTestCase.count + 1
+        self.__class__.count = self.__class__.count + 1
 
         # and open the database / "instance"
         self.db = memorydb.create('admin')
@@ -149,6 +162,15 @@ class MailgwTestCase(unittest.TestCase, DiffHelper):
             os.remove(SENDMAILDEBUG)
         self.db.close()
 
+    def _allowAnonymousSubmit(self):
+        p = [
+            self.db.security.getPermission('Register', 'user'),
+            self.db.security.getPermission('Email Access', None),
+            self.db.security.getPermission('Create', 'issue'),
+            self.db.security.getPermission('Create', 'msg'),
+        ]
+        self.db.security.role['anonymous'].permissions = p
+
     def _create_mailgw(self, message, args=()):
         class MailGW(self.instance.MailGW):
             def handle_message(self, message):
@@ -157,9 +179,9 @@ class MailgwTestCase(unittest.TestCase, DiffHelper):
         handler.db = self.db
         return handler
 
-    def _handle_mail(self, message, args=()):
+    def _handle_mail(self, message, args=(), trap_exc=0):
         handler = self._create_mailgw(message, args)
-        handler.trapExceptions = 0
+        handler.trapExceptions = trap_exc
         return handler.main(StringIO(message))
 
     def _get_mail(self):
@@ -169,6 +191,8 @@ class MailgwTestCase(unittest.TestCase, DiffHelper):
         finally:
             f.close()
 
+    # Normal test-case used for both non-pgp test and a test while pgp
+    # is enabled, so this test is run in both test suites.
     def testEmptyMessage(self):
         nodeid = self._handle_mail('''Content-Type: text/plain;
   charset="iso-8859-1"
@@ -182,6 +206,9 @@ Subject: [issue] Testing...
 ''')
         assert not os.path.exists(SENDMAILDEBUG)
         self.assertEqual(self.db.issue.get(nodeid, 'title'), 'Testing...')
+
+
+class MailgwTestCase(MailgwTestAbstractBase):
 
     def testMessageWithFromInIt(self):
         nodeid = self._handle_mail('''Content-Type: text/plain;
@@ -276,8 +303,7 @@ Hi there!
         self.assertEqual(self.db.issue.get(nodeid, 'status'), '3')
         self.assertEqual(self.db.issue.get(nodeid, 'priority'), '1')
 
-    def doNewIssue(self):
-        nodeid = self._handle_mail('''Content-Type: text/plain;
+    newmsg = '''Content-Type: text/plain;
   charset="iso-8859-1"
 From: Chef <chef@bork.bork.bork>
 To: issue_tracker@your.tracker.email.domain.example
@@ -286,7 +312,10 @@ Message-Id: <dummy_test_message_id>
 Subject: [issue] Testing...
 
 This is a test submission of a new issue.
-''')
+'''
+
+    def doNewIssue(self):
+        nodeid = self._handle_mail(self.newmsg)
         assert not os.path.exists(SENDMAILDEBUG)
         l = self.db.issue.get(nodeid, 'nosy')
         l.sort()
@@ -298,20 +327,25 @@ This is a test submission of a new issue.
 
     def testNewIssueNosy(self):
         self.instance.config.ADD_AUTHOR_TO_NOSY = 'yes'
-        nodeid = self._handle_mail('''Content-Type: text/plain;
-  charset="iso-8859-1"
-From: Chef <chef@bork.bork.bork>
-To: issue_tracker@your.tracker.email.domain.example
-Cc: richard@test.test
-Message-Id: <dummy_test_message_id>
-Subject: [issue] Testing...
+        nodeid = self.doNewIssue()
+        m = self.db.issue.get(nodeid, 'messages')
+        self.assertEqual(len(m), 1)
+        recv = self.db.msg.get(m[0], 'recipients')
+        self.assertEqual(recv, [self.richard_id])
 
-This is a test submission of a new issue.
-''')
+    def testNewIssueNosyAuthor(self):
+        self.instance.config.ADD_AUTHOR_TO_NOSY = 'no'
+        self.instance.config.MESSAGES_TO_AUTHOR = 'nosy'
+        nodeid = self._handle_mail(self.newmsg)
         assert not os.path.exists(SENDMAILDEBUG)
         l = self.db.issue.get(nodeid, 'nosy')
         l.sort()
-        self.assertEqual(l, [self.chef_id, self.richard_id])
+        self.assertEqual(l, [self.richard_id])
+        m = self.db.issue.get(nodeid, 'messages')
+        self.assertEqual(len(m), 1)
+        recv = self.db.msg.get(m[0], 'recipients')
+        recv.sort()
+        self.assertEqual(recv, [self.richard_id])
 
     def testAlternateAddress(self):
         self._handle_mail('''Content-Type: text/plain;
@@ -342,7 +376,6 @@ This is a test submission of a new issue.
         assert not os.path.exists(SENDMAILDEBUG)
 
     def testNewIssueAuthMsg(self):
-        # TODO: fix the damn config - this is apalling
         self.db.config.MESSAGES_TO_AUTHOR = 'yes'
         self._handle_mail('''Content-Type: text/plain;
   charset="iso-8859-1"
@@ -1439,11 +1472,7 @@ Subject: Re: Testing...
 This is a followup
 '''), nodeid)
 
-
-    def testFollowupNosyAuthor(self):
-        self.doNewIssue()
-        self.db.config.ADD_AUTHOR_TO_NOSY = 'yes'
-        self._handle_mail('''Content-Type: text/plain;
+    simple_followup = '''Content-Type: text/plain;
   charset="iso-8859-1"
 From: john@test.test
 To: issue_tracker@your.tracker.email.domain.example
@@ -1452,8 +1481,12 @@ In-Reply-To: <dummy_test_message_id>
 Subject: [issue1] Testing...
 
 This is a followup
-''')
+'''
 
+    def testFollowupNosyAuthor(self):
+        self.doNewIssue()
+        self.db.config.ADD_AUTHOR_TO_NOSY = 'yes'
+        self._handle_mail(self.simple_followup)
         self.compareMessages(self._get_mail(),
 '''FROM: roundup-admin@your.tracker.email.domain.example
 TO: chef@bork.bork.bork, richard@test.test
@@ -1491,7 +1524,7 @@ _______________________________________________________________________
         self.doNewIssue()
         self.db.config.ADD_RECIPIENTS_TO_NOSY = 'yes'
         self._handle_mail('''Content-Type: text/plain;
-  charset="iso-8859-1"
+ charset="iso-8859-1"
 From: richard@test.test
 To: issue_tracker@your.tracker.email.domain.example
 Cc: john@test.test
@@ -1538,16 +1571,45 @@ _______________________________________________________________________
         self.doNewIssue()
         self.db.config.ADD_AUTHOR_TO_NOSY = 'yes'
         self.db.config.MESSAGES_TO_AUTHOR = 'yes'
-        self._handle_mail('''Content-Type: text/plain;
-  charset="iso-8859-1"
-From: john@test.test
-To: issue_tracker@your.tracker.email.domain.example
+        self._handle_mail(self.simple_followup)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, john@test.test, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, john@test.test, richard@test.test
+From: John Doe <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
 Message-Id: <followup_dummy_id>
 In-Reply-To: <dummy_test_message_id>
-Subject: [issue1] Testing...
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+Content-Transfer-Encoding: quoted-printable
+
+
+John Doe <john@test.test> added the comment:
 
 This is a followup
+
+----------
+nosy: +john
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+
 ''')
+
+    def testFollowupNosyAuthorNosyCopy(self):
+        self.doNewIssue()
+        self.db.config.ADD_AUTHOR_TO_NOSY = 'yes'
+        self.db.config.MESSAGES_TO_AUTHOR = 'nosy'
+        self._handle_mail(self.simple_followup)
         self.compareMessages(self._get_mail(),
 '''FROM: roundup-admin@your.tracker.email.domain.example
 TO: chef@bork.bork.bork, john@test.test, richard@test.test
@@ -1584,22 +1646,89 @@ _______________________________________________________________________
     def testFollowupNoNosyAuthor(self):
         self.doNewIssue()
         self.instance.config.ADD_AUTHOR_TO_NOSY = 'no'
-        self._handle_mail('''Content-Type: text/plain;
-  charset="iso-8859-1"
-From: john@test.test
-To: issue_tracker@your.tracker.email.domain.example
-Message-Id: <followup_dummy_id>
-In-Reply-To: <dummy_test_message_id>
-Subject: [issue1] Testing...
-
-This is a followup
-''')
+        self._handle_mail(self.simple_followup)
         self.compareMessages(self._get_mail(),
 '''FROM: roundup-admin@your.tracker.email.domain.example
 TO: chef@bork.bork.bork, richard@test.test
 Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
+From: John Doe <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+Content-Transfer-Encoding: quoted-printable
+
+
+John Doe <john@test.test> added the comment:
+
+This is a followup
+
+----------
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+
+''')
+
+    def testFollowupNoNosyAuthorNoCopy(self):
+        self.doNewIssue()
+        self.instance.config.ADD_AUTHOR_TO_NOSY = 'no'
+        self.instance.config.MESSAGES_TO_AUTHOR = 'nosy'
+        self._handle_mail(self.simple_followup)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, richard@test.test
+From: John Doe <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+Content-Transfer-Encoding: quoted-printable
+
+
+John Doe <john@test.test> added the comment:
+
+This is a followup
+
+----------
+status: unread -> chatting
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+
+''')
+
+    # this is a pathological case where the author is *not* on the nosy
+    # list but gets the message; test documents existing behaviour
+    def testFollowupNoNosyAuthorButCopy(self):
+        self.doNewIssue()
+        self.instance.config.ADD_AUTHOR_TO_NOSY = 'no'
+        self.instance.config.MESSAGES_TO_AUTHOR = 'yes'
+        self._handle_mail(self.simple_followup)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, john@test.test, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: chef@bork.bork.bork, john@test.test, richard@test.test
 From: John Doe <issue_tracker@your.tracker.email.domain.example>
 Reply-To: Roundup issue tracker
  <issue_tracker@your.tracker.email.domain.example>
@@ -1772,7 +1901,7 @@ Unknown address: fubar@bork.bork.bork
             body_diff = self.compareMessages(str(value), """
 You are not a registered user. Please register at:
 
-http://tracker.example/cgi-bin/roundup.cgi/bugs/user?template=register
+http://tracker.example/cgi-bin/roundup.cgi/bugs/user?@template=register
 
 ...before sending mail to the tracker.
 
@@ -1780,7 +1909,7 @@ Unknown address: fubar@bork.bork.bork
 """)
             assert not body_diff, body_diff
         else:
-            raise AssertionError, "Unathorized not raised when handling mail"
+            raise AssertionError, "Unauthorized not raised when handling mail"
 
         # Make sure list of users is the same as before.
         m = self.db.user.list()
@@ -1810,13 +1939,7 @@ Subject: [issue] Testing...
 
 This is a test submission of a new issue.
 '''
-        p = [
-            self.db.security.getPermission('Register', 'user'),
-            self.db.security.getPermission('Email Access', None),
-            self.db.security.getPermission('Create', 'issue'),
-            self.db.security.getPermission('Create', 'msg'),
-        ]
-        self.db.security.role['anonymous'].permissions = p
+        self._allowAnonymousSubmit()
         self._handle_mail(message)
         m = set(self.db.user.list())
         new = list(m - l)[0]
@@ -1837,13 +1960,7 @@ Subject: [issue] Test =?utf-8?b?w4TDlsOc?= umlauts
 
 This is a test submission of a new issue.
 '''
-        p = [
-            self.db.security.getPermission('Register', 'user'),
-            self.db.security.getPermission('Email Access', None),
-            self.db.security.getPermission('Create', 'issue'),
-            self.db.security.getPermission('Create', 'msg'),
-        ]
-        self.db.security.role['anonymous'].permissions = p
+        self._allowAnonymousSubmit()
         self._handle_mail(message)
         title = self.db.issue.get('1', 'title')
         self.assertEquals(title, 'Test \xc3\x84\xc3\x96\xc3\x9c umlauts X1 X2')
@@ -1851,6 +1968,29 @@ This is a test submission of a new issue.
         new = list(m - l)[0]
         name = self.db.user.get(new, 'realname')
         self.assertEquals(name, 'Firstname \xc3\xa4\xc3\xb6\xc3\x9f Last')
+
+    def testNewUserAuthorMixedEncodedNameSpacing(self):
+        l = set(self.db.user.list())
+        # From: name has Euro symbol in it
+        message = '''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: (=?utf-8?b?w6TDtsOf?==?utf-8?b?w6TDtsOf?=) <fubar@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Test (=?utf-8?b?w4TDlsOc?=) umlauts
+ X1
+
+This is a test submission of a new issue.
+'''
+        self._allowAnonymousSubmit()
+        self._handle_mail(message)
+        title = self.db.issue.get('1', 'title')
+        self.assertEquals(title, 'Test (\xc3\x84\xc3\x96\xc3\x9c) umlauts X1')
+        m = set(self.db.user.list())
+        new = list(m - l)[0]
+        name = self.db.user.get(new, 'realname')
+        self.assertEquals(name,
+            '(\xc3\xa4\xc3\xb6\xc3\x9f\xc3\xa4\xc3\xb6\xc3\x9f)')
 
     def testUnknownUser(self):
         l = set(self.db.user.list())
@@ -1863,10 +2003,8 @@ Subject: [issue] Testing nonexisting user...
 
 This is a test submission of a new issue.
 '''
-        handler = self._create_mailgw(message)
-        # we want a bounce message:
-        handler.trapExceptions = 1
-        ret = handler.main(StringIO(message))
+        # trap_exc=1: we want a bounce message:
+        ret = self._handle_mail(message, trap_exc=1)
         self.compareMessages(self._get_mail(),
 '''FROM: Roundup issue tracker <roundup-admin@your.tracker.email.domain.example>
 TO: nonexisting@bork.bork.bork
@@ -1892,7 +2030,7 @@ Content-Transfer-Encoding: 7bit
 
 You are not a registered user. Please register at:
 
-http://tracker.example/cgi-bin/roundup.cgi/bugs/user?template=register
+http://tracker.example/cgi-bin/roundup.cgi/bugs/user?@template=register
 
 ...before sending mail to the tracker.
 
@@ -2148,27 +2286,7 @@ Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
 _______________________________________________________________________
 ''')
 
-    def testEmailQuoting(self):
-        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'no'
-        self.innerTestQuoting('''This is a followup
-''')
-
-    def testEmailQuotingRemove(self):
-        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'yes'
-        self.innerTestQuoting('''Blah blah wrote:
-> Blah bklaskdfj sdf asdf jlaskdf skj sdkfjl asdf
->  skdjlkjsdfalsdkfjasdlfkj dlfksdfalksd fj
->
-
-This is a followup
-''')
-
-    def innerTestQuoting(self, expect):
-        nodeid = self.doNewIssue()
-
-        messages = self.db.issue.get(nodeid, 'messages')
-
-        self._handle_mail('''Content-Type: text/plain;
+    firstquotingtest = '''Content-Type: text/plain;
   charset="iso-8859-1"
 From: richard <richard@test.test>
 To: issue_tracker@your.tracker.email.domain.example
@@ -2182,7 +2300,160 @@ Blah blah wrote:
 >
 
 This is a followup
-''')
+'''
+
+    def testEmailQuoting(self):
+        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'no'
+        self.innerTestQuoting(self.firstquotingtest, '''This is a followup
+''', 'This is a followup')
+
+    def testEmailQuotingRemove(self):
+        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'yes'
+        self.innerTestQuoting(self.firstquotingtest, '''Blah blah wrote:
+> Blah bklaskdfj sdf asdf jlaskdf skj sdkfjl asdf
+>  skdjlkjsdfalsdkfjasdlfkj dlfksdfalksd fj
+>
+
+This is a followup
+''', 'This is a followup')
+
+    secondquotingtest = '''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: richard <richard@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: Re: [issue1] Testing...
+
+On Tue, Feb 23, 2010 at 8:46 AM, Someone <report@bugs.python.org> wrote:
+> aa
+> aa
+
+AA:
+
+ AA
+
+AA
+
+ AA
+
+TEXT BEFORE QUOTE
+> bb
+> bb
+>
+
+BB
+BB
+BB
+BB
+
+> cc
+>
+> cc
+>
+>
+> cc
+>
+> cc
+>
+> cc
+>
+CC
+
+--
+added signature
+'''
+    def testEmailQuoting2(self):
+        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'no'
+        self.innerTestQuoting(self.secondquotingtest, '''AA:
+
+ AA
+
+AA
+
+ AA
+
+TEXT BEFORE QUOTE
+
+BB
+BB
+BB
+BB
+
+CC
+''', 'AA:')
+
+    def testEmailQuotingRemove2(self):
+        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'yes'
+        self.innerTestQuoting(self.secondquotingtest,
+            '\n'.join(self.secondquotingtest.split('\n')[8:-3]), 'AA:')
+
+    thirdquotingtest = '''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: richard <richard@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: Re: [issue1] Testing...
+
+On Mon, Jan 02, 2012 at 06:14:27PM +0000, Someone wrote:
+>
+> aa
+>
+> aa
+> aa
+> aa
+AA0
+AA
+
+> bb
+> bb
+> bb
+BB
+
+> cc
+> cc
+> cc
+> cc
+> cc
+> cc
+
+CC
+CC
+CC
+
+CC
+CC
+
+CC
+CC
+CC
+CC
+
+CC
+
+NAME
+--
+sig
+sig
+sig
+sig
+'''
+
+    # This fails because the sig isn't removed (we currently remove the
+    # sig only if the delimiter is the first line in a section)
+    @expectedFailure
+    def testEmailQuotingRemove3(self):
+        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'yes'
+        self.innerTestQuoting(self.thirdquotingtest,
+            '\n'.join(self.thirdquotingtest.split('\n')[8:-6]), 'AA0')
+
+    def innerTestQuoting(self, msgtext, expect, summary=None):
+        nodeid = self.doNewIssue()
+
+        messages = self.db.issue.get(nodeid, 'messages')
+
+        self._handle_mail(msgtext)
         # figure the new message id
         newmessages = self.db.issue.get(nodeid, 'messages')
         for msg in messages:
@@ -2190,6 +2461,8 @@ This is a followup
         messageid = newmessages[0]
 
         self.compareMessages(self.db.msg.get(messageid, 'content'), expect)
+        if summary:
+            self.assertEqual (summary, self.db.msg.get(messageid, 'summary'))
 
     def testUserLookup(self):
         i = self.db.user.create(username='user1', address='user1@foo.com')
@@ -2204,6 +2477,12 @@ This is a followup
                                 alternate_addresses='user1@bar.com')
         self.assertEqual(uidFromAddress(self.db, ('', 'user1@bar.com'), 0), i)
         self.assertEqual(uidFromAddress(self.db, ('', 'USER1@bar.com'), 0), i)
+
+    def testUserAlternateSubstringNomatch(self):
+        i = self.db.user.create(username='user1', address='user1@foo.com',
+                                alternate_addresses='x-user1@bar.com')
+        self.assertEqual(uidFromAddress(self.db, ('', 'user1@bar.com'), 0), 0)
+        self.assertEqual(uidFromAddress(self.db, ('', 'USER1@bar.com'), 0), 0)
 
     def testUserCreate(self):
         i = uidFromAddress(self.db, ('', 'user@foo.com'), 1)
@@ -2944,9 +3223,325 @@ Stack trace:
         fileid = self.db.msg.get(msgid, 'files')[0]
         self.assertEqual(self.db.file.get(fileid, 'type'), 'message/rfc822')
 
+pgp_test_key = """
+-----BEGIN PGP PRIVATE KEY BLOCK-----
+Version: GnuPG v1.4.10 (GNU/Linux)
+
+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
+=3uFZ
+-----END PGP PRIVATE KEY BLOCK-----
+"""
+
+john_doe_key = """
+-----BEGIN PGP PRIVATE KEY BLOCK-----
+Version: GnuPG v1.4.10 (GNU/Linux)
+
+lQHYBE6NwvABBACxg7QqV2qHywwM3wae6HAHJVEo7EeYA6Lv0pZlW3Aw4CCCnpgJ
+jA7CekGFcmGmoCaN9ezuVAPTgUlK4yt8a7P6cT0vw1q341Om9IEKAu59RpNZN/H9
+6GfZ95bU51W/hdTFysH1DRwbCR3MowvLeA6Pk4cZlPsYHD0SD3De2i1BewARAQAB
+AAP+IRi4L6jKwPS3k3LFrj0SHhL0Fdgv5QTQjTxLNCyfN02iYhglqqoFWncm3jWc
+RU/YwGEYwrrBV97kBmVihzkhfgFRsxynE9PMGKKEAuRcAl21RPJDFA6Dlnp6M2No
+rR6eoAhrlZ8+KsK9JaXSMalzO/Yh4u3mOinq3f3XL96wAEkCAMAxeZMF5pnXARNR
+Y7u2clhNNnLuf+BzpENCFMaWzWPyTcvbf4xNK7ZHPxFVZpX5/qAPJ8rnTaOTHxnN
+5PgqbO8CAOxyrTw/muakTJLg+FXdn8BgxZGJXMT7KmkU9SReefjo7c1WlnZxKIAy
+6vLIG8WMGpdfCFDve0YLr/GGyDtOjDUB/RN3gn6qnAJThBnVk2wESZVx41fihbIF
+ACCKc9heFskzwurtvvp+bunM3quwrSH1hWvxiWJlDmGSn8zQFypGChifgLQZSm9o
+biBEb2UgPGpvaG5AdGVzdC50ZXN0Poi4BBMBAgAiBQJOjcLwAhsDBgsJCAcDAgYV
+CAIJCgsEFgIDAQIeAQIXgAAKCRC/z7qg+FujnPWiA/9T5SOGraRNIVVIyvJvYwkG
+OTAfQ0K3QMlLoQMPmaEbx9Q+isF15M9sOMcl1XGO4UNWuCPIIN8z/y/OLgAB0ZuL
+GlnAPPOOZ+MlaUXiMYo8oi416QZrMDf2H/Nkc10csiXm+zMl8RqeIQBEeljNyJ+t
+MG1EWn/PHTwFTd/VePuQdJ0B2AROjcLwAQQApw+72jKy0/wqg5SAtnVSkA1F3Jna
+/OG+ufz5dX57jkMFRvFoksWIWqHmiCjdE5QV8j+XTnjElhLsmrgjl7aAFveb30R6
+ImmcpKMN31vAp4RZlnyYbYUCY4IXFuz3n1CaUL+mRx5yNJykrZNfpWNf2pwozkZq
+lcDI69ymIW5acXUAEQEAAQAD/R7Jdf98l1scngMYo228ikYUxBqm2eX/fiQNXDWM
+ZR2u+TJ9O53MvFejfXX7Pd6lTDQUBwDFncjgXO0YYSrMzabhqpqoKLqOIpZmBuWC
+Hh1lvcFoIYoDR2LkiJ9EPBUEVUBDsUO8ajkILEE3G+DDpCaf9Vo82lCVyhDESqyt
+v4lxAgDOLpoq1Whv5Ejr6FifTWytCiQjH2P1SmePlQmy6oEJRUYA1t4zYrzCJUX8
+VAvPjh9JXilP6mhDbyQArWllewV9AgDPbVOf75ktRwfhje26tZsukqWYJCc1XvoH
+3PTzA7vH1HZZq7dvxa87PiSnkOLEsIAsI+4jpeMxpPlQRxUvHf1ZAf9rK3v3HMJ/
+2xVzwK24Oaj+g2O7D/fdqtLFGe5S5JobnTyp9xArDAhaZ/AKfDMYjUIKMP+bdNAf
+y8fQUtuawFltm1GInwQYAQIACQUCTo3C8AIbDAAKCRC/z7qg+FujnDzYA/9EU6Pv
+Ci1+DCtxjnq7IOvOjqExhFNGvN9Dw17Tl8HcyW3if9v5RxeSWYKl0DhzVdzMQgH/
+78q4F4W1q2IkB7SCpXizHLIc3eh8iZkbWZE+CGPvTpqyF03Yi16qhxpAbkGs2Yhq
+jTx5oJ4CL5fybBOZLg+BTlK4HIee6xEcbNoq+A==
+=ZKBW
+-----END PGP PRIVATE KEY BLOCK-----
+"""
+
+ownertrust = """
+723762CD5A5FECB76DC72DF85ADCFD5631C38741:6:
+2940C247A1FBAD508A1AF24BBFCFBAA0F85BA39C:6:
+"""
+
+class MailgwPGPTestCase(MailgwTestAbstractBase):
+    pgphome = gpgmelib.pgphome
+    def setUp(self):
+        MailgwTestAbstractBase.setUp(self)
+        self.db.security.addRole(name = 'pgp', description = 'PGP Role')
+        self.instance.config['PGP_HOMEDIR'] = self.pgphome
+        self.instance.config['PGP_ROLES'] = 'pgp'
+        self.instance.config['PGP_ENABLE'] = True
+        self.instance.config['MAIL_DOMAIN'] = 'example.com'
+        self.instance.config['ADMIN_EMAIL'] = 'roundup-admin@example.com'
+        self.db.user.set(self.john_id, roles='User,pgp')
+        gpgmelib.setUpPGP()
+
+    def tearDown(self):
+        MailgwTestAbstractBase.tearDown(self)
+        gpgmelib.tearDownPGP()
+
+    def testPGPUnsignedMessage(self):
+        self.assertRaises(MailUsageError, self._handle_mail,
+            '''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: John Doe <john@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Testing non-signed message...
+
+This is no pgp signed message.
+''')
+
+    signed_msg = '''Content-Disposition: inline
+From: John Doe <john@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Subject: [issue] Testing signed message...
+Content-Type: multipart/signed; micalg=pgp-sha1;
+        protocol="application/pgp-signature"; boundary="cWoXeonUoKmBZSoM"
+
+
+--cWoXeonUoKmBZSoM
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+
+This is a pgp signed message.
+
+--cWoXeonUoKmBZSoM
+Content-Type: application/pgp-signature; name="signature.asc"
+Content-Description: Digital signature
+Content-Disposition: inline
+
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1.4.10 (GNU/Linux)
+
+iJwEAQECAAYFAk6N4A4ACgkQv8+6oPhbo5x5nAP/d7R7SxTvLoVESI+1r7eDXp1J
+LvBVU2EF3YFYKBHMLcWmjG92fNjnHX6NENTEhTeBynba5IPEwUfITC+7PmgPmQkA
+VXnFZnwraHxsYgyFsVFN1kkTSbwRUlWl9+nTEsr0yBLTpZN0QSIDcwu+i/xVcg+t
+ZQ4K6R3m3AOw7BLdvZs=
+=wpYk
+-----END PGP SIGNATURE-----
+
+--cWoXeonUoKmBZSoM--
+'''
+
+    def testPGPSignedMessage(self):
+        nodeid = self._handle_mail(self.signed_msg)
+        m = self.db.issue.get(nodeid, 'messages')[0]
+        self.assertEqual(self.db.msg.get(m, 'content'), 
+            'This is a pgp signed message.')
+
+    def testPGPSignedMessageFail(self):
+        # require both, signing and encryption
+        self.instance.config['PGP_REQUIRE_INCOMING'] = 'both'
+        self.assertRaises(MailUsageError, self._handle_mail, self.signed_msg)
+
+    encrypted_msg = '''Content-Disposition: inline
+From: John Doe <john@test.test>
+To: roundup-admin@example.com
+Subject: [issue] Testing encrypted message...
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted";
+        boundary="d6Gm4EdcadzBjdND"
+
+--d6Gm4EdcadzBjdND
+Content-Type: application/pgp-encrypted
+Content-Disposition: attachment
+
+Version: 1
+
+--d6Gm4EdcadzBjdND
+Content-Type: application/octet-stream
+Content-Disposition: inline; filename="msg.asc"
+
+-----BEGIN PGP MESSAGE-----
+Version: GnuPG v1.4.10 (GNU/Linux)
+
+hQEMAzfeQttq+Q2YAQf9FxCtZVgC7jAy6UkeAJ1imCpnh9DgKA5w40OFtrY4mVAp
+cL7kCkvGvJCW7uQZrmSgIiYaZGLI3GS42XutORC6E6PzBEW0fJUMIXYmoSd0OFeY
+3H2+854qu37W/uCOWM9OnPFIH8g8q8DgYy88i0goM+Ot9Q96yFfJ7QymanOZJgVa
+MNC+oKDiIZKiE3PCwtGr+8CHZN/9J6O4FeJijBlr09C5LXc+Nif5T0R0nt17MAns
+9g2UvGxW8U24NAS1mOg868U05hquLPIcFz9jGZGknJu7HBpOkQ9GjKqkzN8pgZVN
+VbN8IdDqi0QtRKE44jtWQlyNlESMjv6GtC2V9F6qKNK8AfHtBexDhyv4G9cPFFNO
+afQ6e4dPi89RYIQyydtwiqao8fj6jlAy2Z1cbr7YxwBG7BeUZv9yis7ShaAIo78S
+82MrCYpSjfHNwKiSfC5yITw22Uv4wWgixVdAsaSdtBqEKXJPG9LNey18ArsBjSM1
+P81iDOWUp/uyIe5ZfvNI38BBxEYslPTUlDk2GB8J2Vun7IWHoj9a4tY3IotC9jBr
+5Qnigzqrt7cJZX6OrN0c+wnOjXbMGYXmgSs4jeM=
+=XX5Q
+-----END PGP MESSAGE-----
+
+--d6Gm4EdcadzBjdND--
+'''
+    def testPGPEncryptedUnsignedMessageError(self):
+        self.assertRaises(MailUsageError, self._handle_mail, self.encrypted_msg)
+
+    def testPGPEncryptedUnsignedMessage(self):
+        # no error if we don't require a signature:
+        self.instance.config['PGP_REQUIRE_INCOMING'] = 'encrypted'
+        nodeid = self._handle_mail (self.encrypted_msg)
+        m = self.db.issue.get(nodeid, 'messages')[0]
+        self.assertEqual(self.db.msg.get(m, 'content'), 
+            'This is the text to be encrypted')
+
+    def testPGPEncryptedUnsignedMessageFromNonPGPUser(self):
+        msg = self.encrypted_msg.replace('John Doe <john@test.test>',
+            '"Contrary, Mary" <mary@test.test>')
+        nodeid = self._handle_mail (msg)
+        m = self.db.issue.get(nodeid, 'messages')[0]
+        self.assertEqual(self.db.msg.get(m, 'content'), 
+            'This is the text to be encrypted')
+        self.assertEqual(self.db.msg.get(m, 'author'), self.mary_id)
+
+    # check that a bounce-message that is triggered *after*
+    # decrypting is properly encrypted:
+    def testPGPEncryptedUnsignedMessageCheckBounce(self):
+        # allow non-signed msg
+        self.instance.config['PGP_REQUIRE_INCOMING'] = 'encrypted'
+        # don't allow creation of message, trigger error *after* decrypt
+        self.db.user.set(self.john_id, roles='pgp')
+        self.db.security.addPermissionToRole('pgp', 'Email Access')
+        self.db.security.addPermissionToRole('pgp', 'Create', 'issue')
+        # trap_exc=1: we want a bounce message:
+        self._handle_mail(self.encrypted_msg, trap_exc=1)
+        m = self._get_mail()
+        fp = FeedParser()
+        fp.feed(m)
+        parts = fp.close().get_payload()
+        self.assertEqual(len(parts),2)
+        self.assertEqual(parts[0].get_payload().strip(), 'Version: 1')
+        crypt = pyme.core.Data(parts[1].get_payload())
+        plain = pyme.core.Data()
+        ctx = pyme.core.Context()
+        res = ctx.op_decrypt(crypt, plain)
+        self.assertEqual(res, None)
+        plain.seek(0,0)
+        fp = FeedParser()
+        fp.feed(plain.read())
+        parts = fp.close().get_payload()
+        self.assertEqual(len(parts),2)
+        self.assertEqual(parts[0].get_payload().strip(),
+            'You are not permitted to create messages.')
+        self.assertEqual(parts[1].get_payload().strip(),
+            '''Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+
+This is the text to be encrypted''')
+
+
+    def testPGPEncryptedSignedMessage(self):
+        # require both, signing and encryption
+        self.instance.config['PGP_REQUIRE_INCOMING'] = 'both'
+        nodeid = self._handle_mail('''Content-Disposition: inline
+From: John Doe <john@test.test>
+To: roundup-admin@example.com
+Subject: Testing encrypted and signed message
+MIME-Version: 1.0
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted";
+        boundary="ReaqsoxgOBHFXBhH"
+
+--ReaqsoxgOBHFXBhH
+Content-Type: application/pgp-encrypted
+Content-Disposition: attachment
+
+Version: 1
+
+--ReaqsoxgOBHFXBhH
+Content-Type: application/octet-stream
+Content-Disposition: inline; filename="msg.asc"
+
+-----BEGIN PGP MESSAGE-----
+Version: GnuPG v1.4.10 (GNU/Linux)
+
+hQEMAzfeQttq+Q2YAQf+NaC3r8qBURQqxHH9IAP4vg0QAP2yj3n0v6guo1lRf5BA
+EUfTQ3jc3chxLvzTgoUIuMOvhlNroqR1lgLwhfSTCyuKWDZa+aVNiSgsB2MD44Xd
+mAkKKmnmOGLmfbICbPQZxl4xNhCMTHiAy1xQE6mTj/+pEAq5XxjJUwn/gJ3O1Wmd
+NyWtJY2N+TRbxUVB2WhG1j9J1D2sjhG26TciE8JeuLDZzaiVNOW9YlX2Lw5KtlkR
+Hkgw6Xme06G0XXZUcm9JuBU/7oFP/tSrC1tBsnVlq1pZYf6AygIBdXWb9gD/WmXh
+7Eu/xCKrw4RFnXnTgmBz/NHRfVDkfdSscZqexnG1D9LAwQHSuVf8sxDPNesv0W+8
+e49loVjvU+Y0BCFQAbWSW4iOEUYZpW/ITRE4+wIqMXZbAraeBV0KPZ4hAa3qSmf+
+oZBRcbzssL163Odx/OHRuK2J2CHC654+crrlTBnxd/RUKgRbSUKwrZzB2G6OPcGv
+wfiqXsY+XvSZtTbWuvUJxePh8vhhhjpuo1JtlrYc3hZ9OYgoCoV1JiLl5c60U5Es
+oUT9GDl1Qsgb4dF4TJ1IBj+riYiocYpJxPhxzsy6liSLNy2OA6VEjG0FGk53+Ok9
+7UzOA+WaHJHSXafZzrdP1TWJUFlOMA+dOgTKpH69eL1+IRfywOjEwp1UNSbLnJpc
+D0QQLwIFttplKvYkn0DZByJCVnIlGkl4s5LM5rnc8iecX8Jad0iRIlPV6CVM+Nso
+WdARUfyJfXAmz8uk4f2sVfeMu1gdMySdjvxwlgHDJdBPIG51r2b8L/NCTiC57YjF
+zGhS06FLl3V1xx6gBlpqQHjut3efrAGpXGBVpnTJMOcgYAk=
+=jt/n
+-----END PGP MESSAGE-----
+
+--ReaqsoxgOBHFXBhH--
+''')
+        m = self.db.issue.get(nodeid, 'messages')[0]
+        self.assertEqual(self.db.msg.get(m, 'content'), 
+            'This is the text of a signed and encrypted email.')
+
+
 def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(MailgwTestCase))
+    if pyme is not None:
+        suite.addTest(unittest.makeSuite(MailgwPGPTestCase))
+    else:
+        print "Skipping PGP tests"
     return suite
 
 if __name__ == '__main__':
@@ -2954,7 +3549,3 @@ if __name__ == '__main__':
     unittest.main(testRunner=runner)
 
 # vim: set filetype=python sts=4 sw=4 et si :
-
-
-
-

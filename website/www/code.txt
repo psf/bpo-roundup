@@ -1,0 +1,34 @@
+Code
+====
+
+Changelog
+----------
+
+The changelog is available as `CHANGES.txt in the SCM repository <http://roundup.hg.sourceforge.net/hgweb/roundup/roundup/raw-file/default/CHANGES.txt>`_.
+
+Browse
+------
+
+You may browse the repository via the `Mercurial webinterface <http://roundup.hg.sourceforge.net/hgweb/roundup/roundup>`_.
+
+Read-only Access
+----------------
+
+Read-only repository access is provided through ::
+
+  hg clone http://roundup.hg.sourceforge.net:8000/hgroot/roundup/roundup
+
+The URL for the webinterface works, too, but you will see messages about
+redirects to the URL shown here.
+
+Read-write Access
+-----------------
+
+The read/write access uses your SourceForge.net ssh password or ssh key
+to authorize your access. (See `SF's site documentation on Mercurial access
+<https://sourceforge.net/apps/trac/sourceforge/wiki/Mercurial#Access>`_) ::
+
+  hg clone ssh://<username>@roundup.hg.sourceforge.net/hgroot/roundup/roundup
+
+Of course a roundup developer must have granted
+you write access first - ask for it on the roundup-devel list.

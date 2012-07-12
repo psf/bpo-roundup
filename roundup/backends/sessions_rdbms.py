@@ -1,4 +1,3 @@
-#$Id: sessions_rdbms.py,v 1.8 2008-08-18 05:04:01 richard Exp $
 """This module defines a very basic store that's used by the CGI interface
 to store session and one-time-key information.
 
@@ -8,6 +7,7 @@ class. It's now also used for One Time Key handling too.
 __docformat__ = 'restructuredtext'
 
 import os, time
+from cgi import escape
 
 class BasicDatabase:
     ''' Provide a nice encapsulation of an RDBMS table.
@@ -36,7 +36,7 @@ class BasicDatabase:
         if not res:
             if default != self._marker:
                 return default
-            raise KeyError('No such %s "%s"'%(self.name, infoid))
+            raise KeyError('No such %s "%s"'%(self.name, escape(infoid)))
         values = eval(res[0])
         return values.get(value, None)
 
@@ -46,7 +46,7 @@ class BasicDatabase:
             n, n, self.db.arg), (infoid,))
         res = self.cursor.fetchone()
         if not res:
-            raise KeyError('No such %s "%s"'%(self.name, infoid))
+            raise KeyError('No such %s "%s"'%(self.name, escape (infoid)))
         return eval(res[0])
 
     def set(self, infoid, **newvalues):

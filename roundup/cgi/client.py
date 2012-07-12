@@ -5,6 +5,7 @@ __docformat__ = 'restructuredtext'
 import base64, binascii, cgi, codecs, mimetypes, os
 import quopri, random, re, rfc822, stat, sys, time
 import socket, errno
+from traceback import format_exc
 
 from roundup import roundupdb, date, hyperdb, password
 from roundup.cgi import templating, cgitb, TranslationService
@@ -22,6 +23,10 @@ from roundup.anypy.io_ import StringIO
 from roundup.anypy import http_
 from roundup.anypy import urllib_
 
+from email.MIMEBase import MIMEBase
+from email.MIMEText import MIMEText
+from email.MIMEMultipart import MIMEMultipart
+
 def initialiseSecurity(security):
     '''Create some Permissions and Roles on the security object
 
@@ -38,19 +43,8 @@ def initialiseSecurity(security):
         description="User may manipulate user Roles through the web")
     security.addPermissionToRole('Admin', p)
 
-# used to clean messages passed through CGI variables - HTML-escape any tag
-# that isn't <a href="">, <i>, <b> and <br> (including XHTML variants) so
-# that people can't pass through nasties like <script>, <iframe>, ...
-CLEAN_MESSAGE_RE = r'(<(/?(.*?)(\s*href="[^"]")?\s*/?)>)'
-def clean_message(message, mc=re.compile(CLEAN_MESSAGE_RE, re.I)):
-    return mc.sub(clean_message_callback, message)
-def clean_message_callback(match, ok={'a':1,'i':1,'b':1,'br':1}):
-    """ Strip all non <a>,<i>,<b> and <br> tags from a string
-    """
-    if match.group(3).lower() in ok:
-        return match.group(1)
-    return '&lt;%s&gt;'%match.group(2)
-
+def clean_message(msg):
+    return cgi.escape (msg).replace ('\n', '<br />\n')
 
 error_message = ''"""<html><head><title>An error has occurred</title></head>
 <body><h1>An error has occurred</h1>
@@ -290,6 +284,9 @@ class Client:
 
         # this is the base URL for this tracker
         self.base = self.instance.config.TRACKER_WEB
+
+        # should cookies be secure?
+        self.secure = self.base.startswith ('https')
 
         # check the tracker_we setting
         if not self.base.endswith('/'):
@@ -551,7 +548,7 @@ class Client:
             if not self.instance.config.WEB_DEBUG:
                 exc_info = sys.exc_info()
                 subject = "Error: %s" % exc_info[1]
-                self.send_html_to_admin(subject, html)
+                self.send_error_to_admin(subject, html, format_exc())
                 self.write_html(self._(error_message))
             else:
                 self.write_html(html)
@@ -728,7 +725,7 @@ class Client:
                     except TypeError:
                         # invalid challenge
                         pass
-                    username, password = decoded.split(':')
+                    username, password = decoded.split(':', 1)
                     try:
                         login = self.get_action_class('login')(self)
                         login.verifyLogin(username, password)
@@ -966,11 +963,10 @@ class Client:
             raise Unauthorised(self._("You are not allowed to view "
                 "this file."))
 
-        # MvL 20100404: catch IndexError
         try:
             mime_type = klass.get(nodeid, 'type')
-        except IndexError:
-            raise NotFound, designator
+        except IndexError, e:
+            raise NotFound(e)
         # Can happen for msg class:
         if not mime_type:
             mime_type = 'text/plain'
@@ -1065,15 +1061,23 @@ class Client:
             self.additional_headers['Content-Length'] = str(len(content))
             self.write(content)
 
-    def send_html_to_admin(self, subject, content):
-
+    def send_error_to_admin(self, subject, html, txt):
+        """Send traceback information to admin via email.
+           We send both, the formatted html (with more information) and
+           the text version of the traceback. We use
+           multipart/alternative so the receiver can chose which version
+           to display.
+        """
         to = [self.mailer.config.ADMIN_EMAIL]
-        message = self.mailer.get_standard_message(to, subject)
-        # delete existing content-type headers
-        del message['Content-type']
-        message['Content-type'] = 'text/html; charset=utf-8'
-        message.set_payload(content)
-        encode_quopri(message)
+        message = MIMEMultipart('alternative')
+        self.mailer.set_message_attributes(message, to, subject)
+        part = MIMEBase('text', 'html')
+        part.set_charset('utf-8')
+        part.set_payload(html)
+        encode_quopri(part)
+        message.attach(part)
+        part = MIMEText(txt)
+        message.attach(part)
         self.mailer.smtp_send(to, message.as_string())
     
     def renderFrontPage(self, message):
@@ -1131,7 +1135,7 @@ class Client:
                 # If possible, send the HTML page template traceback
                 # to the administrator.
                 subject = "Templating Error: %s" % exc_info[1]
-                self.send_html_to_admin(subject, cgitb.pt_html())
+                self.send_error_to_admin(subject, cgitb.pt_html(), format_exc())
                 # Now report the error to the user.
                 return self._(self.error_message)
             except:
@@ -1205,7 +1209,7 @@ class Client:
                 if name == action_name:
                     break
             else:
-                raise ValueError('No such action "%s"'%action_name)
+                raise ValueError('No such action "%s"'%cgi.escape(action_name))
         return action_klass
 
     def _socket_op(self, call, *args, **kwargs):
@@ -1509,6 +1513,11 @@ class Client:
             cookie = "%s=%s; Path=%s;"%(name, value, path)
             if expire is not None:
                 cookie += " expires=%s;"%get_cookie_date(expire)
+            # mark as secure if https, see issue2550689
+            if self.secure:
+                cookie += " secure;"
+            # prevent theft of session cookie, see issue2550689
+            cookie += " HttpOnly;"
             headers.append(('Set-Cookie', cookie))
 
         self._socket_op(self.request.start_response, headers, response)
@@ -1541,17 +1550,6 @@ class Client:
         if not value:
             expire = -1
         self._cookies[(path, name)] = (value, expire)
-
-    def set_cookie(self, user, expire=None):
-        """Deprecated. Use session_api calls directly
-
-        XXX remove
-        """
-
-        # insert the session in the session db
-        self.session_api.set(user=user)
-        # refresh session cookie
-        self.session_api.update(set_cookie=True, expire=expire)
 
     def make_user_anonymous(self):
         """ Make us anonymous

@@ -75,8 +75,6 @@ set() method to add the message to the item's spool; in the second case we
 are calling the create() method to create a new node). If an auditor raises
 an exception, the original message is bounced back to the sender with the
 explanatory message given in the exception.
-
-$Id: mailgw.py,v 1.196 2008-07-23 03:04:44 richard Exp $
 """
 __docformat__ = 'restructuredtext'
 
@@ -84,7 +82,7 @@ import string, re, os, mimetools, cStringIO, smtplib, socket, binascii, quopri
 import time, random, sys, logging
 import traceback, rfc822
 
-from email.Header import decode_header
+from anypy.email_ import decode_header
 
 from roundup import configuration, hyperdb, date, password, rfc2822, exceptions
 from roundup.mailer import Mailer, MessageSendError
@@ -92,7 +90,7 @@ from roundup.i18n import _
 from roundup.hyperdb import iter_roles
 
 try:
-    import pyme, pyme.core, pyme.gpgme
+    import pyme, pyme.core, pyme.constants, pyme.constants.sigsum
 except ImportError:
     pyme = None
 
@@ -156,39 +154,33 @@ def gpgh_key_getall(key, attr):
     ''' return list of given attribute for all uids in
         a key
     '''
-    u = key.uids
-    while u:
+    for u in key.uids:
         yield getattr(u, attr)
-        u = u.next
 
-def gpgh_sigs(sig):
-    ''' more pythonic iteration over GPG signatures '''
-    while sig:
-        yield sig
-        sig = sig.next
-
-def check_pgp_sigs(sig, gpgctx, author):
+def check_pgp_sigs(sigs, gpgctx, author, may_be_unsigned=False):
     ''' Theoretically a PGP message can have several signatures. GPGME
-        returns status on all signatures in a linked list. Walk that
-        linked list looking for the author's signature
+        returns status on all signatures in a list. Walk that list
+        looking for the author's signature. Note that even if incoming
+        signatures are not required, the processing fails if there is an
+        invalid signature.
     '''
-    for sig in gpgh_sigs(sig):
+    for sig in sigs:
         key = gpgctx.get_key(sig.fpr, False)
         # we really only care about the signature of the user who
         # submitted the email
         if key and (author in gpgh_key_getall(key, 'email')):
-            if sig.summary & pyme.gpgme.GPGME_SIGSUM_VALID:
+            if sig.summary & pyme.constants.sigsum.VALID:
                 return True
             else:
                 # try to narrow down the actual problem to give a more useful
                 # message in our bounce
-                if sig.summary & pyme.gpgme.GPGME_SIGSUM_KEY_MISSING:
+                if sig.summary & pyme.constants.sigsum.KEY_MISSING:
                     raise MailUsageError, \
                         _("Message signed with unknown key: %s") % sig.fpr
-                elif sig.summary & pyme.gpgme.GPGME_SIGSUM_KEY_EXPIRED:
+                elif sig.summary & pyme.constants.sigsum.KEY_EXPIRED:
                     raise MailUsageError, \
                         _("Message signed with an expired key: %s") % sig.fpr
-                elif sig.summary & pyme.gpgme.GPGME_SIGSUM_KEY_REVOKED:
+                elif sig.summary & pyme.constants.sigsum.KEY_REVOKED:
                     raise MailUsageError, \
                         _("Message signed with a revoked key: %s") % sig.fpr
                 else:
@@ -196,7 +188,10 @@ def check_pgp_sigs(sig, gpgctx, author):
                         _("Invalid PGP signature detected.")
 
     # we couldn't find a key belonging to the author of the email
-    raise MailUsageError, _("Message signed with unknown key: %s") % sig.fpr
+    if sigs:
+        raise MailUsageError, _("Message signed with unknown key: %s") % sig.fpr
+    elif not may_be_unsigned:
+        raise MailUsageError, _("Unsigned Message")
 
 class Message(mimetools.Message):
     ''' subclass mimetools.Message so we can retrieve the parts of the
@@ -249,17 +244,14 @@ class Message(mimetools.Message):
 
     def _decode_header_to_utf8(self, hdr):
         l = []
-        prev_encoded = False
         for part, encoding in decode_header(hdr):
             if encoding:
                 part = part.decode(encoding)
             # RFC 2047 specifies that between encoded parts spaces are
             # swallowed while at the borders from encoded to non-encoded
             # or vice-versa we must preserve a space. Multiple adjacent
-            # non-encoded parts should not occur.
-            if l and prev_encoded != bool(encoding):
-                l.append(' ')
-            prev_encoded = bool(encoding)
+            # non-encoded parts should not occur. This is now
+            # implemented in our patched decode_header method in anypy
             l.append(part)
         return ''.join([s.encode('utf-8') for s in l])
 
@@ -460,16 +452,18 @@ class Message(mimetools.Message):
         return self.gettype() == 'multipart/encrypted' \
             and self.typeheader.find('protocol="application/pgp-encrypted"') != -1
 
-    def decrypt(self, author):
+    def decrypt(self, author, may_be_unsigned=False):
         ''' decrypt an OpenPGP MIME message
-            This message must be signed as well as encrypted using the "combined"
-            method. The decrypted contents are returned as a new message.
+            This message must be signed as well as encrypted using the
+            "combined" method if incoming signatures are configured.
+            The decrypted contents are returned as a new message.
         '''
         (hdr, msg) = self.getparts()
         # According to the RFC 3156 encrypted mail must have exactly two parts.
         # The first part contains the control information. Let's verify that
         # the message meets the RFC before we try to decrypt it.
-        if hdr.getbody() != 'Version: 1' or hdr.gettype() != 'application/pgp-encrypted':
+        if hdr.getbody().strip() != 'Version: 1' \
+           or hdr.gettype() != 'application/pgp-encrypted':
             raise MailUsageError, \
                 _("Unknown multipart/encrypted version.")
 
@@ -486,7 +480,8 @@ class Message(mimetools.Message):
         # key to send it to us. now check the signatures to see if it
         # was signed by someone we trust
         result = context.op_verify_result()
-        check_pgp_sigs(result.signatures, context, author)
+        check_pgp_sigs(result.signatures, context, author,
+            may_be_unsigned = may_be_unsigned)
 
         plaintext.seek(0,0)
         # pyme.core.Data implements a seek method with a different signature
@@ -511,7 +506,6 @@ class Message(mimetools.Message):
             raise MailUsageError, \
                 _("No PGP signature found in message.")
 
-        context = pyme.core.Context()
         # msg.getbody() is skipping over some headers that are
         # required to be present for verification to succeed so
         # we'll do this by hand
@@ -526,6 +520,7 @@ class Message(mimetools.Message):
         msg_data = pyme.core.Data(canonical_msg)
         sig_data = pyme.core.Data(sig.getbody())
 
+        context = pyme.core.Context()
         context.op_verify(sig_data, msg_data, None)
 
         # check all signatures for validity
@@ -558,6 +553,7 @@ class parsedMessage:
         self.props = None
         self.content = None
         self.attachments = None
+        self.crypt = False
 
     def handle_ignore(self):
         ''' Check to see if message can be safely ignored:
@@ -847,7 +843,7 @@ Subject was: "%(subject)s"
                     tracker_web = self.config.TRACKER_WEB
                     registration_info = """ Please register at:
 
-%(tracker_web)suser?template=register
+%(tracker_web)suser?@template=register
 
 ...before sending mail to the tracker.""" % locals()
 
@@ -862,7 +858,7 @@ Unknown address: %(from_address)s
                     'You are not permitted to access this tracker.')
         self.author = author
 
-    def check_node_permissions(self):
+    def check_permissions(self):
         ''' Check if the author has permission to edit or create this
             class of node
         '''
@@ -995,26 +991,37 @@ Subject was: "%(subject)s"
             """
             if self.config.PGP_ROLES:
                 return self.db.user.has_role(self.author,
-                    iter_roles(self.config.PGP_ROLES))
+                    *iter_roles(self.config.PGP_ROLES))
             else:
                 return True
 
-        if self.config.PGP_ENABLE and pgp_role():
+        if self.config.PGP_ENABLE:
+            if pgp_role() and self.config.PGP_ENCRYPT:
+                self.crypt = True
             assert pyme, 'pyme is not installed'
             # signed/encrypted mail must come from the primary address
             author_address = self.db.user.get(self.author, 'address')
             if self.config.PGP_HOMEDIR:
                 os.environ['GNUPGHOME'] = self.config.PGP_HOMEDIR
+            if self.config.PGP_REQUIRE_INCOMING in ('encrypted', 'both') \
+                and pgp_role() and not self.message.pgp_encrypted():
+                raise MailUsageError, _(
+                    "This tracker has been configured to require all email "
+                    "be PGP encrypted.")
             if self.message.pgp_signed():
                 self.message.verify_signature(author_address)
             elif self.message.pgp_encrypted():
-                # replace message with the contents of the decrypted
+                # Replace message with the contents of the decrypted
                 # message for content extraction
-                # TODO: encrypted message handling is far from perfect
-                # bounces probably include the decrypted message, for
-                # instance :(
-                self.message = self.message.decrypt(author_address)
-            else:
+                # Note: the bounce-handling code now makes sure that
+                # either the encrypted mail received is sent back or
+                # that the error message is encrypted if needed.
+                encr_only = self.config.PGP_REQUIRE_INCOMING == 'encrypted'
+                encr_only = encr_only or not pgp_role()
+                self.crypt = True
+                self.message = self.message.decrypt(author_address,
+                    may_be_unsigned = encr_only)
+            elif pgp_role():
                 raise MailUsageError, _("""
 This tracker has been configured to require all email be PGP signed or
 encrypted.""")
@@ -1155,6 +1162,72 @@ There was a problem with the message you sent:
 
         return self.nodeid
 
+        # XXX Don't enable. This doesn't work yet.
+#  "[^A-z.]tracker\+(?P<classname>[^\d\s]+)(?P<nodeid>\d+)\@some.dom.ain[^A-z.]"
+        # handle delivery to addresses like:tracker+issue25@some.dom.ain
+        # use the embedded issue number as our issue
+#            issue_re = config['MAILGW_ISSUE_ADDRESS_RE']
+#            if issue_re:
+#                for header in ['to', 'cc', 'bcc']:
+#                    addresses = message.getheader(header, '')
+#                if addresses:
+#                  # FIXME, this only finds the first match in the addresses.
+#                    issue = re.search(issue_re, addresses, 'i')
+#                    if issue:
+#                        classname = issue.group('classname')
+#                        nodeid = issue.group('nodeid')
+#                        break
+
+    # Default sequence of methods to be called on message. Use this for
+    # easier override of the default message processing
+    # list consists of tuples (method, return_if_true), the parsing
+    # returns if the return_if_true flag is set for a method *and* the
+    # method returns something that evaluates to True.
+    method_list = [
+        # Filter out messages to ignore
+        ("handle_ignore", False),
+        # Check for usage/help requests
+        ("handle_help", False),
+        # Check if the subject line is valid
+        ("check_subject", False),
+        # get importants parts from subject
+        ("parse_subject", False),
+        # check for registration OTK
+        ("rego_confirm", True),
+        # get the classname
+        ("get_classname", False),
+        # get the optional nodeid:
+        ("get_nodeid", False),
+        # Determine who the author is:
+        ("get_author_id", False),
+        # allowed to edit or create this class?
+        ("check_permissions", False),
+        # author may have been created:
+        # commit author to database and re-open as author
+        ("commit_and_reopen_as_author", False),
+        # Get the recipients list
+        ("get_recipients", False),
+        # get the new/updated node props
+        ("get_props", False),
+        # Handle PGP signed or encrypted messages
+        ("get_pgp_message", False),
+        # extract content and attachments from message body:
+        ("get_content_and_attachments", False),
+        # put attachments into files linked to the issue:
+        ("create_files", False),
+        # create the message if there's a message body (content):
+        ("create_msg", False),
+    ]
+
+
+    def parse (self):
+        for methodname, flag in self.method_list:
+            method = getattr (self, methodname)
+            ret = method()
+            if flag and ret:
+                return
+        # perform the node change / create:
+        return self.create_node()
 
 
 class MailGW:
@@ -1370,6 +1443,8 @@ class MailGW:
         # in some rare cases, a particularly stuffed-up e-mail will make
         # its way into here... try to handle it gracefully
 
+        self.parsed_message = None
+        crypt = False
         sendto = message.getaddrlist('resent-from')
         if not sendto:
             sendto = message.getaddrlist('from')
@@ -1391,6 +1466,12 @@ class MailGW:
             return self.handle_message(message)
 
         # no, we want to trap exceptions
+        # Note: by default we return the message received not the
+        # internal state of the parsedMessage -- except for
+        # MailUsageError, Unauthorized and for unknown exceptions. For
+        # the latter cases we make sure the error message is encrypted
+        # if needed (if it either was received encrypted or pgp
+        # processing is turned on for the user).
         try:
             return self.handle_message(message)
         except MailUsageHelp:
@@ -1408,12 +1489,18 @@ class MailGW:
             m.append(str(value))
             m.append('\n\nMail Gateway Help\n=================')
             m.append(fulldoc)
-            self.mailer.bounce_message(message, [sendto[0][1]], m)
+            if self.parsed_message:
+                message = self.parsed_message.message
+                crypt = self.parsed_message.crypt
+            self.mailer.bounce_message(message, [sendto[0][1]], m, crypt=crypt)
         except Unauthorized, value:
             # just inform the user that he is not authorized
             m = ['']
             m.append(str(value))
-            self.mailer.bounce_message(message, [sendto[0][1]], m)
+            if self.parsed_message:
+                message = self.parsed_message.message
+                crypt = self.parsed_message.crypt
+            self.mailer.bounce_message(message, [sendto[0][1]], m, crypt=crypt)
         except IgnoreMessage:
             # do not take any action
             # this exception is thrown when email should be ignored
@@ -1434,7 +1521,10 @@ class MailGW:
             m.append('An unexpected error occurred during the processing')
             m.append('of your message. The tracker administrator is being')
             m.append('notified.\n')
-            self.mailer.bounce_message(message, [sendto[0][1]], m)
+            if self.parsed_message:
+                message = self.parsed_message.message
+                crypt = self.parsed_message.crypt
+            self.mailer.bounce_message(message, [sendto[0][1]], m, crypt=crypt)
 
             m.append('----------------')
             m.append(traceback.format_exc())
@@ -1459,81 +1549,13 @@ class MailGW:
         The following code expects an opened database and a try/finally
         that closes the database.
         '''
-        parsed_message = self.parsed_message_class(self, message)
-
-        # Filter out messages to ignore
-        parsed_message.handle_ignore()
-        
-        # Check for usage/help requests
-        parsed_message.handle_help()
-        
-        # Check if the subject line is valid
-        parsed_message.check_subject()
-
-        # XXX Don't enable. This doesn't work yet.
-        # XXX once this works it should be moved to parsedMessage class
-#  "[^A-z.]tracker\+(?P<classname>[^\d\s]+)(?P<nodeid>\d+)\@some.dom.ain[^A-z.]"
-        # handle delivery to addresses like:tracker+issue25@some.dom.ain
-        # use the embedded issue number as our issue
-#            issue_re = config['MAILGW_ISSUE_ADDRESS_RE']
-#            if issue_re:
-#                for header in ['to', 'cc', 'bcc']:
-#                    addresses = message.getheader(header, '')
-#                if addresses:
-#                  # FIXME, this only finds the first match in the addresses.
-#                    issue = re.search(issue_re, addresses, 'i')
-#                    if issue:
-#                        classname = issue.group('classname')
-#                        nodeid = issue.group('nodeid')
-#                        break
-
-        # Parse the subject line to get the importants parts
-        parsed_message.parse_subject()
-
-        # check for registration OTK
-        if parsed_message.rego_confirm():
-            return
-
-        # get the classname
-        parsed_message.get_classname()
-
-        # get the optional nodeid
-        parsed_message.get_nodeid()
-
-        # Determine who the author is
-        parsed_message.get_author_id()
-        
-        # make sure they're allowed to edit or create this class
-        parsed_message.check_node_permissions()
-
-        # author may have been created:
-        # commit author to database and re-open as author
-        parsed_message.commit_and_reopen_as_author()
-
-        # Get the recipients list
-        parsed_message.get_recipients()
-
-        # get the new/updated node props
-        parsed_message.get_props()
-
-        # Handle PGP signed or encrypted messages
-        parsed_message.get_pgp_message()
-
-        # extract content and attachments from message body
-        parsed_message.get_content_and_attachments()
-
-        # put attachments into files linked to the issue
-        parsed_message.create_files()
-        
-        # create the message if there's a message body (content)
-        parsed_message.create_msg()
-            
-        # perform the node change / create
-        nodeid = parsed_message.create_node()
+        self.parsed_message = self.parsed_message_class(self, message)
+        nodeid = self.parsed_message.parse ()
 
         # commit the changes to the DB
         self.db.commit()
 
+        self.parsed_message = None
         return nodeid
 
     def get_class_arguments(self, class_type, classname=None):
@@ -1666,7 +1688,17 @@ def uidFromAddress(db, address, create=1, **user_props):
     props = db.user.getprops()
     if props.has_key('alternate_addresses'):
         users = db.user.filter(None, {'alternate_addresses': address})
-        user = extractUserFromList(db.user, users)
+        # We want an exact match of the email, not just a substring
+        # match. Otherwise e.g. support@example.com would match
+        # discuss-support@example.com which is not what we want.
+        found_users = []
+        for u in users:
+            alt = db.user.get(u, 'alternate_addresses').split('\n')
+            for a in alt:
+                if a.strip().lower() == address.lower():
+                    found_users.append(u)
+                    break
+        user = extractUserFromList(db.user, found_users)
         if user is not None:
             return user
 
@@ -1746,16 +1778,26 @@ def parseContent(content, keep_citations=None, keep_body=None, config=None):
     # extract out the summary from the message
     summary = ''
     l = []
-    for section in sections:
+    # find last non-empty section for signature matching
+    last_nonempty = len(sections) -1
+    while last_nonempty and not sections[last_nonempty]:
+        last_nonempty -= 1
+    for ns, section in enumerate(sections):
         #section = section.strip()
         if not section:
             continue
         lines = eol.split(section)
-        if (lines[0] and lines[0][0] in '>|') or (len(lines) > 1 and
-                lines[1] and lines[1][0] in '>|'):
+        quote_1st = lines[0] and lines[0][0] in '>|'
+        quote_2nd = len(lines) > 1 and lines[1] and lines[1][0] in '>|'
+        if quote_1st or quote_2nd:
+            # don't drop non-quoted first line of intermediate section:
+            if ns and not quote_1st and lines[0] and not keep_citations:
+                # we drop only first-lines ending in ':' (e.g. 'XXX wrote:')
+                if not lines[0].endswith(':'):
+                    l.append(lines[0])
             # see if there's a response somewhere inside this section (ie.
             # no blank line between quoted message and response)
-            for line in lines[1:]:
+            for n, line in enumerate(lines[1:]):
                 if line and line[0] not in '>|':
                     break
             else:
@@ -1764,17 +1806,19 @@ def parseContent(content, keep_citations=None, keep_body=None, config=None):
                     l.append(section)
                 continue
             # keep this section - it has reponse stuff in it
-            lines = lines[lines.index(line):]
+            if not keep_citations:
+                lines = lines[n+1:]
             section = '\n'.join(lines)
-            # and while we're at it, use the first non-quoted bit as
-            # our summary
-            summary = section
 
+        is_last = ns == last_nonempty
+        # and while we're at it, use the first non-quoted bit as
+        # our summary
         if not summary:
             # if we don't have our summary yet use the first line of this
             # section
             summary = section
-        elif signature.match(lines[0]) and 2 <= len(lines) <= 10:
+        # match signature only in last section
+        elif is_last and signature.match(lines[0]) and 2 <= len(lines) <= 10:
             # lose any signature
             break
         elif original_msg.match(lines[0]):

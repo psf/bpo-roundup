@@ -496,7 +496,7 @@ class EditCommon(Action):
                             else:
                                 props[linkprop] = nodeid
 
-        return '<br>'.join(m)
+        return '\n'.join(m)
 
     def _changenode(self, cn, nodeid, props):
         """Change the node based on the contents of the form."""
@@ -1039,14 +1039,6 @@ class ExportCSVAction(Action):
         group = request.group
         columns = request.columns
         klass = self.db.getclass(request.classname)
-
-        # validate the request
-        allprops = klass.getprops()
-        for c in filterspec.keys() + columns + [x[1] for x in group + sort]:
-            if not allprops.has_key(c):
-                # Can't use FormError, since that would try to use
-                # the same bogus field specs
-                raise exceptions.SeriousError, "Property %s does not exist" % c
 
         # validate the request
         allprops = klass.getprops()

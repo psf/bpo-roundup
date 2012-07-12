@@ -38,13 +38,12 @@ import time
 import getopt
 import traceback
 
+from roundup import __version__
 from roundup.cgi.TAL.HTMLTALParser import HTMLTALParser
 from roundup.cgi.TAL.TALInterpreter import TALInterpreter
 from roundup.cgi.TAL.DummyEngine import DummyEngine
 #from ITALES import ITALESEngine
 from roundup.cgi.TAL.TALDefs import TALESError
-
-__version__ = '$Revision: 1.6 $'
 
 pot_header = '''\
 # SOME DESCRIPTIVE TITLE.

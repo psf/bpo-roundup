@@ -1,7 +1,5 @@
 # Roundup Issue Tracker configuration support
 #
-# $Id: configuration.py,v 1.51 2008-09-01 02:30:06 richard Exp $
-#
 __docformat__ = "restructuredtext"
 
 import ConfigParser
@@ -468,6 +466,10 @@ class RegExpOption(Option):
 SETTINGS = (
     ("main", (
         (FilePathOption, "database", "db", "Database directory path."),
+        (Option, "template_engine", "zopetal",
+            "Templating engine to use.\n"
+            "Possible values are 'zopetal' for the old TAL engine\n"
+            "ported from Zope, or 'chameleon' for Chamaleon."),
         (FilePathOption, "templates", "html",
             "Path to the HTML templates directory."),
         (NullableFilePathOption, "static_files", "",
@@ -799,18 +801,44 @@ SETTINGS = (
     ), "Roundup Mail Gateway options"),
     ("pgp", (
         (BooleanOption, "enable", "no",
-            "Enable PGP processing. Requires pyme."),
+            "Enable PGP processing. Requires pyme. If you're planning\n"
+            "to send encrypted PGP mail to the tracker, you should also\n"
+            "enable the encrypt-option below, otherwise mail received\n"
+            "encrypted might be sent unencrypted to another user."),
         (NullableOption, "roles", "",
             "If specified, a comma-separated list of roles to perform\n"
             "PGP processing on. If not specified, it happens for all\n"
-            "users."),
+            "users. Note that received PGP messages (signed and/or\n"
+            "encrypted) will be processed with PGP even if the user\n"
+            "doesn't have one of the PGP roles, you can use this to make\n"
+            "PGP processing completely optional by defining a role here\n"
+            "and not assigning any users to that role."),
         (NullableOption, "homedir", "",
             "Location of PGP directory. Defaults to $HOME/.gnupg if\n"
             "not specified."),
+        (BooleanOption, "encrypt", "no",
+            "Enable PGP encryption. All outgoing mails are encrypted.\n"
+            "This requires that keys for all users (with one of the gpg\n"
+            "roles above or all users if empty) are available. Note that\n"
+            "it makes sense to educate users to also send mails encrypted\n"
+            "to the tracker, to enforce this, set 'require_incoming'\n"
+            "option below (but see the note)."),
+        (Option, "require_incoming", "signed",
+            "Require that pgp messages received by roundup are either\n"
+            "'signed', 'encrypted' or 'both'. If encryption is required\n"
+            "we do not return the message (in clear) to the user but just\n"
+            "send an informational message that the message was rejected.\n"
+            "Note that this still presents known-plaintext to an attacker\n"
+            "when the users sends the mail a second time with encryption\n"
+            "turned on."),
     ), "OpenPGP mail processing options"),
     ("nosy", (
-        (RunDetectorOption, "messages_to_author", "no",
-            "Send nosy messages to the author of the message.",
+        (Option, "messages_to_author", "no",
+            "Send nosy messages to the author of the message.\n"
+            "Allowed values: yes, no, new, nosy -- if yes, messages\n"
+            "are sent to the author even if not on the nosy list, same\n"
+            "for new (but only for new messages). When set to nosy,\n"
+            "the nosy list controls sending messages to the author.",
             ["MESSAGES_TO_AUTHOR"]),
         (Option, "signature_position", "bottom",
             "Where to place the email signature.\n"

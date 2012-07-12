@@ -7,8 +7,6 @@
 # This module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-#
-# $Id: test_cgi.py,v 1.36 2008-08-07 06:12:57 richard Exp $
 
 import unittest, os, shutil, errno, sys, difflib, cgi, re, StringIO
 
@@ -44,23 +42,30 @@ def makeForm(args):
 
 cm = client.clean_message
 class MessageTestCase(unittest.TestCase):
+    # Note: We used to allow some html tags in error message. Now *only*
+    # newlines are allowed which are translated to <br />.
+    # All other tags are escaped.
     def testCleanMessageOK(self):
-        self.assertEqual(cm('<br>x<br />'), '<br>x<br />')
-        self.assertEqual(cm('<i>x</i>'), '<i>x</i>')
-        self.assertEqual(cm('<b>x</b>'), '<b>x</b>')
-        self.assertEqual(cm('<a href="y">x</a>'),
-            '<a href="y">x</a>')
-        self.assertEqual(cm('<BR>x<BR />'), '<BR>x<BR />')
-        self.assertEqual(cm('<I>x</I>'), '<I>x</I>')
-        self.assertEqual(cm('<B>x</B>'), '<B>x</B>')
-        self.assertEqual(cm('<A HREF="y">x</A>'),
-            '<A HREF="y">x</A>')
+        self.assertEqual(cm('a\nb'), 'a<br />\nb')
+        self.assertEqual(cm('a\nb\nc\n'), 'a<br />\nb<br />\nc<br />\n')
 
     def testCleanMessageBAD(self):
         self.assertEqual(cm('<script>x</script>'),
             '&lt;script&gt;x&lt;/script&gt;')
         self.assertEqual(cm('<iframe>x</iframe>'),
             '&lt;iframe&gt;x&lt;/iframe&gt;')
+        self.assertEqual(cm('<<script >>alert(42);5<</script >>'),
+            '&lt;&lt;script &gt;&gt;alert(42);5&lt;&lt;/script &gt;&gt;')
+        self.assertEqual(cm('<a href="y">x</a>'),
+            '&lt;a href="y"&gt;x&lt;/a&gt;')
+        self.assertEqual(cm('<A HREF="y">x</A>'),
+            '&lt;A HREF="y"&gt;x&lt;/A&gt;')
+        self.assertEqual(cm('<br>x<br />'), '&lt;br&gt;x&lt;br /&gt;')
+        self.assertEqual(cm('<i>x</i>'), '&lt;i&gt;x&lt;/i&gt;')
+        self.assertEqual(cm('<b>x</b>'), '&lt;b&gt;x&lt;/b&gt;')
+        self.assertEqual(cm('<BR>x<BR />'), '&lt;BR&gt;x&lt;BR /&gt;')
+        self.assertEqual(cm('<I>x</I>'), '&lt;I&gt;x&lt;/I&gt;')
+        self.assertEqual(cm('<B>x</B>'), '&lt;B&gt;x&lt;/B&gt;')
 
 class FormTestCase(unittest.TestCase):
     def setUp(self):
@@ -925,6 +930,16 @@ class FormTestCase(unittest.TestCase):
             '8,resolved\r\n',
             output.getvalue())
 
+    def testCSVExportBadColumnName(self):
+        cl = self._make_client({'@columns': 'falseid,name'}, nodeid=None,
+            userid='1')
+        cl.classname = 'status'
+        output = StringIO.StringIO()
+        cl.request = MockNull()
+        cl.request.wfile = output
+        self.assertRaises(exceptions.SeriousError,
+            actions.ExportCSVAction(cl).handle)
+
     def testCSVExportFailPermission(self):
         cl = self._make_client({'@columns': 'id,email,password'}, nodeid=None,
             userid='2')
@@ -932,6 +947,8 @@ class FormTestCase(unittest.TestCase):
         output = StringIO.StringIO()
         cl.request = MockNull()
         cl.request.wfile = output
+        # used to be self.assertRaises(exceptions.Unauthorised,
+        # but not acting like the column name is not found
         self.assertRaises(exceptions.SeriousError,
             actions.ExportCSVAction(cl).handle)
 
