@@ -15,7 +15,6 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: hyperdb.py,v 1.131 2007-09-27 06:18:53 jpend Exp $
 
 """Hyperdatabase implementation, especially field types.
 """
@@ -23,7 +22,8 @@ __docformat__ = 'restructuredtext'
 
 # standard python modules
 import os, re, shutil, weakref
-from sets import Set
+# Python 2.3 ... 2.6 compatibility:
+from roundup.anypy.sets_ import set
 
 # roundup modules
 import date, password
@@ -53,8 +53,12 @@ class String(_Type):
     def __init__(self, indexme='no', required=False):
         super(String, self).__init__(required)
         self.indexme = indexme == 'yes'
-    def from_raw(self, value, **kw):
+    def from_raw(self, value, propname='', **kw):
         """fix the CRLF/CR -> LF stuff"""
+        if propname == 'content':
+            # Why oh why wasn't the FileClass content property a File
+            # type from the beginning?
+            return value
         return fixNewlines(value)
     def sort_repr (self, cls, val, name):
         if not val:
@@ -133,8 +137,8 @@ class _Pointer(_Type):
     """An object designating a Pointer property that links or multilinks
     to a node in a specified class."""
     def __init__(self, classname, do_journal='yes', required=False):
-        ''' Default is to journal link and unlink events
-        '''
+        """ Default is to journal link and unlink events
+        """
         super(_Pointer, self).__init__(required)
         self.classname = classname
         self.do_journal = do_journal == 'yes'
@@ -190,7 +194,7 @@ class Multilink(_Pointer):
         # definitely in the new list (in case of e.g.
         # <propname>=A,+B, which should replace the old
         # list with A,B)
-        set = 1
+        do_set = 1
         newvalue = []
         for item in value:
             item = item.strip()
@@ -203,10 +207,10 @@ class Multilink(_Pointer):
             if item.startswith('-'):
                 remove = 1
                 item = item[1:]
-                set = 0
+                do_set = 0
             elif item.startswith('+'):
                 item = item[1:]
-                set = 0
+                do_set = 0
 
             # look up the value
             itemid = convertLinkValue(db, propname, self, item)
@@ -225,7 +229,7 @@ class Multilink(_Pointer):
 
         # that's it, set the new Multilink property value,
         # or overwrite it completely
-        if set:
+        if do_set:
             value = newvalue
         else:
             value = curvalue
@@ -269,15 +273,15 @@ class Number(_Type):
 class DesignatorError(ValueError):
     pass
 def splitDesignator(designator, dre=re.compile(r'([^\d]+)(\d+)')):
-    ''' Take a foo123 and return ('foo', 123)
-    '''
+    """ Take a foo123 and return ('foo', 123)
+    """
     m = dre.match(designator)
     if m is None:
         raise DesignatorError, _('"%s" not a node designator')%designator
     return m.group(1), m.group(2)
 
 class Proptree(object):
-    ''' Simple tree data structure for optimizing searching of
+    """ Simple tree data structure for optimizing searching of
     properties. Each node in the tree represents a roundup Class
     Property that has to be navigated for finding the given search
     or sort properties. The sort_type attribute is used for
@@ -289,7 +293,7 @@ class Proptree(object):
     The Proptree is also used for transitively searching attributes for
     backends that do not support transitive search (e.g. anydbm). The
     _val attribute with set_val is used for this.
-    '''
+    """
 
     def __init__(self, db, cls, name, props, parent = None):
         self.db = db
@@ -484,7 +488,7 @@ class Proptree(object):
             v = self._val
             if not isinstance(self._val, type([])):
                 v = [self._val]
-            vals = Set(v)
+            vals = set(v)
             vals.intersection_update(val)
             self._val = [v for v in vals]
         else:
@@ -561,11 +565,11 @@ class Proptree(object):
 # the base Database class
 #
 class DatabaseError(ValueError):
-    '''Error to be raised when there is some problem in the database code
-    '''
+    """Error to be raised when there is some problem in the database code
+    """
     pass
 class Database:
-    '''A database for storing records containing flexible data types.
+    """A database for storing records containing flexible data types.
 
 This class defines a hyperdatabase storage layer, which the Classes use to
 store their data.
@@ -588,7 +592,7 @@ Implementation
 
 All methods except __repr__ must be implemented by a concrete backend Database.
 
-'''
+"""
 
     # flag to set on retired entries
     RETIRED_FLAG = '__hyperdb_retired'
@@ -630,8 +634,8 @@ All methods except __repr__ must be implemented by a concrete backend Database.
         raise NotImplementedError
 
     def addclass(self, cl):
-        '''Add a Class to the hyperdatabase.
-        '''
+        """Add a Class to the hyperdatabase.
+        """
         raise NotImplementedError
 
     def getclasses(self):
@@ -646,14 +650,14 @@ All methods except __repr__ must be implemented by a concrete backend Database.
         raise NotImplementedError
 
     def clear(self):
-        '''Delete all database contents.
-        '''
+        """Delete all database contents.
+        """
         raise NotImplementedError
 
     def getclassdb(self, classname, mode='r'):
-        '''Obtain a connection to the class db that will be used for
+        """Obtain a connection to the class db that will be used for
            multiple actions.
-        '''
+        """
         raise NotImplementedError
 
     def addnode(self, classname, nodeid, node):
@@ -662,73 +666,73 @@ All methods except __repr__ must be implemented by a concrete backend Database.
         raise NotImplementedError
 
     def serialise(self, classname, node):
-        '''Copy the node contents, converting non-marshallable data into
+        """Copy the node contents, converting non-marshallable data into
            marshallable data.
-        '''
+        """
         return node
 
     def setnode(self, classname, nodeid, node):
-        '''Change the specified node.
-        '''
+        """Change the specified node.
+        """
         raise NotImplementedError
 
     def unserialise(self, classname, node):
-        '''Decode the marshalled node data
-        '''
+        """Decode the marshalled node data
+        """
         return node
 
     def getnode(self, classname, nodeid):
-        '''Get a node from the database.
+        """Get a node from the database.
 
         'cache' exists for backwards compatibility, and is not used.
-        '''
+        """
         raise NotImplementedError
 
     def hasnode(self, classname, nodeid):
-        '''Determine if the database has a given node.
-        '''
+        """Determine if the database has a given node.
+        """
         raise NotImplementedError
 
     def countnodes(self, classname):
-        '''Count the number of nodes that exist for a particular Class.
-        '''
+        """Count the number of nodes that exist for a particular Class.
+        """
         raise NotImplementedError
 
     def storefile(self, classname, nodeid, property, content):
-        '''Store the content of the file in the database.
+        """Store the content of the file in the database.
 
            The property may be None, in which case the filename does not
            indicate which property is being saved.
-        '''
+        """
         raise NotImplementedError
 
     def getfile(self, classname, nodeid, property):
-        '''Store the content of the file in the database.
-        '''
+        """Get the content of the file in the database.
+        """
         raise NotImplementedError
 
     def addjournal(self, classname, nodeid, action, params):
-        ''' Journal the Action
+        """ Journal the Action
         'action' may be:
 
             'create' or 'set' -- 'params' is a dictionary of property values
             'link' or 'unlink' -- 'params' is (classname, nodeid, propname)
             'retire' -- 'params' is None
-        '''
+        """
         raise NotImplementedError
 
     def getjournal(self, classname, nodeid):
-        ''' get the journal for id
-        '''
+        """ get the journal for id
+        """
         raise NotImplementedError
 
     def pack(self, pack_before):
-        ''' pack the database
-        '''
+        """ pack the database
+        """
         raise NotImplementedError
 
     def commit(self):
-        ''' Commit the current transactions.
+        """ Commit the current transactions.
 
         Save all data changed since the database was opened or since the
         last commit() or rollback().
@@ -738,15 +742,15 @@ All methods except __repr__ must be implemented by a concrete backend Database.
         database. We don't care if there's a concurrency issue there.
 
         The only backend this seems to affect is postgres.
-        '''
+        """
         raise NotImplementedError
 
     def rollback(self):
-        ''' Reverse all actions from the current transaction.
+        """ Reverse all actions from the current transaction.
 
         Undo all the changes made since the database was opened or the last
         commit() or rollback() was performed.
-        '''
+        """
         raise NotImplementedError
 
     def close(self):
@@ -794,8 +798,8 @@ class Class:
         self.reactors = dict([(a, PrioList()) for a in actions])
 
     def __repr__(self):
-        '''Slightly more useful representation
-        '''
+        """Slightly more useful representation
+        """
         return '<hyperdb.Class "%s">'%self.classname
 
     # Editing nodes:
@@ -833,18 +837,18 @@ class Class:
 
     # not in spec
     def getnode(self, nodeid):
-        ''' Return a convenience wrapper for the node.
+        """ Return a convenience wrapper for the node.
 
         'nodeid' must be the id of an existing node of this class or an
         IndexError is raised.
 
         'cache' exists for backwards compatibility, and is not used.
-        '''
+        """
         return Node(self, nodeid)
 
     def getnodeids(self, retired=None):
-        '''Retrieve all the ids of the nodes for a particular Class.
-        '''
+        """Retrieve all the ids of the nodes for a particular Class.
+        """
         raise NotImplementedError
 
     def set(self, nodeid, **propvalues):
@@ -879,15 +883,15 @@ class Class:
         raise NotImplementedError
 
     def restore(self, nodeid):
-        '''Restpre a retired node.
+        """Restpre a retired node.
 
         Make node available for all operations like it was before retirement.
-        '''
+        """
         raise NotImplementedError
 
     def is_retired(self, nodeid):
-        '''Return true if the node is rerired
-        '''
+        """Return true if the node is rerired
+        """
         raise NotImplementedError
 
     def destroy(self, nodeid):
@@ -928,8 +932,8 @@ class Class:
 
     # Locating nodes:
     def hasnode(self, nodeid):
-        '''Determine if the given nodeid actually exists
-        '''
+        """Determine if the given nodeid actually exists
+        """
         raise NotImplementedError
 
     def setkey(self, propname):
@@ -1125,7 +1129,7 @@ class Class:
         backward-compatibility reasons a single (dir, prop) tuple is
         also allowed.
 
-        "search_matches" is {nodeid: marker}
+        "search_matches" is a container type
 
         The filter must match all properties specificed. If the property
         value to match is a list:
@@ -1226,11 +1230,11 @@ class Class:
 
 
 class HyperdbValueError(ValueError):
-    ''' Error converting a raw value into a Hyperdb value '''
+    """ Error converting a raw value into a Hyperdb value """
     pass
 
 def convertLinkValue(db, propname, prop, value, idre=re.compile('^\d+$')):
-    ''' Convert the link value (may be id or key value) to an id value. '''
+    """ Convert the link value (may be id or key value) to an id value. """
     linkcl = db.classes[prop.classname]
     if not idre.match(value):
         if linkcl.getkey():
@@ -1255,14 +1259,14 @@ def fixNewlines(text):
     return text.replace('\r', '\n')
 
 def rawToHyperdb(db, klass, itemid, propname, value, **kw):
-    ''' Convert the raw (user-input) value to a hyperdb-storable value. The
+    """ Convert the raw (user-input) value to a hyperdb-storable value. The
         value is for the "propname" property on itemid (may be None for a
         new item) of "klass" in "db".
 
         The value is usually a string, but in the case of multilink inputs
         it may be either a list of strings or a string with comma-separated
         values.
-    '''
+    """
     properties = klass.getprops()
 
     # ensure it's a valid property name
@@ -1284,21 +1288,21 @@ def rawToHyperdb(db, klass, itemid, propname, value, **kw):
     return value
 
 class FileClass:
-    ''' A class that requires the "content" property and stores it on
+    """ A class that requires the "content" property and stores it on
         disk.
-    '''
+    """
     default_mime_type = 'text/plain'
 
     def __init__(self, db, classname, **properties):
-        '''The newly-created class automatically includes the "content"
+        """The newly-created class automatically includes the "content"
         property.
-        '''
+        """
         if not properties.has_key('content'):
             properties['content'] = String(indexme='yes')
 
     def export_propnames(self):
-        ''' Don't export the "content" property
-        '''
+        """ Don't export the "content" property
+        """
         propnames = self.getprops().keys()
         propnames.remove('content')
         propnames.sort()
@@ -1309,8 +1313,8 @@ class FileClass:
         return os.path.join(dirname, self.classname+'-files', subdir_filename)
 
     def export_files(self, dirname, nodeid):
-        ''' Export the "content" property as a file, not csv column
-        '''
+        """ Export the "content" property as a file, not csv column
+        """
         source = self.db.filename(self.classname, nodeid)
 
         dest = self.exportFilename(dirname, nodeid)
@@ -1318,8 +1322,8 @@ class FileClass:
         shutil.copyfile(source, dest)
 
     def import_files(self, dirname, nodeid):
-        ''' Import the "content" property as a file
-        '''
+        """ Import the "content" property as a file
+        """
         source = self.exportFilename(dirname, nodeid)
 
         dest = self.db.filename(self.classname, nodeid, create=1)
@@ -1337,8 +1341,8 @@ class FileClass:
                 self.get(nodeid, 'content'), mime_type)
 
 class Node:
-    ''' A convenience wrapper for the given node
-    '''
+    """ A convenience wrapper for the given node
+    """
     def __init__(self, cl, nodeid, cache=1):
         self.__dict__['cl'] = cl
         self.__dict__['nodeid'] = nodeid
@@ -1388,8 +1392,8 @@ class Node:
 
 
 def Choice(name, db, *options):
-    '''Quick helper to create a simple class with choices
-    '''
+    """Quick helper to create a simple class with choices
+    """
     cl = Class(db, name, name=String(), order=String())
     for i in range(len(options)):
         cl.create(name=options[i], order=i)

@@ -1,6 +1,6 @@
 # Roundup Issue Tracker configuration support
 #
-# $Id: configuration.py,v 1.50 2007-11-14 14:57:47 schlatterbeck Exp $
+# $Id: configuration.py,v 1.51 2008-09-01 02:30:06 richard Exp $
 #
 __docformat__ = "restructuredtext"
 
@@ -370,7 +370,7 @@ class OctalNumberOption(Option):
 
 class NullableOption(Option):
 
-    """Option that is set to None if it's string value is one of NULL strings
+    """Option that is set to None if its string value is one of NULL strings
 
     Default nullable strings list contains empty string only.
     There is constructor parameter allowing to specify different nullables.
@@ -478,12 +478,16 @@ SETTINGS = (
             "specified above.  If this option is not set, all static\n"
             "files are taken from the TEMPLATES directory"),
         (MailAddressOption, "admin_email", "roundup-admin",
-            "Email address that roundup will complain to"
-            " if it runs into trouble."),
+            "Email address that roundup will complain to if it runs\n"
+            "into trouble.\n"
+            "If no domain is specified then the config item\n"
+            "mail -> domain is added."),
         (MailAddressOption, "dispatcher_email", "roundup-admin",
             "The 'dispatcher' is a role that can get notified\n"
             "of new items to the database.\n"
-            "It is used by the ERROR_MESSAGES_TO config setting."),
+            "It is used by the ERROR_MESSAGES_TO config setting.\n"
+            "If no domain is specified then the config item\n"
+            "mail -> domain is added."),
         (Option, "email_from_tag", "",
             "Additional text to include in the \"name\" part\n"
             "of the From: address used in nosy messages.\n"
@@ -538,7 +542,8 @@ SETTINGS = (
             "that is required to get to the home page of the tracker.\n"
             "You MUST include a trailing '/' in the URL."),
         (MailAddressOption, "email", "issue_tracker",
-            "Email address that mail to roundup should go to."),
+            "Email address that mail to roundup should go to.\n"
+            "If no domain is specified then mail_domain is added."),
         (NullableOption, "language", "",
             "Default locale name for this tracker.\n"
             "If this option is not set, the language is determined\n"
@@ -546,6 +551,11 @@ SETTINGS = (
             "or LANG, in that order of preference."),
     )),
     ("web", (
+        (BooleanOption, "allow_html_file", "no",
+            "Setting this option enables Roundup to serve uploaded HTML\n"
+            "file content *as HTML*. This is a potential security risk\n"
+            "and is therefore disabled by default. Set to 'yes' if you\n"
+            "trust *all* users uploading content to your tracker."),
         (BooleanOption, 'http_auth', "yes",
             "Whether to use HTTP Basic Authentication, if present.\n"
             "Roundup will use either the REMOTE_USER or HTTP_AUTHORIZATION\n"
@@ -587,8 +597,10 @@ SETTINGS = (
         (NullableOption, 'read_default_group', 'roundup',
             "Name of the group to use in the MySQL defaults file (.my.cnf).\n"
             "Only used in MySQL connections."),
+        (IntegerNumberOption, 'cache_size', '100',
+            "Size of the node cache (in elements)"),
     ), "Settings in this section are used"
-        " by Postgresql and MySQL backends only"
+        " by RDBMS backends only"
     ),
     ("logging", (
         (FilePathOption, "config", "",
@@ -606,7 +618,12 @@ SETTINGS = (
             "Allowed values: DEBUG, INFO, WARNING, ERROR"),
     )),
     ("mail", (
-        (Option, "domain", NODEFAULT, "Domain name used for email addresses."),
+        (Option, "domain", NODEFAULT,
+            "The email domain that admin_email, issue_tracker and\n"
+            "dispatcher_email belong to.\n"
+            "This domain is added to those config items if they don't\n"
+            "explicitly include a domain.\n"
+            "Do not include the '@' symbol."),
         (Option, "host", NODEFAULT,
             "SMTP mail host that roundup will use to send mail",
             ["MAILHOST"],),
@@ -864,7 +881,7 @@ class Config:
             _options.append(_name)
         # (section, name) key is used for writing .ini file
         self.options[(_section, _name)] = option
-        # make the option known under all of it's A.K.A.s
+        # make the option known under all of its A.K.A.s
         for _name in option.aliases:
             self.options[_name] = option
 

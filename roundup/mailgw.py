@@ -73,13 +73,15 @@ are calling the create() method to create a new node). If an auditor raises
 an exception, the original message is bounced back to the sender with the
 explanatory message given in the exception.
 
-$Id: mailgw.py,v 1.195 2008-02-07 03:33:31 richard Exp $
+$Id: mailgw.py,v 1.196 2008-07-23 03:04:44 richard Exp $
 """
 __docformat__ = 'restructuredtext'
 
 import string, re, os, mimetools, cStringIO, smtplib, socket, binascii, quopri
 import time, random, sys, logging
 import traceback, MimeWriter, rfc822
+
+from email.Header import decode_header
 
 from roundup import configuration, hyperdb, date, password, rfc2822, exceptions
 from roundup.mailer import Mailer, MessageSendError
@@ -261,9 +263,30 @@ class Message(mimetools.Message):
 
     def getheader(self, name, default=None):
         hdr = mimetools.Message.getheader(self, name, default)
+        if not hdr:
+            return ''
         if hdr:
             hdr = hdr.replace('\n','') # Inserted by rfc822.readheaders
-        return rfc2822.decode_header(hdr)
+        # historically this method has returned utf-8 encoded string
+        l = []
+        for part, encoding in decode_header(hdr):
+            if encoding:
+                part = part.decode(encoding)
+            l.append(part)
+        return ''.join([s.encode('utf-8') for s in l])
+
+    def getaddrlist(self, name):
+        # overload to decode the name part of the address
+        l = []
+        for (name, addr) in mimetools.Message.getaddrlist(self, name):
+            p = []
+            for part, encoding in decode_header(name):
+                if encoding:
+                    part = part.decode(encoding)
+                p.append(part)
+            name = ''.join([s.encode('utf-8') for s in p])
+            l.append((name, addr))
+        return l
 
     def getname(self):
         """Find an appropriate name for this message."""
@@ -348,7 +371,7 @@ class Message(mimetools.Message):
 
     def extract_content(self, parent_type=None, ignore_alternatives = False):
         """Extract the body and the attachments recursively.
-        
+
            If the content is hidden inside a multipart/alternative part,
            we use the *last* text/plain part of the *first*
            multipart/alternative in the whole message.
@@ -768,7 +791,7 @@ class MailGW:
             m.append('An unexpected error occurred during the processing')
             m.append('of your message. The tracker administrator is being')
             m.append('notified.\n')
-            self.mailer.bounce_message(message, sendto[0][1], m)
+            self.mailer.bounce_message(message, [sendto[0][1]], m)
 
             m.append('----------------')
             m.append(traceback.format_exc())

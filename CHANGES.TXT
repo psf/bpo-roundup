@@ -1,7 +1,78 @@
 This file contains the changes to the Roundup system over time. The entries
 are given with the most recent entry first.
 
-2008-02-07 1.4.2
+2009-03-13 1.4.7 (r4202)
+
+Features:
+- Provide a "no selection" option in web interface selection widgets
+- Debug logging now uses the logging module rather than print
+- Allow CGI frontend to serve XMLRPC requests.
+- Added XMLRPC actions, as well as bridging CGI actions to XMLRPC actions.
+- Optimized large file serving via mod_python / sendfile().
+- Support resuming downloads for (large) files.
+
+Fixes:
+- a number of security issues were discovered by Daniel Diniz
+- EditCSV and ExportCSV altered to include permission checks
+- HTTP POST required on actions which alter data
+- HTML file uploads served as application/octet-stream
+- Handle Unauthorised in file serving correctly
+- New item action reject creation of new users
+- Item retirement was not being controlled
+- Roundup is now compatible with Python 2.6
+- Improved French and German translations
+- Improve consistency of item sorting in HTML interface
+- Various other small bug fixes, robustification and optimisation
+
+
+2008-09-01 1.4.6
+Fixed:
+- Fix bug introduced in 1.4.5 in RDBMS full-text indexing
+- Make URL matching code less matchy
+- Try to clarify mail_domain config setting
+
+
+2008-08-19 1.4.5
+Feature:
+- Add use of username/password stored in ~/.netrc in mailgw (sf patch
+  #1912105)
+
+Fixed:
+- 'Make a Copy' failed with more than one person in nosy list (sf #1906147)
+- xml-rpc security checks and tests across all backends (sf #1907211)
+- Send a Precedence header in email so (well-written) autoresponders don't
+- Fix mailgw total failure bounce message generation (thanks Bradley Dean)
+- Fix for postgres 8.3 compatibility (and bug) (sf patch #2030479 and bug
+  #1959261)
+- Fix for translations (sf patch #2032526)
+- Fire reactors after file storage is all done (sf patch #2001243)
+- Allow negative ids other than -1 for item generation (sf patch #1982481)
+- Better German translation for retiring users (sf #1998701)
+- More improvements to German translation (sf #1919446)
+- Add filter() to XML-RPC interface (sf patch #1966456)
+- Fix IndexError when there are no messages to an issue (sf patch #1894249)
+- Prevent broken pipe errors in csv export (sf patch #1911449)
+- New session API and cleanup thanks anatoly t.
+- Make WSGI handler threadsafe (sf #1968027)
+- Improved URL matching RE (sf #2038858)
+- Allow binary file content submission via XML-RPC (sf #1995623)
+- Don't run old code on newer database (sf #1979556)
+- Fix HTML injection into page title
+- Fix indexer handling of indexed Link properties (sf #1936876)
+
+
+2008-03-01 1.4.4
+Fixed:
+- Security fixes (thanks Roland Meister)
+
+
+2008-02-27 1.4.3
+Fixed:
+- MySQL backend bug introduced in 1.4.2 (TEXT columns need a size when
+  being indexed)
+
+
+2008-02-08 1.4.2
 Feature:
 - New config option in mail section: ignore_alternatives allows to
   ignore alternatives besides the text/plain part used for the content

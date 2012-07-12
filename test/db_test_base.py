@@ -15,9 +15,11 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: db_test_base.py,v 1.96 2008-02-07 03:28:34 richard Exp $
+# $Id: db_test_base.py,v 1.101 2008-08-19 01:40:59 richard Exp $
 
-import unittest, os, shutil, errno, imp, sys, time, pprint, sets, base64, os.path
+import unittest, os, shutil, errno, imp, sys, time, pprint, base64, os.path
+# Python 2.3 ... 2.6 compatibility:
+from roundup.anypy.sets_ import set
 
 from roundup.hyperdb import String, Password, Link, Multilink, Date, \
     Interval, DatabaseError, Boolean, Number, Node
@@ -55,13 +57,18 @@ def setupTracker(dirname, backend="anydbm"):
     except OSError, error:
         if error.errno not in (errno.ENOENT, errno.ESRCH): raise
     # create the instance
-    init.install(dirname, os.path.join(os.path.dirname(__file__), '..',
-        'templates/classic'))
+    init.install(dirname, os.path.join(os.path.dirname(__file__),
+                                       '..',
+                                       'share',
+                                       'roundup',
+                                       'templates',
+                                       'classic'))
     init.write_select_db(dirname, backend)
     config.save(os.path.join(dirname, 'config.ini'))
     tracker = instance.open(dirname)
     if tracker.exists():
         tracker.nuke()
+        init.write_select_db(dirname, backend)
     tracker.init(password.Password('sekrit'))
     return tracker
 
@@ -80,7 +87,8 @@ def setupSchema(db, create, module):
     issue = module.IssueClass(db, "issue", title=String(indexme="yes"),
         status=Link("status"), nosy=Multilink("user"), deadline=Date(),
         foo=Interval(), files=Multilink("file"), assignedto=Link('user'),
-        priority=Link('priority'), spam=Multilink('msg'))
+        priority=Link('priority'), spam=Multilink('msg'),
+        feedback=Link('msg'))
     stuff = module.Class(db, "stuff", stuff=String())
     session = module.Class(db, 'session', title=String())
     msg = module.FileClass(db, "msg", date=Date(),
@@ -288,12 +296,12 @@ class DBTest(MyTestCase):
             if commit: self.db.commit()
             self.assertEqual(self.db.issue.get(nid, "nosy"), [])
             # make sure we accept a frozen set
-            self.db.issue.set(nid, nosy=frozenset([u1,u2]))
+            self.db.issue.set(nid, nosy=set([u1,u2]))
             if commit: self.db.commit()
             l = [u1,u2]; l.sort()
             m = self.db.issue.get(nid, "nosy"); m.sort()
             self.assertEqual(l, m)
-       
+
 
 # XXX one day, maybe...
 #    def testMultilinkOrdering(self):
@@ -328,6 +336,19 @@ class DBTest(MyTestCase):
                 if commit: self.db.commit()
                 c = self.db.issue.get(nid, "deadline")
                 self.assertEqual(c, d)
+
+    def testDateLeapYear(self):
+        nid = self.db.issue.create(title='spam', status='1',
+            deadline=date.Date('2008-02-29'))
+        self.assertEquals(str(self.db.issue.get(nid, 'deadline')),
+            '2008-02-29.00:00:00')
+        self.assertEquals(self.db.issue.filter(None,
+            {'deadline': '2008-02-29'}), [nid])
+        self.db.issue.set(nid, deadline=date.Date('2008-03-01'))
+        self.assertEquals(str(self.db.issue.get(nid, 'deadline')),
+            '2008-03-01.00:00:00')
+        self.assertEquals(self.db.issue.filter(None,
+            {'deadline': '2008-02-29'}), [])
 
     def testDateUnset(self):
         for commit in (0,1):
@@ -468,12 +489,12 @@ class DBTest(MyTestCase):
         others = nodeids[:]
         others.remove('1')
 
-        self.assertEqual(sets.Set(self.db.status.getnodeids()),
-            sets.Set(nodeids))
-        self.assertEqual(sets.Set(self.db.status.getnodeids(retired=True)),
-            sets.Set(['1']))
-        self.assertEqual(sets.Set(self.db.status.getnodeids(retired=False)),
-            sets.Set(others))
+        self.assertEqual(set(self.db.status.getnodeids()),
+            set(nodeids))
+        self.assertEqual(set(self.db.status.getnodeids(retired=True)),
+            set(['1']))
+        self.assertEqual(set(self.db.status.getnodeids(retired=False)),
+            set(others))
 
         self.assert_(self.db.status.is_retired('1'))
 
@@ -843,6 +864,15 @@ class DBTest(MyTestCase):
 
         # unindexed stopword
         self.assertEquals(self.db.indexer.search(['the'], self.db.issue), {})
+
+    def testIndexerSearchingLink(self):
+        m1 = self.db.msg.create(content="one two")
+        i1 = self.db.issue.create(messages=[m1])
+        m2 = self.db.msg.create(content="two three")
+        i2 = self.db.issue.create(feedback=m2)
+        self.db.commit()
+        self.assertEquals(self.db.indexer.search(['two'], self.db.issue),
+            {i1: {'messages': [m1]}, i2: {'feedback': [m2]}})
 
     def testIndexerSearchMulti(self):
         m1 = self.db.msg.create(content="one two")
@@ -1711,7 +1741,7 @@ class DBTest(MyTestCase):
         keys = props.keys()
         keys.sort()
         self.assertEqual(keys, ['activity', 'actor', 'assignedto', 'creation',
-            'creator', 'deadline', 'files', 'fixer', 'foo', 'id', 'messages',
+            'creator', 'deadline', 'feedback', 'files', 'fixer', 'foo', 'id', 'messages',
             'nosy', 'priority', 'spam', 'status', 'superseder', 'title'])
         self.assertEqual(self.db.issue.get('1', "fixer"), None)
 
@@ -1725,7 +1755,7 @@ class DBTest(MyTestCase):
         keys = props.keys()
         keys.sort()
         self.assertEqual(keys, ['activity', 'actor', 'assignedto', 'creation',
-            'creator', 'deadline', 'files', 'foo', 'id', 'messages',
+            'creator', 'deadline', 'feedback', 'files', 'foo', 'id', 'messages',
             'nosy', 'priority', 'spam', 'status', 'superseder'])
         self.assertEqual(self.db.issue.list(), ['1'])
 
@@ -1740,8 +1770,8 @@ class DBTest(MyTestCase):
         keys = props.keys()
         keys.sort()
         self.assertEqual(keys, ['activity', 'actor', 'assignedto', 'creation',
-            'creator', 'deadline', 'files', 'fixer', 'foo', 'id', 'messages',
-            'nosy', 'priority', 'spam', 'status', 'superseder'])
+            'creator', 'deadline', 'feedback', 'files', 'fixer', 'foo', 'id',
+            'messages', 'nosy', 'priority', 'spam', 'status', 'superseder'])
         self.assertEqual(self.db.issue.list(), ['1'])
 
     def testNosyMail(self) :
@@ -1763,16 +1793,16 @@ class DBTest(MyTestCase):
                 messages = [m], nosy = [db.user.lookup("fred")])
 
             db.issue.nosymessage(i, m, {})
-            mail_msg = res["mail_msg"].getvalue()
+            mail_msg = str(res["mail_msg"])
             self.assertEqual(res["mail_to"], ["fred@example.com"])
             self.failUnless("From: admin" in mail_msg)
             self.failUnless("Subject: [issue1] spam" in mail_msg)
             self.failUnless("New submission from admin" in mail_msg)
             self.failUnless("one two" in mail_msg)
             self.failIf("File 'test1.txt' not attached" in mail_msg)
-            self.failUnless(base64.b64encode("xxx") in mail_msg)
+            self.failUnless(base64.encodestring("xxx").rstrip() in mail_msg)
             self.failUnless("File 'test2.txt' not attached" in mail_msg)
-            self.failIf(base64.b64encode("yyy") in mail_msg)
+            self.failIf(base64.encodestring("yyy").rstrip() in mail_msg)
         finally :
             Mailer.smtp_send = backup
 
@@ -2026,7 +2056,7 @@ class SchemaTest(MyTestCase):
         self.db.getjournal('a', aid)
 
 class RDBMSTest:
-    ''' tests specific to RDBMS backends '''
+    """ tests specific to RDBMS backends """
     def test_indexTest(self):
         self.assertEqual(self.db.sql_index_exists('_issue', '_issue_id_idx'), 1)
         self.assertEqual(self.db.sql_index_exists('_issue', '_issue_x_idx'), 0)

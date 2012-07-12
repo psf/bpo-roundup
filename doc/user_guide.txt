@@ -2,8 +2,6 @@
 User Guide
 ==========
 
-:Version: $Revision: 1.37 $
-
 .. contents::
 
 .. hint::
@@ -479,8 +477,13 @@ Sender identification
 
 If the sender of an e-mail is unknown to Roundup (looking up both user
 primary e-mail addresses and their alternate addresses) then a new user
-will be created. The new user will have their username set to the "user"
-part of "user@domain" in their e-mail address. Their password will be
+may be created, depending on tracker configuration (see the `Admin
+Guide`_ section "Users and Security" for configuration details.)
+
+.. _`Admin Guide`: admin_guide.html
+
+The new user will have their username set to the "user" part of
+"user@domain" in their e-mail address. Their password will be
 completely randomised, and they'll have to visit the web interface to
 have it changed. Some sites don't allow web access by users who register
 via e-mail like this.
@@ -799,9 +802,3 @@ Also the tautological::
 Remember the roundup commands that accept multiple designators accept
 them ',' separated so using '-dc' is almost always required.
 
------------------
-
-Back to `Table of Contents`_
-
-.. _`Table of Contents`: index.html
-.. _`customisation documentation`: customizing.html

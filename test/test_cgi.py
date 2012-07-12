@@ -8,7 +8,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 #
-# $Id: test_cgi.py,v 1.33 2007-10-05 03:07:14 richard Exp $
+# $Id: test_cgi.py,v 1.36 2008-08-07 06:12:57 richard Exp $
 
 import unittest, os, shutil, errno, sys, difflib, cgi, re
 
@@ -77,7 +77,7 @@ class FormTestCase(unittest.TestCase):
             string=hyperdb.String(), number=hyperdb.Number(),
             boolean=hyperdb.Boolean(), link=hyperdb.Link('test'),
             multilink=hyperdb.Multilink('test'), date=hyperdb.Date(),
-            interval=hyperdb.Interval())
+            messages=hyperdb.Multilink('msg'), interval=hyperdb.Interval())
 
         # compile the labels re
         classes = '|'.join(self.db.classes.keys())
@@ -85,10 +85,11 @@ class FormTestCase(unittest.TestCase):
             re.VERBOSE)
 
     def parseForm(self, form, classname='test', nodeid=None):
-        cl = client.Client(self.instance, None, {'PATH_INFO':'/'},
-            makeForm(form))
+        cl = client.Client(self.instance, None, {'PATH_INFO':'/',
+            'REQUEST_METHOD':'POST'}, makeForm(form))
         cl.classname = classname
         cl.nodeid = nodeid
+        cl.language = ('en',)
         cl.db = self.db
         return cl.parsePropsFromForm(create=1)
 
@@ -204,6 +205,7 @@ class FormTestCase(unittest.TestCase):
         cl.classname = 'issue'
         cl.nodeid = issue
         cl.db = self.db
+        cl.language = ('en',)
         item = HTMLItem(cl, 'issue', issue)
         self.assertEqual(item.status.id, '1')
         self.assertEqual(item.status.name, '2')
@@ -222,6 +224,7 @@ class FormTestCase(unittest.TestCase):
         cl.classname = 'issue'
         cl.nodeid = issue
         cl.db = self.db
+        cl.language = ('en',)
         cl.userid = '1'
         item = HTMLItem(cl, 'issue', issue)
         for keyword in item.keyword:
@@ -304,6 +307,7 @@ class FormTestCase(unittest.TestCase):
         cl.classname = 'issue'
         cl.nodeid = None
         cl.db = self.db
+        cl.language = ('en',)
         self.assertEqual(cl.parsePropsFromForm(create=1),
             ({('issue', None): {'nosy': ['1','2', '3']}}, []))
 
@@ -564,10 +568,21 @@ class FormTestCase(unittest.TestCase):
             }),
             ({('test', None): {'string': 'a'},
               ('issue', '-1'): {'nosy': ['1']},
-              ('issue', '-2'): {}
              },
              [('issue', '-2', 'superseder', [('issue', '-1')])
              ]
+            )
+        )
+
+    def testMessages(self):
+        self.assertEqual(self.parseForm({
+            'msg-1@content': 'asdf',
+            'msg-2@content': 'qwer',
+            '@link@messages': 'msg-1, msg-2'}),
+            ({('test', None): {},
+              ('msg', '-2'): {'content': 'qwer'},
+              ('msg', '-1'): {'content': 'asdf'}},
+             [('test', None, 'messages', [('msg', '-1'), ('msg', '-2')])]
             )
         )
 
@@ -600,12 +615,13 @@ class FormTestCase(unittest.TestCase):
     #
     # XXX test all default permissions
     def _make_client(self, form, classname='user', nodeid='2', userid='2'):
-        cl = client.Client(self.instance, None, {'PATH_INFO':'/'},
-            makeForm(form))
+        cl = client.Client(self.instance, None, {'PATH_INFO':'/',
+            'REQUEST_METHOD':'POST'}, makeForm(form))
         cl.classname = 'user'
         cl.nodeid = '1'
         cl.db = self.db
         cl.userid = '2'
+        cl.language = ('en',)
         return cl
 
     def testClassPermission(self):

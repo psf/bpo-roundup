@@ -16,23 +16,27 @@ from __future__ import nested_scopes
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: roundupdb.py,v 1.138 2008-01-08 20:58:31 richard Exp $
+# $Id: roundupdb.py,v 1.139 2008-08-07 06:31:16 richard Exp $
 
 """Extending hyperdb with types specific to issue-tracking.
 """
 __docformat__ = 'restructuredtext'
 
 import re, os, smtplib, socket, time, random
-import cStringIO, base64, quopri, mimetypes
+import cStringIO, base64, mimetypes
 import os.path
-
-from rfc2822 import encode_header
+import logging
+from email import Encoders
+from email.Utils import formataddr
+from email.Header import Header
+from email.MIMEText import MIMEText
+from email.MIMEBase import MIMEBase
 
 from roundup import password, date, hyperdb
 from roundup.i18n import _
 
 # MessageSendError is imported for backwards compatibility
-from roundup.mailer import Mailer, straddr, MessageSendError
+from roundup.mailer import Mailer, MessageSendError, encode_quopri
 
 class Database:
 
@@ -113,6 +117,29 @@ class Database:
         self.commit()
 
         return userid
+
+
+    def log_debug(self, msg, *args, **kwargs):
+        """Log a message with level DEBUG."""
+
+        logger = self.get_logger()
+        logger.debug(msg, *args, **kwargs)
+
+    def log_info(self, msg, *args, **kwargs):
+        """Log a message with level INFO."""
+
+        logger = self.get_logger()
+        logger.info(msg, *args, **kwargs)
+
+    def get_logger(self):
+        """Return the logger for this database."""
+
+        # Because getting a logger requires acquiring a lock, we want
+        # to do it only once.
+        if not hasattr(self, '__logger'):
+            self.__logger = logging.getLogger('hyperdb')
+
+        return self.__logger
 
 
 class DetectorError(RuntimeError):
@@ -296,7 +323,7 @@ class IssueClass:
         authaddr = users.get(authid, 'address', '')
 
         if authaddr and self.db.config.MAIL_ADD_AUTHOREMAIL:
-            authaddr = " <%s>" % straddr( ('',authaddr) )
+            authaddr = " <%s>" % formataddr( ('',authaddr) )
         elif authaddr:
             authaddr = ""
 
@@ -350,15 +377,11 @@ class IssueClass:
         if self.db.config.EMAIL_SIGNATURE_POSITION == 'bottom':
             m.append(self.email_signature(nodeid, msgid))
 
-        # encode the content as quoted-printable
+        # figure the encoding
         charset = getattr(self.db.config, 'EMAIL_CHARSET', 'utf-8')
-        m = '\n'.join(m)
-        if charset != 'utf-8':
-            m = unicode(m, 'utf-8').encode(charset)
-        content = cStringIO.StringIO(m)
-        content_encoded = cStringIO.StringIO()
-        quopri.encode(content, content_encoded, 0)
-        content_encoded = content_encoded.getvalue()
+
+        # construct the content and convert to unicode object
+        content = unicode('\n'.join(m), 'utf-8').encode(charset)
 
         # make sure the To line is always the same (for testing mostly)
         sendto.sort()
@@ -381,6 +404,10 @@ class IssueClass:
         else:
             sendto = [sendto]
 
+        tracker_name = unicode(self.db.config.TRACKER_NAME, 'utf-8')
+        tracker_name = formataddr((tracker_name, from_address))
+        tracker_name = Header(tracker_name, charset)
+
         # now send one or more messages
         # TODO: I believe we have to create a new message each time as we
         # can't fiddle the recipients in the message ... worth testing
@@ -389,21 +416,18 @@ class IssueClass:
         for sendto in sendto:
             # create the message
             mailer = Mailer(self.db.config)
-            message, writer = mailer.get_standard_message(sendto, subject,
-                author)
+
+            message = mailer.get_standard_message(sendto, subject, author,
+                multipart=message_files)
 
             # set reply-to to the tracker
-            tracker_name = self.db.config.TRACKER_NAME
-            if charset != 'utf-8':
-                tracker = unicode(tracker_name, 'utf-8').encode(charset)
-            tracker_name = encode_header(tracker_name, charset)
-            writer.addheader('Reply-To', straddr((tracker_name, from_address)))
+            message['Reply-To'] = tracker_name
 
             # message ids
             if messageid:
-                writer.addheader('Message-Id', messageid)
+                message['Message-Id'] = messageid
             if inreplyto:
-                writer.addheader('In-Reply-To', inreplyto)
+                message['In-Reply-To'] = inreplyto
 
             # Additional headers for bugs.python.org
             # 20080106 mvl
@@ -427,8 +451,12 @@ class IssueClass:
                         continue
                 values = [cl.get(v, 'name') for v in values]
                 values = ', '.join(values)
-                writer.addheader("X-Roundup-%s-%s" % (self.classname, propname),
-                                 values)
+                header = "X-Roundup-%s-%s"%(self.classname, propname)
+                try:
+                    message[header] = values.encode('ascii')
+                except UnicodeError:
+                    message[header] = Header(values, charset)
+
             if not inreplyto:
                 # Default the reply to the first message
                 msgs = self.get(nodeid, 'messages')
@@ -438,37 +466,32 @@ class IssueClass:
                 if msgs and msgs[0] != nodeid:
                     inreplyto = messages.get(msgs[0], 'messageid')
                     if inreplyto:
-                        writer.addheader('In-Reply-To', inreplyto)
+                        message['In-Reply-To'] = inreplyto
             # end additional headers
 
             # attach files
             if message_files:
-                part = writer.startmultipartbody('mixed')
-                part = writer.nextpart()
-                part.addheader('Content-Transfer-Encoding', 'quoted-printable')
-                body = part.startbody('text/plain; charset=%s'%charset)
-                body.write(content_encoded)
+                # first up the text as a part
+                part = MIMEText(content)
+                encode_quopri(part)
+                message.attach(part)
+
                 for fileid in message_files:
                     name = files.get(fileid, 'name')
                     mime_type = files.get(fileid, 'type')
                     content = files.get(fileid, 'content')
-                    part = writer.nextpart()
                     if mime_type == 'text/plain':
-                        part.addheader('Content-Disposition',
-                            'attachment;\n filename="%s"'%name)
                         try:
                             content.decode('ascii')
                         except UnicodeError:
                             # the content cannot be 7bit-encoded.
                             # use quoted printable
-                            part.addheader('Content-Transfer-Encoding',
-                                'quoted-printable')
-                            body = part.startbody('text/plain')
-                            body.write(quopri.encodestring(content))
+                            # XXX stuffed if we know the charset though :(
+                            part = MIMEText(content)
+                            encode_quopri(part)
                         else:
-                            part.addheader('Content-Transfer-Encoding', '7bit')
-                            body = part.startbody('text/plain')
-                            body.write(content)
+                            part = MIMEText(content)
+                            part['Content-Transfer-Encoding'] = '7bit'
                     else:
                         # some other type, so encode it
                         if not mime_type:
@@ -476,17 +499,16 @@ class IssueClass:
                             mime_type = mimetypes.guess_type(name)[0]
                         if mime_type is None:
                             mime_type = 'application/octet-stream'
-                        part.addheader('Content-Disposition',
-                            'attachment;\n filename="%s"'%name)
-                        part.addheader('Content-Transfer-Encoding', 'base64')
-                        body = part.startbody(mime_type)
-                        body.write(base64.encodestring(content))
-                writer.lastpart()
+                        main, sub = mime_type.split('/')
+                        part = MIMEBase(main, sub)
+                        part.set_payload(content)
+                        Encoders.encode_base64(part)
+                    part['Content-Disposition'] = 'attachment;\n filename="%s"'%name
+                    message.attach(part)
+
             else:
-                writer.addheader('Content-Transfer-Encoding',
-                    'quoted-printable')
-                body = writer.startbody('text/plain; charset=%s'%charset)
-                body.write(content_encoded)
+                message.set_payload(content)
+                encode_quopri(message)
 
             if first:
                 mailer.smtp_send(sendto + bcc_sendto, message)
@@ -510,7 +532,7 @@ class IssueClass:
             web = base + self.classname + nodeid
 
         # ensure the email address is properly quoted
-        email = straddr((self.db.config.TRACKER_NAME,
+        email = formataddr((self.db.config.TRACKER_NAME,
             self.db.config.TRACKER_EMAIL))
 
         line = '_' * max(len(web)+2, len(email))

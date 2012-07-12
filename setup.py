@@ -16,17 +16,16 @@
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: setup.py,v 1.99 2007-11-07 21:24:24 richard Exp $
 
-from distutils.core import setup, Extension
-from distutils.util import get_platform
-from distutils.file_util import write_file
-from distutils.command.bdist_rpm import bdist_rpm
-from distutils.command.build import build
-from distutils.command.build_scripts import build_scripts
-from distutils.command.build_py import build_py
 
-import sys, os, string
+from roundup.dist.command.build_doc import build_doc
+from roundup.dist.command.build_scripts import build_scripts
+from roundup.dist.command.build_py import build_py
+from roundup.dist.command.build import build, list_message_files
+from roundup.dist.command.bdist_rpm import bdist_rpm
+from distutils.core import setup
+
+import sys, os
 from glob import glob
 
 # patch distutils if it can't cope with the "classifiers" keyword
@@ -35,268 +34,28 @@ if not hasattr(DistributionMetadata, 'classifiers'):
     DistributionMetadata.classifiers = None
     DistributionMetadata.download_url = None
 
-from roundup import msgfmt
+def include(d, e):
+    """Generate a pair of (directory, file-list) for installation.
 
-#############################################################################
-### Build script files
-#############################################################################
+    'd' -- A directory
 
-class build_scripts_create(build_scripts):
-    """ Overload the build_scripts command and create the scripts
-        from scratch, depending on the target platform.
+    'e' -- A glob pattern"""
 
-        You have to define the name of your package in an inherited
-        class (due to the delayed instantiation of command classes
-        in distutils, this cannot be passed to __init__).
-
-        The scripts are created in an uniform scheme: they start the
-        run() function in the module
-
-            <packagename>.scripts.<mangled_scriptname>
-
-        The mangling of script names replaces '-' and '/' characters
-        with '-' and '.', so that they are valid module paths.
-
-        If the target platform is win32, create .bat files instead of
-        *nix shell scripts.  Target platform is set to "win32" if main
-        command is 'bdist_wininst' or if the command is 'bdist' and
-        it has the list of formats (from command line or config file)
-        and the first item on that list is wininst.  Otherwise
-        target platform is set to current (build) platform.
-    """
-    package_name = None
-
-    def initialize_options(self):
-        build_scripts.initialize_options(self)
-        self.script_preamble = None
-        self.target_platform = None
-        self.python_executable = None
-
-    def finalize_options(self):
-        build_scripts.finalize_options(self)
-        cmdopt=self.distribution.command_options
-
-        # find the target platform
-        if self.target_platform:
-            # TODO? allow explicit setting from command line
-            target = self.target_platform
-        if cmdopt.has_key("bdist_wininst"):
-            target = "win32"
-        elif cmdopt.get("bdist", {}).has_key("formats"):
-            formats = cmdopt["bdist"]["formats"][1].split(",")
-            if formats[0] == "wininst":
-                target = "win32"
-            else:
-                target = sys.platform
-            if len(formats) > 1:
-                self.warn(
-                    "Scripts are built for %s only (requested formats: %s)"
-                    % (target, ",".join(formats)))
-        else:
-            # default to current platform
-            target = sys.platform
-        self.target_platfom = target
-
-        # for native builds, use current python executable path;
-        # for cross-platform builds, use default executable name
-        if self.python_executable:
-            # TODO? allow command-line option
-            pass
-        if target == sys.platform:
-            self.python_executable = os.path.normpath(sys.executable)
-        else:
-            self.python_executable = "python"
-
-        # for windows builds, add ".bat" extension
-        if target == "win32":
-            # *nix-like scripts may be useful also on win32 (cygwin)
-            # to build both script versions, use:
-            #self.scripts = list(self.scripts) + [script + ".bat"
-            #    for script in self.scripts]
-            self.scripts = [script + ".bat" for script in self.scripts]
-
-        # tweak python path for installations outside main python library
-        if cmdopt.get("install", {}).has_key("prefix"):
-            prefix = os.path.expanduser(cmdopt['install']['prefix'][1])
-            version = '%d.%d'%sys.version_info[:2]
-            self.script_preamble = '''
-import sys
-sys.path.insert(1, "%s/lib/python%s/site-packages")
-'''%(prefix, version)
-        else:
-            self.script_preamble = ''
-
-    def copy_scripts(self):
-        """ Create each script listed in 'self.scripts'
-        """
-        if not self.package_name:
-            raise Exception("You have to inherit build_scripts_create and"
-                " provide a package name")
-
-        to_module = string.maketrans('-/', '_.')
-
-        self.mkpath(self.build_dir)
-        for script in self.scripts:
-            outfile = os.path.join(self.build_dir, os.path.basename(script))
-
-            #if not self.force and not newer(script, outfile):
-            #    self.announce("not copying %s (up-to-date)" % script)
-            #    continue
-
-            if self.dry_run:
-                self.announce("would create %s" % outfile)
-                continue
-
-            module = os.path.splitext(os.path.basename(script))[0]
-            module = string.translate(module, to_module)
-            script_vars = {
-                'python': self.python_executable,
-                'package': self.package_name,
-                'module': module,
-                'prefix': self.script_preamble,
-            }
-
-            self.announce("creating %s" % outfile)
-            file = open(outfile, 'w')
-
-            try:
-                # could just check self.target_platform,
-                # but looking at the script extension
-                # makes it possible to build both *nix-like
-                # and windows-like scripts on win32.
-                # may be useful for cygwin.
-                if os.path.splitext(outfile)[1] == ".bat":
-                    file.write('@echo off\n'
-                        'if NOT "%%_4ver%%" == "" "%(python)s" -c "from %(package)s.scripts.%(module)s import run; run()" %%$\n'
-                        'if     "%%_4ver%%" == "" "%(python)s" -c "from %(package)s.scripts.%(module)s import run; run()" %%*\n'
-                        % script_vars)
-                else:
-                    file.write('#! %(python)s\n%(prefix)s'
-                        'from %(package)s.scripts.%(module)s import run\n'
-                        'run()\n'
-                        % script_vars)
-            finally:
-                file.close()
-                os.chmod(outfile, 0755)
-
-
-class build_scripts_roundup(build_scripts_create):
-    package_name = 'roundup'
-
+    return (d, [f for f in glob('%s/%s'%(d, e)) if os.path.isfile(f)])
 
 def scriptname(path):
     """ Helper for building a list of script names from a list of
         module files.
     """
     script = os.path.splitext(os.path.basename(path))[0]
-    script = string.replace(script, '_', '-')
+    script = script.replace('_', '-')
     return script
 
-### Build Roundup
-
-def list_message_files(suffix=".po"):
-    """Return list of all found message files and their intallation paths"""
-    _files = glob("locale/*" + suffix)
-    _list = []
-    for _file in _files:
-        # basename (without extension) is a locale name
-        _locale = os.path.splitext(os.path.basename(_file))[0]
-        _list.append((_file, os.path.join(
-            "share", "locale", _locale, "LC_MESSAGES", "roundup.mo")))
-    return _list
-
-def check_manifest():
-    """Check that the files listed in the MANIFEST are present when the
-    source is unpacked.
-    """
-    try:
-        f = open('MANIFEST')
-    except:
-        print '\n*** SOURCE WARNING: The MANIFEST file is missing!'
-        return
-    try:
-        manifest = [l.strip() for l in f.readlines()]
-    finally:
-        f.close()
-    err = [line for line in manifest if not os.path.exists(line)]
-    err.sort()
-    # ignore auto-generated files
-    if err == ['roundup-admin', 'roundup-demo', 'roundup-gettext',
-            'roundup-mailgw', 'roundup-server']:
-        err = []
-    if err:
-        n = len(manifest)
-        print '\n*** SOURCE WARNING: There are files missing (%d/%d found)!'%(
-            n-len(err), n)
-        print 'Missing:', '\nMissing: '.join(err)
-
-
-class build_py_roundup(build_py):
-
-    def find_modules(self):
-        # Files listed in py_modules are in the toplevel directory
-        # of the source distribution.
-        modules = []
-        for module in self.py_modules:
-            path = string.split(module, '.')
-            package = string.join(path[0:-1], '.')
-            module_base = path[-1]
-            module_file = module_base + '.py'
-            if self.check_module(module, module_file):
-                modules.append((package, module_base, module_file))
-        return modules
-
-
-class build_roundup(build):
-
-    def build_message_files(self):
-        """For each locale/*.po, build .mo file in target locale directory"""
-        for (_src, _dst) in list_message_files():
-            _build_dst = os.path.join("build", _dst)
-            self.mkpath(os.path.dirname(_build_dst))
-            self.announce("Compiling %s -> %s" % (_src, _build_dst))
-            msgfmt.make(_src, _build_dst)
-
-    def run(self):
-        check_manifest()
-        self.build_message_files()
-        build.run(self)
-
-class bdist_rpm_roundup(bdist_rpm):
-
-    def finalize_options(self):
-        bdist_rpm.finalize_options(self)
-        if self.install_script:
-            # install script is overridden.  skip default
-            return
-        # install script option must be file name.
-        # create the file in rpm build directory.
-        install_script = os.path.join(self.rpm_base, "install.sh")
-        self.mkpath(self.rpm_base)
-        self.execute(write_file, (install_script, [
-                ("%s setup.py install --root=$RPM_BUILD_ROOT "
-                    "--record=ROUNDUP_FILES") % self.python,
-                # allow any additional extension for man pages
-                # (rpm may compress them to .gz or .bz2)
-                # man page here is any file
-                # with single-character extension
-                # in man directory
-                "sed -e 's,\(/man/.*\..\)$,\\1*,' "
-                    "<ROUNDUP_FILES >INSTALLED_FILES",
-            ]), "writing '%s'" % install_script)
-        self.install_script = install_script
-
-#############################################################################
-### Main setup stuff
-#############################################################################
-
 def main():
-    # build list of scripts from their implementation modules
-    roundup_scripts = map(scriptname, glob('roundup/scripts/[!_]*.py'))
-
     # template munching
-    packagelist = [
+    packages = [
         'roundup',
+        'roundup.anypy',
         'roundup.cgi',
         'roundup.cgi.PageTemplates',
         'roundup.cgi.TAL',
@@ -304,47 +63,41 @@ def main():
         'roundup.backends',
         'roundup.scripts',
     ]
-    installdatafiles = [
-        ('share/roundup/cgi-bin', ['frontends/roundup.cgi']),
-    ]
     py_modules = ['roundup.demo',]
 
+    # build list of scripts from their implementation modules
+    scripts = [scriptname(f) for f in glob('roundup/scripts/[!_]*.py')]
+
+    data_files = [
+        ('share/roundup/cgi-bin', ['frontends/roundup.cgi']),
+    ]
     # install man pages on POSIX platforms
     if os.name == 'posix':
-        installdatafiles.append(('man/man1', ['doc/roundup-admin.1',
-            'doc/roundup-mailgw.1', 'doc/roundup-server.1',
-            'doc/roundup-demo.1']))
+        data_files.append(include('share/man/man1', '*'))
 
     # add the templates to the data files lists
     from roundup.init import listTemplates
-    templates = [t['path'] for t in listTemplates('templates').values()]
+    templates = [t['path']
+                 for t in listTemplates('share/roundup/templates').values()]
     for tdir in templates:
-        # scan for data files
         for idir in '. detectors extensions html'.split():
-            idir = os.path.join(tdir, idir)
-            if not os.path.isdir(idir):
-                continue
-            tfiles = []
-            for f in os.listdir(idir):
-                if f.startswith('.'):
-                    continue
-                ifile = os.path.join(idir, f)
-                if os.path.isfile(ifile):
-                    tfiles.append(ifile)
-            installdatafiles.append(
-                (os.path.join('share', 'roundup', idir), tfiles)
-            )
+            data_files.append(include(os.path.join(tdir, idir), '*'))
 
     # add message files
     for (_dist_file, _mo_file) in list_message_files():
-        installdatafiles.append((os.path.dirname(_mo_file),
-            [os.path.join("build", _mo_file)]))
+        data_files.append((os.path.dirname(_mo_file),
+                           [os.path.join("build", _mo_file)]))
+
+    # add docs
+    data_files.append(include('share/doc/roundup/html', '*'))
 
     # perform the setup action
     from roundup import __version__
-    setup_args = {
-        'name': "roundup",
-        'version': __version__,
+
+    setup(name='roundup',
+          version=__version__,
+          author="Richard Jones",
+          author_email="richard@users.sourceforge.net",
         'description': "A simple-to-use and -install issue-tracking system"
             " with command-line, web and e-mail interfaces. Highly"
             " customisable.",
@@ -352,35 +105,29 @@ def main():
 '''In this release
 ===============
 
-The metakit backend has been removed due to lack of maintenance and
-presence of good alternatives (in particular sqlite built into Python 2.5)
+1.4.7 is primarily a bugfix release which contains important security
+fixes:
 
-Release 1.4.1 removes an old trace of the metakit backend that was
-preventing new tracker installation.
+- a number of security issues were discovered by Daniel Diniz
+- EditCSV and ExportCSV altered to include permission checks
+- HTTP POST required on actions which alter data
+- HTML file uploads served as application/octet-stream
+- Handle Unauthorised in file serving correctly
+- New item action reject creation of new users
+- Item retirement was not being controlled
+- Roundup is now compatible with Python 2.6
+- Improved French and German translations
+- Improve consistency of item sorting in HTML interface
+- Various other small bug fixes, robustification and optimisation
 
-New Features in 1.4.0:
+Though some new features made it in also:
 
-- Roundup has a new xmlrpc frontend that gives access to a tracker using
-  XMLRPC.
-- Dates can now be in the year-range 1-9999
-- Add simple anti-spam recipe to docs
-- Allow customisation of regular expressions used in email parsing, thanks
-  Bruno Damour
-- Italian translation by Marco Ghidinelli
-- Multilinks take any iterable
-- config option: specify port and local hostname for SMTP connections
-- Tracker index templating (i.e. when roundup_server is serving multiple
-  trackers) (sf bug 1058020)
-- config option: Limit nosy attachments based on size (Philipp Gortan)
-- roundup_server supports SSL via pyopenssl
-- templatable 404 not found messages (sf bug 1403287)
-- Unauthorized email includes a link to the registration page for
-  the tracker
-- config options: control whether author info/email is included in email
-  sent by roundup
-- support for receiving OpenPGP MIME messages (signed or encrypted)
-
-There's also a ton of bugfixes.
+- Provide a "no selection" option in web interface selection widgets
+- Debug logging now uses the logging module rather than print
+- Allow CGI frontend to serve XMLRPC requests.
+- Added XMLRPC actions, as well as bridging CGI actions to XMLRPC actions.
+- Optimized large file serving via mod_python / sendfile().
+- Support resuming downloads for (large) files.
 
 If you're upgrading from an older version of Roundup you *must* follow
 the "Software Upgrade" guidelines given in the maintenance documentation.
@@ -424,42 +171,35 @@ It comes with two issue tracker templates (a classic bug/feature tracker and
 a minimal skeleton) and five database back-ends (anydbm, sqlite, metakit,
 mysql and postgresql).
 ''',
-        'author': "Richard Jones",
-        'author_email': "richard@users.sourceforge.net",
-        'url': 'http://roundup.sourceforge.net/',
-        'packages': packagelist,
-        'classifiers': [
-            'Development Status :: 5 - Production/Stable',
-            'Environment :: Console',
-            'Environment :: Web Environment',
-            'Intended Audience :: End Users/Desktop',
-            'Intended Audience :: Developers',
-            'Intended Audience :: System Administrators',
-            'License :: OSI Approved :: Python Software Foundation License',
-            'Operating System :: MacOS :: MacOS X',
-            'Operating System :: Microsoft :: Windows',
-            'Operating System :: POSIX',
-            'Programming Language :: Python',
-            'Topic :: Communications :: Email',
-            'Topic :: Office/Business',
-            'Topic :: Software Development :: Bug Tracking',
-        ],
+          url='http://www.roundup-tracker.org',
+          download_url='http://pypi.python.org/pypi/roundup',
+          classifiers=['Development Status :: 5 - Production/Stable',
+                       'Environment :: Console',
+                       'Environment :: Web Environment',
+                       'Intended Audience :: End Users/Desktop',
+                       'Intended Audience :: Developers',
+                       'Intended Audience :: System Administrators',
+                       'License :: OSI Approved :: Python Software Foundation License',
+                       'Operating System :: MacOS :: MacOS X',
+                       'Operating System :: Microsoft :: Windows',
+                       'Operating System :: POSIX',
+                       'Programming Language :: Python',
+                       'Topic :: Communications :: Email',
+                       'Topic :: Office/Business',
+                       'Topic :: Software Development :: Bug Tracking',
+                       ],
 
-        # Override certain command classes with our own ones
-        'cmdclass': {
-            'build_scripts': build_scripts_roundup,
-            'build_py': build_py_roundup,
-            'build': build_roundup,
-            'bdist_rpm': bdist_rpm_roundup,
-        },
-        'scripts': roundup_scripts,
-
-        'data_files':  installdatafiles
-    }
-    if sys.version_info[:2] > (2, 2):
-       setup_args['py_modules'] = py_modules
-
-    setup(**setup_args)
+          # Override certain command classes with our own ones
+          cmdclass= {'build_doc': build_doc,
+                     'build_scripts': build_scripts,
+                     'build_py': build_py,
+                     'build': build,
+                     'bdist_rpm': bdist_rpm,
+                     },
+          packages=packages,
+          py_modules=py_modules,
+          scripts=scripts,
+          data_files=data_files)
 
 if __name__ == '__main__':
     main()

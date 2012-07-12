@@ -1,5 +1,7 @@
-#$Id: indexer_common.py,v 1.8 2006-11-11 03:01:54 richard Exp $
-import re, sets
+#$Id: indexer_common.py,v 1.11 2008-09-11 19:41:07 schlatterbeck Exp $
+import re
+# Python 2.3 ... 2.6 compatibility:
+from roundup.anypy.sets_ import set
 
 from roundup import hyperdb
 
@@ -8,7 +10,7 @@ STOPWORDS = [
     "FOR", "IF", "IN", "INTO", "IS", "IT",
     "NO", "NOT", "OF", "ON", "OR", "SUCH",
     "THAT", "THE", "THEIR", "THEN", "THERE", "THESE",
-    "THEY", "THIS", "TO", "WAS", "WILL", "WITH" 
+    "THEY", "THIS", "TO", "WAS", "WILL", "WITH"
 ]
 
 def _isLink(propclass):
@@ -17,7 +19,7 @@ def _isLink(propclass):
 
 class Indexer:
     def __init__(self, db):
-        self.stopwords = sets.Set(STOPWORDS)
+        self.stopwords = set(STOPWORDS)
         for word in db.config[('main', 'indexer_stopwords')]:
             self.stopwords.add(word)
 
@@ -26,13 +28,13 @@ class Indexer:
 
     def getHits(self, search_terms, klass):
         return self.find(search_terms)
-    
+
     def search(self, search_terms, klass, ignore={}):
-        '''Display search results looking for [search, terms] associated
+        """Display search results looking for [search, terms] associated
         with the hyperdb Class "klass". Ignore hits on {class: property}.
 
         "dre" is a helper, not an argument.
-        '''
+        """
         # do the index lookup
         hits = self.getHits(search_terms, klass)
         if not hits:
@@ -61,7 +63,9 @@ class Indexer:
                 continue
 
             # if it's a property on klass, it's easy
-            nodeid = entry[1]
+            # (make sure the nodeid is str() not unicode() as returned by some
+            # backends as that can cause problems down the track)
+            nodeid = str(entry[1])
             if classname == klass.classname:
                 if not nodeids.has_key(nodeid):
                     nodeids[nodeid] = {}
@@ -81,14 +85,21 @@ class Indexer:
                 del propspec[propname]
 
         # klass.find tells me the klass nodeids the linked nodes relate to
+        propdefs = klass.getprops()
         for resid in klass.find(**propspec):
             resid = str(resid)
-            if not nodeids.has_key(id):
-                nodeids[resid] = {}
+            if resid in nodeids:
+                continue # we ignore duplicate resids
+            nodeids[resid] = {}
             node_dict = nodeids[resid]
             # now figure out where it came from
             for linkprop in propspec.keys():
-                for nodeid in klass.get(resid, linkprop):
+                v = klass.get(resid, linkprop)
+                # the link might be a Link so deal with a single result or None
+                if isinstance(propdefs[linkprop], hyperdb.Link):
+                    if v is None: continue
+                    v = [v]
+                for nodeid in v:
                     if propspec[linkprop].has_key(nodeid):
                         # OK, this node[propname] has a winner
                         if not node_dict.has_key(linkprop):

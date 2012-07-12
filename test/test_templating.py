@@ -12,7 +12,8 @@ class TemplatingTestCase(unittest.TestCase):
     def setUp(self):
         self.form = FieldStorage()
         self.client = MockNull()
-        self.client.db = MockDatabase()
+        self.client.db = db = MockDatabase()
+        db.security.hasPermission = lambda *args, **kw: True
         self.client.form = self.form
 
 class HTMLDatabaseTestCase(TemplatingTestCase):
@@ -68,6 +69,87 @@ class FunctionsTestCase(TemplatingTestCase):
             ['green', 'eggs'])
         self.assertEqual(lookupKeys(shrubbery, 'spam', ['ok','2']), ['ok',
             'eggs'])
+
+class HTMLClassTestCase(TemplatingTestCase) :
+
+    def test_link(self):
+        """Make sure lookup of a Link property works even in the
+        presence of multiple values in the form."""
+        def lookup(key) :
+            self.assertEqual(key, key.strip())
+            return "Status%s"%key
+        self.form.list.append(MiniFieldStorage("status", "1"))
+        self.form.list.append(MiniFieldStorage("status", "2"))
+        status = hyperdb.Link("status")
+        self.client.db.classes = dict \
+            ( issue = MockNull(getprops = lambda : dict(status = status))
+            , status  = MockNull(get = lambda id, name : id, lookup = lookup)
+            )
+        cls = HTMLClass(self.client, "issue")
+        cls["status"]
+
+    def test_multilink(self):
+        """`lookup` of an item will fail if leading or trailing whitespace
+           has not been stripped.
+        """
+        def lookup(key) :
+            self.assertEqual(key, key.strip())
+            return "User%s"%key
+        self.form.list.append(MiniFieldStorage("nosy", "1, 2"))
+        nosy = hyperdb.Multilink("user")
+        self.client.db.classes = dict \
+            ( issue = MockNull(getprops = lambda : dict(nosy = nosy))
+            , user  = MockNull(get = lambda id, name : id, lookup = lookup)
+            )
+        cls = HTMLClass(self.client, "issue")
+        cls["nosy"]
+
+    def test_url_match(self):
+        '''Test the URL regular expression in StringHTMLProperty.
+        '''
+        def t(s, nothing=False, **groups):
+            m = StringHTMLProperty.hyper_re.search(s)
+            if nothing:
+                if m:
+                    self.assertEquals(m, None, '%r matched (%r)'%(s, m.groupdict()))
+                return
+            else:
+                self.assertNotEquals(m, None, '%r did not match'%s)
+            d = m.groupdict()
+            for g in groups:
+                self.assertEquals(d[g], groups[g], '%s %r != %r in %r'%(g, d[g],
+                    groups[g], s))
+
+        #t('123.321.123.321', 'url')
+        t('http://localhost/', url='http://localhost/')
+        t('http://roundup.net/', url='http://roundup.net/')
+        t('http://richard@localhost/', url='http://richard@localhost/')
+        t('http://richard:sekrit@localhost/',
+            url='http://richard:sekrit@localhost/')
+        t('<HTTP://roundup.net/>', url='HTTP://roundup.net/')
+        t('www.a.ex', url='www.a.ex')
+        t('foo.a.ex', nothing=True)
+        t('StDevValidTimeSeries.GetObservation', nothing=True)
+        t('http://a.ex', url='http://a.ex')
+        t('http://a.ex/?foo&bar=baz\\.@!$%()qwerty',
+            url='http://a.ex/?foo&bar=baz\\.@!$%()qwerty')
+        t('www.foo.net', url='www.foo.net')
+        t('richard@com.example', email='richard@com.example')
+        t('r@a.com', email='r@a.com')
+        t('i1', **{'class':'i', 'id':'1'})
+        t('item123', **{'class':'item', 'id':'123'})
+        t('www.user:pass@host.net', email='pass@host.net')
+        t('user:pass@www.host.net', url='user:pass@www.host.net')
+        t('123.35', nothing=True)
+        t('-.3535', nothing=True)
+
+    def test_url_replace(self):
+        p = StringHTMLProperty(self.client, 'test', '1', None, 'test', '')
+        def t(s): return p.hyper_re.sub(p._hyper_repl, s)
+        ae = self.assertEquals
+        ae(t('http://roundup.net/'), '<a href="http://roundup.net/">http://roundup.net/</a>')
+        ae(t('&lt;HTTP://roundup.net/&gt;'), '&lt;<a href="HTTP://roundup.net/">HTTP://roundup.net/</a>&gt;')
+        ae(t('&lt;www.roundup.net&gt;'), '&lt;<a href="http://www.roundup.net">www.roundup.net</a>&gt;')
 
 '''
 class HTMLPermissions:
@@ -243,6 +325,7 @@ def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(HTMLDatabaseTestCase))
     suite.addTest(unittest.makeSuite(FunctionsTestCase))
+    suite.addTest(unittest.makeSuite(HTMLClassTestCase))
     return suite
 
 if __name__ == '__main__':

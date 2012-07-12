@@ -1,8 +1,8 @@
+:tocdepth: 2
+
 ===================
 Customising Roundup
 ===================
-
-:Version: $Revision: 1.222 $
 
 .. This document borrows from the ZopeBook section on ZPT. The original is at:
    http://www.zope.org/Documentation/Books/ZopeBook/current/ZPT.stx
@@ -181,6 +181,12 @@ Section **tracker**
   LC_MESSAGES, or LANG, in that order of preference.
 
 Section **web**
+ allow_html_file -- ``no``
+  Setting this option enables Roundup to serve uploaded HTML
+  file content *as HTML*. This is a potential security risk
+  and is therefore disabled by default. Set to 'yes' if you
+  trust *all* users uploading content to your tracker.
+
  http_auth -- ``yes``
   Whether to use HTTP Basic Authentication, if present.
   Roundup will use either the REMOTE_USER or HTTP_AUTHORIZATION
@@ -1875,10 +1881,15 @@ The following variables are available to templates.
    - the current index information (``filterspec``, ``filter`` args,
      ``properties``, etc) parsed out of the form. 
    - methods for easy filterspec link generation
-   - *user*, the current user item as an HTMLItem instance
-   - *form*
+   - "form"
      The current CGI form information as a mapping of form argument name
-     to value
+     to value (specifically a cgi.FieldStorage)
+   - "env" the CGI environment variables
+   - "base" the base URL for this instance
+   - "user" a HTMLItem instance for the current user
+   - "language" as determined by the browser or config
+   - "classname" the current classname (possibly None)
+   - "template" the current template (suffix, also possibly None)
 **config**
   This variable holds all the values defined in the tracker config.ini
   file (eg. TRACKER_NAME, etc.)
@@ -4850,11 +4861,4 @@ in which it reloads edited templates immediately when they are changed,
 rather than requiring a web server restart.
 
 
--------------------
-
-Back to `Table of Contents`_
-
-.. _`Table of Contents`: index.html
 .. _`design documentation`: design.html
-.. _`admin guide`: admin_guide.html
-

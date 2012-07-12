@@ -1,4 +1,3 @@
-#$Id: back_mysql.py,v 1.74 2007-10-26 01:34:43 richard Exp $
 #
 # Copyright (c) 2003 Martynas Sklyzmantas, Andrey Lebedev <andrey@micro.lt>
 #
@@ -67,11 +66,10 @@ def db_nuke(config):
             # stupid MySQL bug requires us to drop all the tables first
             for table in tables:
                 command = 'DROP TABLE `%s`'%table[0]
-                if __debug__:
-                    logging.getLogger('hyperdb').debug(command)
+                logging.debug(command)
                 cursor.execute(command)
             command = "DROP DATABASE %s"%config.RDBMS_NAME
-            logging.getLogger('hyperdb').info(command)
+            logging.info(command)
             cursor.execute(command)
             conn.commit()
         conn.close()
@@ -85,7 +83,7 @@ def db_create(config):
     conn = MySQLdb.connect(**kwargs)
     cursor = conn.cursor()
     command = "CREATE DATABASE %s"%config.RDBMS_NAME
-    logging.getLogger('hyperdb').info(command)
+    logging.info(command)
     cursor.execute(command)
     conn.commit()
     conn.close()
@@ -140,7 +138,7 @@ class Database(Database):
 
     def sql_open_connection(self):
         kwargs = connection_dict(self.config, 'db')
-        logging.getLogger('hyperdb').info('open database %r'%(kwargs['db'],))
+        self.log_info('open database %r'%(kwargs['db'],))
         try:
             conn = MySQLdb.connect(**kwargs)
         except MySQLdb.OperationalError, message:
@@ -299,7 +297,7 @@ class Database(Database):
                     # convert to new MySQL data type
                     prop = properties[name]
                     if v is not None:
-                        e = self.hyperdb_to_sql_value[prop.__class__](v)
+                        e = self.to_sql_value(prop.__class__)(v)
                     else:
                         e = None
                     l.append(e)
@@ -351,7 +349,7 @@ class Database(Database):
 
             # re-create journal table
             self.create_journal_table(klass)
-            dc = self.hyperdb_to_sql_value[hyperdb.Date]
+            dc = self.to_sql_value(hyperdb.Date)
             for nodeid, journaldate, journaltag, action, params in olddata:
                 self.save_journal(cn, cols, nodeid, dc(journaldate),
                     journaltag, action, params)
@@ -421,9 +419,19 @@ class Database(Database):
         # TODO: create indexes on (selected?) Link property columns, as
         # they're more likely to be used for lookup
 
+    def add_class_key_required_unique_constraint(self, cn, key):
+        # mysql requires sizes on TEXT indexes
+        prop = self.classes[cn].getprops()[key]
+        if isinstance(prop, String):
+            sql = '''create unique index _%s_key_retired_idx
+                on _%s(__retired__, _%s(255))'''%(cn, cn, key)
+        else:
+            sql = '''create unique index _%s_key_retired_idx
+                on _%s(__retired__, _%s)'''%(cn, cn, key)
+        self.sql(sql)
+
     def create_class_table_key_index(self, cn, key):
-        ''' create the class table for the given spec
-        '''
+        # mysql requires sizes on TEXT indexes
         prop = self.classes[cn].getprops()[key]
         if isinstance(prop, String):
             sql = 'create index _%s_%s_idx on _%s(_%s(255))'%(cn, key, cn, key)
@@ -534,7 +542,7 @@ class Database(Database):
     def sql_commit(self, fail_ok=False):
         ''' Actually commit to the database.
         '''
-        logging.getLogger('hyperdb').info('commit')
+        self.log_info('commit')
 
         # MySQL commits don't seem to ever fail, the latest update winning.
         # makes you wonder why they have transactions...
@@ -548,7 +556,7 @@ class Database(Database):
         self.sql("START TRANSACTION")
 
     def sql_close(self):
-        logging.getLogger('hyperdb').info('close')
+        self.log_info('close')
         try:
             self.conn.close()
         except MySQLdb.ProgrammingError, message:
