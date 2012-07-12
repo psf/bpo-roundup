@@ -387,7 +387,6 @@ class Client:
                                            self.translator,
                                            allow_none=True)
         output = handler.dispatch(input)
-        self.db.commit()
 
         self.setHeader("Content-Type", "text/xml")
         self.setHeader("Content-Length", str(len(output)))
@@ -490,13 +489,23 @@ class Client:
                 self.additional_headers['Location'] = str(url)
                 self.response_code = 302
             self.write_html('Redirecting to <a href="%s">%s</a>'%(url, url))
+        except LoginError, message:
+            # The user tried to log in, but did not provide a valid
+            # username and password.  If we support HTTP
+            # authorization, send back a response that will cause the
+            # browser to prompt the user again.
+            if self.instance.config.WEB_HTTP_AUTH:
+                self.response_code = httplib.UNAUTHORIZED
+                realm = self.instance.config.TRACKER_NAME
+                self.setHeader("WWW-Authenticate",
+                               "Basic realm=\"%s\"" % realm)
+            else:
+                self.response_code = httplib.FORBIDDEN
+            self.renderFrontPage(message)
         except Unauthorised, message:
             # users may always see the front page
             self.response_code = 403
-            self.classname = self.nodeid = None
-            self.template = ''
-            self.error_message.append(message)
-            self.write_html(self.renderContext())
+            self.renderFrontPage(message)
         except NotModified:
             # send the 304 response
             self.response_code = 304
@@ -516,11 +525,22 @@ class Client:
             self.error_message.append(self._('Form Error: ') + str(e))
             self.write_html(self.renderContext())
         except:
-            if self.instance.config.WEB_DEBUG:
-                self.write_html(cgitb.html(i18n=self.translator))
+            # Something has gone badly wrong.  Therefore, we should
+            # make sure that the response code indicates failure.
+            if self.response_code == httplib.OK:
+                self.response_code = httplib.INTERNAL_SERVER_ERROR
+            # Help the administrator work out what went wrong.
+            html = ("<h1>Traceback</h1>"
+                    + cgitb.html(i18n=self.translator)
+                    + ("<h1>Environment Variables</h1><table>%s</table>"
+                       % cgitb.niceDict("", self.env)))
+            if not self.instance.config.WEB_DEBUG:
+                exc_info = sys.exc_info()
+                subject = "Error: %s" % exc_info[1]
+                self.send_html_to_admin(subject, html)
+                self.write_html(self._(error_message))
             else:
-                self.mailer.exception_message(self.exception_data())
-                return self.write_html(self._(error_message))
+                self.write_html(html)
 
     def exception_data(self):
         result = ''
@@ -700,7 +720,7 @@ class Client:
                         login.verifyLogin(username, password)
                     except LoginError, err:
                         self.make_user_anonymous()
-                        raise Unauthorised, err
+                        raise
                     user = username
 
         # if user was not set by http authorization, try session lookup
@@ -755,6 +775,10 @@ class Client:
             else:
                 self.db.close()
                 self.db = self.instance.open(username)
+                # The old session API refers to the closed database;
+                # we can no longer use it.
+                self.session_api = Session(self)
+ 
 
     def determine_context(self, dre=re.compile(r'([^\d]+)0*(\d+)')):
         """Determine the context of this page from the URL:
@@ -877,7 +901,12 @@ class Client:
             raise NotFound, str(designator)
         classname, nodeid = m.group(1), m.group(2)
 
-        klass = self.db.getclass(classname)
+        try:
+            klass = self.db.getclass(classname)
+        except KeyError:
+            # The classname was not valid.
+            raise NotFound, str(designator)
+            
 
         # make sure we have the appropriate properties
         props = klass.getprops()
@@ -984,6 +1013,25 @@ class Client:
             self.additional_headers['Content-Length'] = str(len(content))
             self.write(content)
 
+    def send_html_to_admin(self, subject, content):
+
+        to = [self.mailer.config.ADMIN_EMAIL]
+        message = self.mailer.get_standard_message(to, subject)
+        # delete existing content-type headers
+        del message['Content-type']
+        message['Content-type'] = 'text/html; charset=utf-8'
+        message.set_payload(content)
+        encode_quopri(message)
+        self.mailer.smtp_send(to, str(message))
+    
+    def renderFrontPage(self, message):
+        """Return the front page of the tracker."""
+    
+        self.classname = self.nodeid = None
+        self.template = ''
+        self.error_message.append(message)
+        self.write_html(self.renderContext())
+
     def renderContext(self):
         """ Return a PageTemplate for the named page
         """
@@ -1030,16 +1078,8 @@ class Client:
             try:
                 # If possible, send the HTML page template traceback
                 # to the administrator.
-                to = [self.mailer.config.ADMIN_EMAIL]
                 subject = "Templating Error: %s" % exc_info[1]
-                content = cgitb.pt_html()
-                message = self.mailer.get_standard_message(to, subject)
-                # delete existing content-type headers
-                del message['Content-type']
-                message['Content-type'] = 'text/html; charset=utf-8'
-                message.set_payload(content)
-                encode_quopri(message)
-                self.mailer.smtp_send(to, str(message))
+                self.send_html_to_admin(subject, cgitb.pt_html())
                 # Now report the error to the user.
                 return self._(self.error_message)
             except:
@@ -1365,7 +1405,7 @@ class Client:
             # RFC 2616 14.13: Content-Length
             #
             # Tell the client how much data we are providing.
-            self.setHeader("Content-Length", length)
+            self.setHeader("Content-Length", str(length))
             # Send the HTTP header.
             self.header()
         # If the client doesn't actually want the body, or if we are

@@ -19,64 +19,30 @@ All development is coordinated through two resources:
 
 - roundup-dev mailing list at
   http://lists.sourceforge.net/mailman/listinfo/roundup-devel
-- Sourceforge's issue trackers at
-  https://sourceforge.net/tracker/?group_id=31577
+- The issue tracker running at
+  http://issues.roundup-tracker.org/
+
+Website, wiki, issue tracker
+----------------------------
+
+1. Log into <username>,roundup@shell.sourceforge.net
+2. cd /home/groups/r/ro/roundup
+3. follow instructions in README.txt
+
 
 Small Changes
 -------------
 
-Most small changes can be submitted through the `feature tracker`_, with
+Most small changes can be submitted through the issue tracker, with
 patches attached that give context diffs of the affected source.
 
 
-CVS Access
+SVN Access
 ----------
 
-To get CVS access, contact richard@users.sourceforge.net.
+See http://www.roundup-tracker.org/code.html.
+For all other questions ask on the development mailinglist.
 
-CVS stuff:
-
-1. to tag a release (eg. the pre-release of 0.5.0)::
-
-    cvs tag release-0-5-0-pr1
-
-1. to make a branch (eg. branching for code freeze/release)::
-
-    cvs co -d maint-0-5 -r release-0-5-0-pr1 roundup
-    cd maint-0-5 
-    cvs tag -b maint-0-5
-
-2. to check out a branch (eg. the maintenance branch for 0.5.x)::
-
-    cvs co -d maint-0-5 -r maint-0-5
-
-3. to merge changes from the maintenance branch to the trunk, in the
-   directory containing the HEAD checkout::
-
-    cvs up -j maint-0-5
-
-   though this is highly discouraged, as it generally creates a whole swag
-   of conflicts :(
-
-Standard tag names:
-
-*release-maj-min-patch[-sub]*
-  Release of the major.minor.patch release, possibly a beta or pre-release,
-  in which case *sub* will be one of "b*N*" or "pr*N*".
-*maint-maj-min*
-  Maintenance branch for the major.minor release. Patch releases are tagged in
-  this branch.
-
-Typically, release happen like this:
-
-1. work progresses in the HEAD branch until milestones are met,
-2. a series of beta releases are tagged in the HEAD until the code is
-   stable enough to freeze,
-3. the pre-release is tagged in the HEAD, with the resultant code branched
-   to the maintenance branch for that release,
-4. bugs in the release are patched in the maintenance branch, and the final
-   and patch releases are tagged there, and
-5. further major work happens in the HEAD.
 
 Project Rules
 -------------
@@ -86,7 +52,7 @@ relaxed sometimes). In short:
 
 - 80 column width code
 - 4-space indentations
-- All modules must have a CVS Id line near the top
+- All modules must have an Id line near the top
 
 Other project rules:
 
@@ -94,7 +60,7 @@ Other project rules:
   where there's missing documentation) and changes to tracker configuration
   must be logged in the upgrading document.
 - subscribe to roundup-checkins to receive checkin notifications from the
-  other developers with CVS access
+  other developers with write access to the source-code repository.
 - discuss any changes with the other developers on roundup-dev. If nothing
   else, this makes sure there's no rude shocks
 - write unit tests for changes you make (where possible), and ensure that
@@ -144,8 +110,8 @@ How stuff works:
    message translators.
 
 4. Translated Message Files are compiled into binary form (_`MO` files)
-   and stored in ``locale`` directory (but not kept in the `Roundup
-   CVS`_ repository, as they may be easily made from PO files).
+   and stored in ``locale`` directory (but not kept in the source code
+   repository, as they may be easily made from PO files).
    See `Compiling Message Catalogs`_ section.
 
 5. Roundup installer creates runtime locale structure on the file
@@ -346,8 +312,9 @@ Roundup overcomes these limitations by using both of these utilities.
 This means that you need both `GNU gettext`_ tools and `PO utilities`_
 to build the Message Template File yourself.
 
-Latest Message Template File is kept in `Roundup CVS`_ and distributed
-with `Roundup Source`_.  If you wish to rebuild the template yourself,
+Latest Message Template File is kept in the source code repository 
+and distributed with `Roundup Source`_.  
+If you wish to rebuild the template yourself,
 make sure that you have both ``xpot`` and ``xgettext`` installed and
 just run ``gmake`` (or ``make``, if you are on a `GNU`_ system like
 `linux`_ or `cygwin`_) in the ``locale`` directory.
@@ -451,7 +418,6 @@ At run time, Roundup automatically compiles message catalogs whenever
     http://vim.sourceforge.net/scripts/script.php?script_id=695
 .. _PO utilities: http://po-utils.progiciels-bpi.ca/
 .. _poEdit: http://poedit.sourceforge.net/
-.. _Roundup CVS: http://sourceforge.net/cvs/?group_id=31577
 .. _Roundup Source:
 .. _Roundup source distribution:
 .. _Roundup binary distribution:
@@ -464,5 +430,4 @@ At run time, Roundup automatically compiles message catalogs whenever
    http://dev.zope.org/Wikis/DevSite/Projects/ZPT/TALES%20Specification%201.3
 .. _vim: http://www.vim.org/
 .. _ZPTInternationalizationSupport: http://dev.zope.org/Wikis/DevSite/Projects/ComponentArchitecture/ZPTInternationalizationSupport
-.. _feature tracker: http://sourceforge.net/tracker/?group_id=31577&atid=402791
 

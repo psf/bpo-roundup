@@ -51,6 +51,7 @@ class DiffHelper:
         if not new == old:
             res = []
 
+            replace = {}
             for key in new.keys():
                 if key.startswith('from '):
                     # skip the unix from line
@@ -60,11 +61,18 @@ class DiffHelper:
                     if new[key] != __version__:
                         res.append('  %s: %r != %r' % (key, __version__,
                             new[key]))
+                elif key.lower() == 'content-type' and 'boundary=' in new[key]:
+                    # handle mime messages
+                    newmime = new[key].split('=',1)[-1].strip('"')
+                    oldmime = old.get(key, '').split('=',1)[-1].strip('"')
+                    replace ['--' + newmime] = '--' + oldmime
+                    replace ['--' + newmime + '--'] = '--' + oldmime + '--'
                 elif new.get(key, '') != old.get(key, ''):
                     res.append('  %s: %r != %r' % (key, old.get(key, ''),
                         new.get(key, '')))
 
-            body_diff = self.compareStrings(new.fp.read(), old.fp.read())
+            body_diff = self.compareStrings(new.fp.read(), old.fp.read(),
+                replace=replace)
             if body_diff:
                 res.append('')
                 res.extend(body_diff)
@@ -73,13 +81,14 @@ class DiffHelper:
                 res.insert(0, 'Generated message not correct (diff follows):')
                 raise AssertionError, '\n'.join(res)
 
-    def compareStrings(self, s2, s1):
+    def compareStrings(self, s2, s1, replace={}):
         '''Note the reversal of s2 and s1 - difflib.SequenceMatcher wants
            the first to be the "original" but in the calls in this file,
            the second arg is the original. Ho hum.
+           Do replacements over the replace dict -- used for mime boundary
         '''
         l1 = s1.strip().split('\n')
-        l2 = s2.strip().split('\n')
+        l2 = [replace.get(i,i) for i in s2.strip().split('\n')]
         if l1 == l2:
             return
         s = difflib.SequenceMatcher(None, l1, l2)
@@ -116,11 +125,11 @@ class MailgwTestCase(unittest.TestCase, DiffHelper):
             address='chef@bork.bork.bork', realname='Bork, Chef', roles='User')
         self.richard_id = self.db.user.create(username='richard',
             address='richard@test.test', roles='User')
-        self.mary_id = self.db.user.create(username='mary', address='mary@test.test',
-            roles='User', realname='Contrary, Mary')
-        self.john_id = self.db.user.create(username='john', address='john@test.test',
-            alternate_addresses='jondoe@test.test\njohn.doe@test.test', roles='User',
-            realname='John Doe')
+        self.mary_id = self.db.user.create(username='mary',
+            address='mary@test.test', roles='User', realname='Contrary, Mary')
+        self.john_id = self.db.user.create(username='john',
+            address='john@test.test', roles='User', realname='John Doe',
+            alternate_addresses='jondoe@test.test\njohn.doe@test.test')
 
     def tearDown(self):
         if os.path.exists(SENDMAILDEBUG):
@@ -132,11 +141,15 @@ class MailgwTestCase(unittest.TestCase, DiffHelper):
             if error.errno not in (errno.ENOENT, errno.ESRCH): raise
 
     def _handle_mail(self, message):
-        handler = self.instance.MailGW(self.instance, self.db)
+        # handler will open a new db handle. On single-threaded
+        # databases we'll have to close our current connection
+        self.db.commit()
+        self.db.close()
+        handler = self.instance.MailGW(self.instance)
         handler.trapExceptions = 0
         ret = handler.main(StringIO(message))
-        # handler can close the db on us and open a new one
-        self.db = handler.db
+        # handler had its own database, open new connection
+        self.db = self.instance.open('admin')
         return ret
 
     def _get_mail(self):
@@ -549,6 +562,11 @@ _______________________________________________________________________
         self.doNewIssue()
         oldvalues = self.db.getnode('issue', '1').copy()
         oldvalues['assignedto'] = None
+        # reconstruct old behaviour: This would reuse the
+        # database-handle from the doNewIssue above which has committed
+        # as user "Chef". So we close and reopen the db as that user.
+        self.db.close()
+        self.db = self.instance.open('Chef')
         self.db.issue.set('1', assignedto=self.chef_id)
         self.db.commit()
         self.db.issue.nosymessage('1', None, oldvalues)
@@ -990,11 +1008,6 @@ Subject: [issue1] Testing... [nosy=-richard]
         assert not os.path.exists(SENDMAILDEBUG)
 
     def testNewUserAuthor(self):
-        # first without the permission
-        # heh... just ignore the API for a second ;)
-        self.db.security.role['anonymous'].permissions=[]
-        anonid = self.db.user.lookup('anonymous')
-        self.db.user.set(anonid, roles='Anonymous')
 
         l = self.db.user.list()
         l.sort()
@@ -1007,6 +1020,12 @@ Subject: [issue] Testing...
 
 This is a test submission of a new issue.
 '''
+        def hook (db, **kw):
+            ''' set up callback for db open '''
+            db.security.role['anonymous'].permissions=[]
+            anonid = db.user.lookup('anonymous')
+            db.user.set(anonid, roles='Anonymous')
+        self.instance.schema_hook = hook
         try:
             self._handle_mail(message)
         except Unauthorized, value:
@@ -1021,15 +1040,17 @@ Unknown address: fubar@bork.bork.bork
         else:
             raise AssertionError, "Unathorized not raised when handling mail"
 
-        # Add Web Access role to anonymous, and try again to make sure
-        # we get a "please register at:" message this time.
-        p = [
-            self.db.security.getPermission('Create', 'user'),
-            self.db.security.getPermission('Web Access', None),
-        ]
 
-        self.db.security.role['anonymous'].permissions=p
-
+        def hook (db, **kw):
+            ''' set up callback for db open '''
+            # Add Web Access role to anonymous, and try again to make sure
+            # we get a "please register at:" message this time.
+            p = [
+                db.security.getPermission('Create', 'user'),
+                db.security.getPermission('Web Access', None),
+            ]
+            db.security.role['anonymous'].permissions=p
+        self.instance.schema_hook = hook
         try:
             self._handle_mail(message)
         except Unauthorized, value:
@@ -1053,12 +1074,15 @@ Unknown address: fubar@bork.bork.bork
         m.sort()
         self.assertEqual(l, m)
 
-        # now with the permission
-        p = [
-            self.db.security.getPermission('Create', 'user'),
-            self.db.security.getPermission('Email Access', None),
-        ]
-        self.db.security.role['anonymous'].permissions=p
+        def hook (db, **kw):
+            ''' set up callback for db open '''
+            # now with the permission
+            p = [
+                db.security.getPermission('Create', 'user'),
+                db.security.getPermission('Email Access', None),
+            ]
+            db.security.role['anonymous'].permissions=p
+        self.instance.schema_hook = hook
         self._handle_mail(message)
         m = self.db.user.list()
         m.sort()
@@ -1076,16 +1100,79 @@ Subject: [issue] Testing...
 
 This is a test submission of a new issue.
 '''
-        p = [
-            self.db.security.getPermission('Create', 'user'),
-            self.db.security.getPermission('Email Access', None),
-        ]
-        self.db.security.role['anonymous'].permissions=p
+        def hook (db, **kw):
+            ''' set up callback for db open '''
+            p = [
+                db.security.getPermission('Create', 'user'),
+                db.security.getPermission('Email Access', None),
+            ]
+            db.security.role['anonymous'].permissions=p
+        self.instance.schema_hook = hook
         self._handle_mail(message)
         m = set(self.db.user.list())
         new = list(m - l)[0]
         name = self.db.user.get(new, 'realname')
         self.assertEquals(name, 'H€llo')
+
+    def testUnknownUser(self):
+        l = set(self.db.user.list())
+        message = '''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Nonexisting User <nonexisting@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Testing nonexisting user...
+
+This is a test submission of a new issue.
+'''
+        self.db.close()
+        handler = self.instance.MailGW(self.instance)
+        # we want a bounce message:
+        handler.trapExceptions = 1
+        ret = handler.main(StringIO(message))
+        self.compareMessages(self._get_mail(),
+'''FROM: Roundup issue tracker <roundup-admin@your.tracker.email.domain.example>
+TO: nonexisting@bork.bork.bork
+From nobody Tue Jul 14 12:04:11 2009
+Content-Type: multipart/mixed; boundary="===============0639262320=="
+MIME-Version: 1.0
+Subject: Failed issue tracker submission
+To: nonexisting@bork.bork.bork
+From: Roundup issue tracker <roundup-admin@your.tracker.email.domain.example>
+Date: Tue, 14 Jul 2009 12:04:11 +0000
+Precedence: bulk
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Version: 1.4.8
+MIME-Version: 1.0
+
+--===============0639262320==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+
+
+
+You are not a registered user.
+
+Unknown address: nonexisting@bork.bork.bork
+
+--===============0639262320==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+
+Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Nonexisting User <nonexisting@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Testing nonexisting user...
+
+This is a test submission of a new issue.
+
+--===============0639262320==--
+''')
 
     def testEnc01(self):
         self.doNewIssue()

@@ -16,7 +16,6 @@ from __future__ import nested_scopes
 # BASIS, AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #
-# $Id: roundupdb.py,v 1.139 2008-08-07 06:31:16 richard Exp $
 
 """Extending hyperdb with types specific to issue-tracking.
 """
@@ -382,7 +381,7 @@ class IssueClass:
         charset = getattr(self.db.config, 'EMAIL_CHARSET', 'utf-8')
 
         # construct the content and convert to unicode object
-        content = unicode('\n'.join(m), 'utf-8').encode(charset)
+        body = unicode('\n'.join(m), 'utf-8').encode(charset)
 
         # make sure the To line is always the same (for testing mostly)
         sendto.sort()
@@ -473,7 +472,7 @@ class IssueClass:
             # attach files
             if message_files:
                 # first up the text as a part
-                part = MIMEText(content)
+                part = MIMEText(body)
                 encode_quopri(part)
                 message.attach(part)
 
@@ -508,13 +507,13 @@ class IssueClass:
                     message.attach(part)
 
             else:
-                message.set_payload(content)
+                message.set_payload(body)
                 encode_quopri(message)
 
             if first:
-                mailer.smtp_send(sendto + bcc_sendto, str(message))
+                mailer.smtp_send(sendto + bcc_sendto, message.as_string())
             else:
-                mailer.smtp_send(sendto, str(message))
+                mailer.smtp_send(sendto, message.as_string())
             first = False
 
     def email_signature(self, nodeid, msgid):

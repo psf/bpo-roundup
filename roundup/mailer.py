@@ -1,7 +1,6 @@
 """Sending Roundup-specific mail over SMTP.
 """
 __docformat__ = 'restructuredtext'
-# $Id: mailer.py,v 1.22 2008-07-21 01:44:58 richard Exp $
 
 import time, quopri, os, socket, smtplib, re, sys, traceback, email
 
@@ -75,8 +74,7 @@ class Mailer:
         if multipart:
             message = MIMEMultipart()
         else:
-            message = Message()
-            message.set_type('text/plain')
+            message = MIMEText("")
             message.set_charset(charset)
 
         try:
@@ -103,8 +101,6 @@ class Mailer:
         # finally, an aid to debugging problems
         message['X-Roundup-Version'] = __version__
 
-        message['MIME-Version'] = '1.0'
-
         return message
 
     def standard_message(self, to, subject, content, author=None):
@@ -121,7 +117,7 @@ class Mailer:
         message = self.get_standard_message(to, subject, author)
         message.set_payload(content)
         encode_quopri(message)
-        self.smtp_send(to, str(message))
+        self.smtp_send(to, message.as_string())
 
     def bounce_message(self, bounced_message, to, error,
                        subject='Failed issue tracker submission'):
@@ -145,29 +141,30 @@ class Mailer:
         elif error_messages_to == "both":
             to.append(dispatcher_email)
 
-        message = self.get_standard_message(to, subject)
+        message = self.get_standard_message(to, subject, multipart=True)
 
         # add the error text
-        part = MIMEText(error)
+        part = MIMEText('\n'.join(error))
         message.attach(part)
 
         # attach the original message to the returned message
+        body = []
+        for header in bounced_message.headers:
+            body.append(header)
         try:
             bounced_message.rewindbody()
-        except IOError, message:
-            body.write("*** couldn't include message body: %s ***"
-                       % bounced_message)
+        except IOError, errmessage:
+            body.append("*** couldn't include message body: %s ***" %
+                errmessage)
         else:
-            body.write(bounced_message.fp.read())
-        part = MIMEText(bounced_message.fp.read())
-        part['Content-Disposition'] = 'attachment'
-        for header in bounced_message.headers:
-            part.write(header)
+            body.append('\n')
+            body.append(bounced_message.fp.read())
+        part = MIMEText(''.join(body))
         message.attach(part)
 
         # send
         try:
-            self.smtp_send(to, str(message))
+            self.smtp_send(to, message.as_string())
         except MessageSendError:
             # squash mail sending errors when bouncing mail
             # TODO this *could* be better, as we could notify admin of the

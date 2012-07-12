@@ -59,6 +59,14 @@ class RoundupInstance:
         self.actions = actions
         self.translator = translator
 
+    def schema(self):
+        s = {}
+        for c in self.db.classes:
+            cls = self.db.classes[c]
+            props = [(n,repr(v)) for n,v in cls.properties.items()]
+            s[c] = props
+        return s
+
     def list(self, classname, propname=None):
         cl = self.db.getclass(classname)
         if not propname:
@@ -90,6 +98,7 @@ class RoundupInstance:
         return dict(result)
 
     def create(self, classname, *args):
+        
         if not self.db.security.hasPermission('Create', self.db.getuid(), classname):
             raise Unauthorised('Permission to create %s denied'%classname)
 
@@ -103,9 +112,15 @@ class RoundupInstance:
         if key and not props.has_key(key):
             raise UsageError, 'you must provide the "%s" property.'%key
 
+        for key in props:
+            if not self.db.security.hasPermission('Edit', self.db.getuid(), classname,
+                                                  property=key):
+                raise Unauthorised('Permission to set %s.%s denied'%(classname, key))
+
         # do the actual create
         try:
             result = cl.create(**props)
+            self.db.commit()
         except (TypeError, IndexError, ValueError), message:
             raise UsageError, message
         return result
@@ -121,15 +136,17 @@ class RoundupInstance:
                 raise Unauthorised('Permission to edit %s of %s denied'%
                                    (p, designator))
         try:
-            return cl.set(itemid, **props)
+            result = cl.set(itemid, **props)
+            self.db.commit()
         except (TypeError, IndexError, ValueError), message:
             raise UsageError, message
+        return result
 
 
     builtin_actions = {'retire': actions.Retire}
 
     def action(self, name, *args):
-        """"""
+        """Execute a named action."""
         
         if name in self.actions:
             action_type = self.actions[name]
@@ -148,7 +165,12 @@ class RoundupDispatcher(SimpleXMLRPCDispatcher):
     def __init__(self, db, actions, translator,
                  allow_none=False, encoding=None):
 
-        SimpleXMLRPCDispatcher.__init__(self, allow_none, encoding)
+        try:
+            # python2.5 and beyond
+            SimpleXMLRPCDispatcher.__init__(self, allow_none, encoding)
+        except TypeError:
+            # python2.4
+            SimpleXMLRPCDispatcher.__init__(self)
         self.register_instance(RoundupInstance(db, actions, translator))
                  
 

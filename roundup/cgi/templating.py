@@ -183,12 +183,28 @@ class Templates:
             return self.templates[src]
 
         # compile the template
-        self.templates[src] = pt = RoundupPageTemplate()
+        pt = RoundupPageTemplate()
         # use pt_edit so we can pass the content_type guess too
         content_type = mimetypes.guess_type(filename)[0] or 'text/html'
         pt.pt_edit(open(src).read(), content_type)
         pt.id = filename
         pt.mtime = stime
+        # Add it to the cache.  We cannot do this until the template
+        # is fully initialized, as we could otherwise have a race
+        # condition when running with multiple threads:
+        #
+        # 1. Thread A notices the template is not in the cache,
+        #    adds it, but has not yet set "mtime".
+        #
+        # 2. Thread B notices the template is in the cache, checks
+        #    "mtime" (above) and crashes.
+        #
+        # Since Python dictionary access is atomic, as long as we
+        # insert "pt" only after it is fully initialized, we avoid
+        # this race condition.  It's possible that two separate
+        # threads will both do the work of initializing the template,
+        # but the risk of wasted work is offset by avoiding a lock.
+        self.templates[src] = pt
         return pt
 
     def __getitem__(self, name):
@@ -420,17 +436,19 @@ def _set_input_default_args(dic):
         except KeyError:
             pass
 
+def cgi_escape_attrs(**attrs):
+    return ' '.join(['%s="%s"'%(k,cgi.escape(str(v), True))
+        for k,v in attrs.items()])
+
 def input_html4(**attrs):
     """Generate an 'input' (html4) element with given attributes"""
     _set_input_default_args(attrs)
-    return '<input %s>'%' '.join(['%s="%s"'%(k,cgi.escape(str(v), True))
-        for k,v in attrs.items()])
+    return '<input %s>'%cgi_escape_attrs(**attrs)
 
 def input_xhtml(**attrs):
     """Generate an 'input' (xhtml) element with given attributes"""
     _set_input_default_args(attrs)
-    return '<input %s/>'%' '.join(['%s="%s"'%(k,cgi.escape(str(v), True))
-        for k,v in attrs.items()])
+    return '<input %s/>'%cgi_escape_attrs(**attrs)
 
 class HTMLInputMixin:
     """ requires a _client property """
@@ -880,7 +898,8 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
         # XXX do this
         return []
 
-    def history(self, direction='descending', dre=re.compile('^\d+$')):
+    def history(self, direction='descending', dre=re.compile('^\d+$'),
+            limit=None):
         if not self.is_view_ok():
             return self._('[hidden]')
 
@@ -911,6 +930,10 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
         history = self._klass.history(self._nodeid)
         history.sort()
         history.reverse()
+
+        # restrict the volume
+        if limit:
+            history = history[:limit]
 
         timezone = self._db.getUserTimezone()
         l = []
@@ -1268,7 +1291,9 @@ class HTMLProperty(HTMLInputMixin, HTMLPermissions):
             return self._db.security.hasPermission('Edit', self._client.userid,
                 self._classname, self._name, self._nodeid)
         return self._db.security.hasPermission('Create', self._client.userid,
-            self._classname, self._name)
+            self._classname, self._name) or \
+            self._db.security.hasPermission('Register', self._client.userid,
+                                            self._classname, self._name)
 
     def is_view_ok(self):
         """ Is the user allowed to View the current class?
@@ -1457,8 +1482,7 @@ class StringHTMLProperty(HTMLProperty):
 
             value = '&quot;'.join(value.split('"'))
         name = self._formname
-        passthrough_args = ' '.join(['%s="%s"' % (k, cgi.escape(str(v), True))
-            for k,v in kwargs.items()])
+        passthrough_args = cgi_escape_attrs(**kwargs)
         return ('<textarea %(passthrough_args)s name="%(name)s" id="%(name)s"'
                 ' rows="%(rows)s" cols="%(cols)s">'
                  '%(value)s</textarea>') % locals()
@@ -1496,7 +1520,7 @@ class PasswordHTMLProperty(HTMLProperty):
             return ''
         return self._('*encrypted*')
 
-    def field(self, size=30):
+    def field(self, size=30, **kwargs):
         """ Render a form edit field for the property.
 
             If not editable, just display the value via plain().
@@ -1504,7 +1528,8 @@ class PasswordHTMLProperty(HTMLProperty):
         if not self.is_edit_ok():
             return self.plain(escape=1)
 
-        return self.input(type="password", name=self._formname, size=size)
+        return self.input(type="password", name=self._formname, size=size,
+                          **kwargs)
 
     def confirm(self, size=30):
         """ Render a second form edit field for the property, used for
@@ -1533,7 +1558,7 @@ class NumberHTMLProperty(HTMLProperty):
 
         return str(self._value)
 
-    def field(self, size=30):
+    def field(self, size=30, **kwargs):
         """ Render a form edit field for the property.
 
             If not editable, just display the value via plain().
@@ -1545,7 +1570,8 @@ class NumberHTMLProperty(HTMLProperty):
         if value is None:
             value = ''
 
-        return self.input(name=self._formname, value=value, size=size)
+        return self.input(name=self._formname, value=value, size=size,
+                          **kwargs)
 
     def __int__(self):
         """ Return an int of me
@@ -1569,7 +1595,7 @@ class BooleanHTMLProperty(HTMLProperty):
             return ''
         return self._value and self._("Yes") or self._("No")
 
-    def field(self):
+    def field(self, **kwargs):
         """ Render a form edit field for the property
 
             If not editable, just display the value via plain().
@@ -1585,15 +1611,17 @@ class BooleanHTMLProperty(HTMLProperty):
         checked = value and "checked" or ""
         if value:
             s = self.input(type="radio", name=self._formname, value="yes",
-                checked="checked")
+                checked="checked", **kwargs)
             s += self._('Yes')
-            s +=self.input(type="radio", name=self._formname, value="no")
+            s +=self.input(type="radio", name=self._formname,  value="no",
+                           **kwargs)
             s += self._('No')
         else:
-            s = self.input(type="radio", name=self._formname, value="yes")
+            s = self.input(type="radio", name=self._formname,  value="yes",
+                           **kwargs)
             s += self._('Yes')
             s +=self.input(type="radio", name=self._formname, value="no",
-                checked="checked")
+                checked="checked", **kwargs)
             s += self._('No')
         return s
 
@@ -1651,7 +1679,8 @@ class DateHTMLProperty(HTMLProperty):
         return DateHTMLProperty(self._client, self._classname, self._nodeid,
             self._prop, self._formname, ret)
 
-    def field(self, size=30, default=None, format=_marker, popcal=True):
+    def field(self, size=30, default=None, format=_marker, popcal=True,
+              **kwargs):
         """Render a form edit field for the property
 
         If not editable, just display the value via plain().
@@ -1686,7 +1715,8 @@ class DateHTMLProperty(HTMLProperty):
         elif isinstance(value, str) or isinstance(value, unicode):
             # most likely erroneous input to be passed back to user
             if isinstance(value, unicode): value = value.encode('utf8')
-            return self.input(name=self._formname, value=value, size=size)
+            return self.input(name=self._formname, value=value, size=size,
+                              **kwargs)
         else:
             raw_value = value
 
@@ -1706,7 +1736,8 @@ class DateHTMLProperty(HTMLProperty):
             if format is not self._marker:
                 value = value.pretty(format)
 
-        s = self.input(name=self._formname, value=value, size=size)
+        s = self.input(name=self._formname, value=value, size=size,
+                       **kwargs)
         if popcal:
             s += self.popcal()
         return s
@@ -1801,7 +1832,7 @@ class IntervalHTMLProperty(HTMLProperty):
 
         return self._value.pretty()
 
-    def field(self, size=30):
+    def field(self, size=30, **kwargs):
         """ Render a form edit field for the property
 
             If not editable, just display the value via plain().
@@ -1813,7 +1844,8 @@ class IntervalHTMLProperty(HTMLProperty):
         if value is None:
             value = ''
 
-        return self.input(name=self._formname, value=value, size=size)
+        return self.input(name=self._formname, value=value, size=size,
+                          **kwargs)
 
 class LinkHTMLProperty(HTMLProperty):
     """ Link HTMLProperty
@@ -1866,7 +1898,7 @@ class LinkHTMLProperty(HTMLProperty):
             value = cgi.escape(value)
         return value
 
-    def field(self, showid=0, size=None):
+    def field(self, showid=0, size=None, **kwargs):
         """ Render a form edit field for the property
 
             If not editable, just display the value via plain().
@@ -1884,10 +1916,11 @@ class LinkHTMLProperty(HTMLProperty):
                 value = linkcl.get(self._value, k)
             else:
                 value = self._value
-        return self.input(name=self._formname, value=value, size=size)
+        return self.input(name=self._formname, value=value, size=size,
+                          **kwargs)
 
     def menu(self, size=None, height=None, showid=0, additional=[], value=None,
-            sort_on=None, **conditions):
+             sort_on=None, html_kwargs = {}, **conditions):
         """ Render a form select list for this property
 
             "size" is used to limit the length of the list labels
@@ -1920,7 +1953,8 @@ class LinkHTMLProperty(HTMLProperty):
             value = None
 
         linkcl = self._db.getclass(self._prop.classname)
-        l = ['<select name="%s">'%self._formname]
+        l = ['<select %s>'%cgi_escape_attrs(name = self._formname,
+                                            **html_kwargs)]
         k = linkcl.labelprop(1)
         s = ''
         if value is None:
@@ -2086,7 +2120,7 @@ class MultilinkHTMLProperty(HTMLProperty):
             value = cgi.escape(value)
         return value
 
-    def field(self, size=30, showid=0):
+    def field(self, size=30, showid=0, **kwargs):
         """ Render a form edit field for the property
 
             If not editable, just display the value via plain().
@@ -2103,10 +2137,11 @@ class MultilinkHTMLProperty(HTMLProperty):
             k = linkcl.labelprop(1)
             value = lookupKeys(linkcl, k, value)
         value = ','.join(value)
-        return self.input(name=self._formname, size=size, value=value)
+        return self.input(name=self._formname, size=size, value=value,
+                          **kwargs)
 
     def menu(self, size=None, height=None, showid=0, additional=[],
-             value=None, sort_on=None, **conditions):
+             value=None, sort_on=None, html_kwargs = {}, **conditions):
         """ Render a form <select> list for this property.
 
             "size" is used to limit the length of the list labels
@@ -2159,7 +2194,9 @@ class MultilinkHTMLProperty(HTMLProperty):
                 # The "no selection" option.
                 height += 1
             height = min(height, 7)
-        l = ['<select multiple name="%s" size="%s">'%(self._formname, height)]
+        l = ['<select multiple %s>'%cgi_escape_attrs(name = self._formname,
+                                                     size = height,
+                                                     **html_kwargs)]
         k = linkcl.labelprop(1)
 
         if value:

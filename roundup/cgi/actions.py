@@ -105,7 +105,7 @@ class RetireAction(Action):
         """Retire the context item."""
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            self.client.error_message.append(self._('Invalid request'))
+            raise roundup.exceptions.Reject(self._('Invalid request'))
 
         # if we want to view the index template now, then unset the itemid
         # context info (a special-case for retire actions on the index page)
@@ -289,7 +289,7 @@ class EditCSVAction(Action):
         """
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            self.client.error_message.append(self._('Invalid request'))
+            raise roundup.exceptions.Reject(self._('Invalid request'))
 
         # figure the properties list for the class
         cl = self.db.classes[self.classname]
@@ -544,9 +544,25 @@ class EditCommon(Action):
         Base behaviour is to check the user can edit this class. No additional
         property checks are made.
         """
+
         if not classname :
             classname = self.client.classname
-        return self.hasPermission('Create', classname=classname)
+        
+        if not self.hasPermission('Create', classname=classname):
+            return 0
+
+        # Check Edit permission for each property, to avoid being able
+        # to set restricted ones on new item creation
+        for key in props:
+            if not self.hasPermission('Edit', classname=classname,
+                                      property=key):
+                # We restrict by default and special-case allowed properties
+                if key == 'date' or key == 'content':
+                    continue
+                elif key == 'author' and props[key] == self.userid:
+                    continue
+                return 0
+        return 1
 
 class EditItemAction(EditCommon):
     def lastUserActivity(self):
@@ -592,7 +608,7 @@ class EditItemAction(EditCommon):
         """
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            self.client.error_message.append(self._('Invalid request'))
+            raise roundup.exceptions.Reject(self._('Invalid request'))
 
         user_activity = self.lastUserActivity()
         if user_activity:
@@ -638,7 +654,7 @@ class NewItemAction(EditCommon):
         '''
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            self.client.error_message.append(self._('Invalid request'))
+            raise roundup.exceptions.Reject(self._('Invalid request'))
 
         # parse the props from the form
         try:
@@ -647,11 +663,6 @@ class NewItemAction(EditCommon):
             self.client.error_message.append(self._('Error: %s')
                 % str(message))
             return
-
-        # guard against new user creation that would bypass security checks
-        for key in props:
-            if 'user' in key:
-                return
 
         # handle the props - edit or create
         try:
@@ -814,7 +825,7 @@ class ConfRegoAction(RegoCommon):
 
 class RegisterAction(RegoCommon, EditCommon):
     name = 'register'
-    permissionType = 'Create'
+    permissionType = 'Register'
 
     def handle(self):
         """Attempt to create a new user based on the contents of the form
@@ -824,7 +835,7 @@ class RegisterAction(RegoCommon, EditCommon):
         """
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            self.client.error_message.append(self._('Invalid request'))
+            raise roundup.exceptions.Reject(self._('Invalid request'))
 
         # parse the props from the form
         try:
@@ -942,7 +953,7 @@ class LoginAction(Action):
         """
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            self.client.error_message.append(self._('Invalid request'))
+            raise roundup.exceptions.Reject(self._('Invalid request'))
 
         # we need the username at a minimum
         if not self.form.has_key('__login_name'):
@@ -1107,11 +1118,11 @@ class Bridge(BaseAction):
     def permission(self, args):
         """Raise Unauthorised if the current user is not allowed to execute
         this action. Users may override this method."""
-        
+
         pass
 
     def handle(self, args):
-        
+
         raise NotImplementedError
 
 # vim: set filetype=python sts=4 sw=4 et si :

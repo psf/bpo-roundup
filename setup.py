@@ -101,22 +101,31 @@ def main():
           description="A simple-to-use and -install issue-tracking system"
             " with command-line, web and e-mail interfaces. Highly"
             " customisable.",
-          long_description='''
-1.4.8 fixes some regressions:
+          long_description='''This version of Roundup fixes some bugs:
 
-- bug introduced into hyperdb filter (issue 2550505)
-- bug introduced into CVS export and view (issue 2550529)
-- bugs introduced in the migration to the email package (issue 2550531)
-
-And adds a couple of other fixes:
-
-- handle bogus pagination values (issue 2550530)
-- fix TLS handling with some SMTP servers (issues 2484879 and 1912923)
+- Minor update of doc/developers.txt to point to the new resources
+  on www.roundup-tracker.org (Bernhard Reiter)
+- Small CSS improvements regaring the search box (thanks Thomas Arendsan Hein)
+  (issue 2550589)
+- Indexers behaviour made more consistent regarding length of indexed words
+  and stopwords (thanks Thomas Arendsen Hein, Bernhard Reiter)(issue 2550584)
+- fixed typos in the installation instructions (thanks Thomas Arendsen Hein)
+  (issue 2550573) 
+- New config option csv_field_size: Pythons csv module (which is used
+  for export/import) has a new field size limit starting with python2.5.
+  We now issue a warning during export if the limit is too small and use
+  the csv_field_size configuration during import to set the limit for
+  the csv module.
+- Small fix for CGI-handling of XMLRPC requests for python2.4, this
+  worked only for 2.5 and beyond due to a change in the xmlrpc interface
+  in python
+- Document filter method of xmlrpc interface
+- Fix interaction of SSL and XMLRPC, now XMLRPC works with SSL
 
 If you're upgrading from an older version of Roundup you *must* follow
 the "Software Upgrade" guidelines given in the maintenance documentation.
 
-Roundup requires python 2.3 or later for correct operation.
+Roundup requires python 2.3 or later (but not 3+) for correct operation.
 
 To give Roundup a try, just download (see below), unpack and run::
 
@@ -147,9 +156,9 @@ Roundup manages a number of issues (with flexible properties such as
 The system will facilitate communication among the participants by managing
 discussions and notifying interested parties when issues are edited. One of
 the major design goals for Roundup that it be simple to get going. Roundup
-is therefore usable "out of the box" with any python 2.3+ installation. It
-doesn't even need to be "installed" to be operational, though a
-disutils-based install script is provided.
+is therefore usable "out of the box" with any python 2.3+ (but not 3+)
+installation. It doesn't even need to be "installed" to be operational,
+though an install script is provided.
 
 It comes with two issue tracker templates (a classic bug/feature tracker and
 a minimal skeleton) and five database back-ends (anydbm, sqlite, metakit,
