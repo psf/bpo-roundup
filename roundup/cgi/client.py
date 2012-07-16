@@ -7,6 +7,11 @@ import quopri, random, re, rfc822, stat, sys, time
 import socket, errno
 from traceback import format_exc
 
+try:
+    from OpenSSL.SSL import SysCallError
+except ImportError:
+    SysCallError = None
+
 from roundup import roundupdb, date, hyperdb, password
 from roundup.cgi import templating, cgitb, TranslationService
 from roundup.cgi.actions import *
@@ -487,7 +492,10 @@ class Client:
                 self.serve_static_file(str(file))
             except IOError:
                 # IOErrors here are due to the client disconnecting before
-                # recieving the reply.
+                # receiving the reply.
+                pass
+            except SysCallError:
+                # OpenSSL.SSL.SysCallError is similar to IOError above
                 pass
 
         except SeriousError, message:
@@ -535,6 +543,15 @@ class Client:
         except FormError, e:
             self.error_message.append(self._('Form Error: ') + str(e))
             self.write_html(self.renderContext())
+        except IOError:
+            # IOErrors here are due to the client disconnecting before
+            # receiving the reply.
+            # may happen during write_html and serve_file, too.
+            pass
+        except SysCallError:
+            # OpenSSL.SSL.SysCallError is similar to IOError above
+            # may happen during write_html and serve_file, too.
+            pass
         except:
             # Something has gone badly wrong.  Therefore, we should
             # make sure that the response code indicates failure.
