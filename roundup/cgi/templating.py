@@ -2660,7 +2660,7 @@ function help_window(helpurl, width, height) {
             ignore[(klass, prop)] = None
         return ignore
 
-    def batch(self, to_ignore='ignore'):
+    def batch(self, permission='View', to_ignore='ignore'):
         """ Return a batch object for results from the "current search"
         """
         check = self._client.db.security.hasPermission
