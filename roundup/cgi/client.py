@@ -600,33 +600,11 @@ class Client:
         #      'last_clean' string is used instead of otk key
         last_clean = self.db.getOTKManager().get('last_clean', 'last_use', 0)
         if now - last_clean < hour:
-            # Release the database lock obtained when looking at last_clean
-            self.db.rollback()
             return
 
-        # This is a bit ugly, but right now, I'm too lazy to fix a new API
-        # in all rdbms-based backends to cope with this problem that only
-        # appears on Postgres.
-        try:
-            from psycopg import ProgrammingError
-        except ImportError:
-            from psycopg2.psycopg1 import ProgrammingError
-        except ImportError:
-            ProgrammingError = None
-
-        try:
-            sessions.clean(now)
-            self.db.getOTKManager().clean(now)
-            sessions.set('last_clean', last_use=time.time())
-        except ProgrammingError, err:
-            response = str(err).split('\n')[0]
-            if -1 != response.find('ERROR') and \
-               -1 != response.find('could not serialize access due to concurrent update'):
-                # Another client just updated, and we're running on
-                # serializable isolation.
-                # See http://www.postgresql.org/docs/7.4/interactive/transaction-iso.html
-                self.db.rollback()
-                return
+        self.session_api.clean_up()
+        self.db.getOTKManager().clean()
+        self.db.getOTKManager().set('last_clean', last_use=now)
         self.db.commit(fail_ok=True)
 
     def determine_charset(self):
