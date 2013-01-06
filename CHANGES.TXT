@@ -3,10 +3,31 @@ Entries are given with the most recent entry first.
 Each entry has the developer who committed the change in brackets.
 Entries without name were done by Richard Jones.
 
-2012-??-??: 1.4.21
+2013-??-??: 1.4.22
 
 Features:
 
+- ...
+
+Fixed:
+
+- Make roundup play nice with setup tools (for using with virtualenv)
+  (Pradip Caulagi)
+- [minor] Template responsive: make demo.py work out of the box with it,
+  by setting the static_files config.ini setting to "static". 
+  Footer: link fixed and hardcoded last modfied date removed. (Bernhard Reiter)
+
+
+2012-12-21: 1.4.21
+
+Features:
+
+- issue2550782: Added a new irker detector to send notifications on IRC
+  when an issue is created or messages are added. (Ezio Melotti)
+- Beta version of responsive templates using devel schema
+  and Twitter Bootstrap for styling (Pradip Caulagi)
+- pywin32 is no longer required to run on Windows (anatoly techtonik)
+- Rewritten portalocker.py logic in ctypes for Windows (anatoly techtonik)
 - Add an interface to register clearCache callbacks in roundupdb.
   Sometimes complicated computations may require an application cache.
   This application can now register a callback to clear the application
@@ -42,6 +63,36 @@ Fixed:
   thanks Nathan Russell. (John Kristensen)
 - issue2550756: Fix `oder' typo in mailer.Mailer.bounce_message docstring,
   thanks W. Trevor King (John Kristensen)
+- Fix basic authentication: instatiating the login action would fail if
+  the user is not set. We now first set the user to anonymous and then
+  try basic authentication if enabled. (Ralf Schlatterbeck)
+- Fix xmlrpc permissions for lookup method: Allow if the key attribute
+  is either searchable or viewable, don't check id attribute (Ralf
+  Schlatterbeck)
+- Fix installation documentation (section Prerequisites) to require at
+  least python 2.5, thanks to John P. Rouillard for discovering this.
+  (committed by Ralf Schlatterbeck)
+- Fix version_check.py to require at least python 2.5 (anatoly techtonik)
+- Fixing the download button re-activating the cheeseshop plugin in the 
+  sphinx config. Thanks to Richard for the hint. (Bernhard Reiter)
+- issue2550783 devel template's schema.py permissions referenced the
+  organization property for the user, but the property is called
+  organisation. Thanks to Pradip Caulagi. (committed by John Rouillard)
+- issue2550749 - the xmlrpc interface is invoked on content type
+  and not url path. Sending any text/xml data to roundup results in
+  invoking the xml-rpc interface, but a REST or other interface could
+  also consume xml data and do something different. So require the use
+  of 'http(s)://.../xmlrpc' uri to trigger the xmlrpc interface.
+  (John Rouillard)
+- issue2550774: Remove generating documentation with rst2html, and update the
+  README.txt with how to create the html docs using sphinx, thanks Kai Storbeck
+  (John Kristensen)
+- issue2550774: Include doc/conf.py in the release tarball, so people can build
+  their own documentation in html, thanks Kai Storbeck (John Kristensen)
+- issue2550774: Update website/www/Makefile to symlink COPYING.txt so "make"
+  works again, thanks Kai Storbeck (John Kristensen)
+- issue2550760: Several improvements to the manpages
+  thanks Kai Storbeck & Bastian Kleineidam (John Kristensen)
 
 
 2012-05-15: 1.4.20

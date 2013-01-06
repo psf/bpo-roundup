@@ -365,7 +365,7 @@ class Client:
         """ Wrap the real main in a try/finally so we always close off the db.
         """
         try:
-            if self.env.get('CONTENT_TYPE') == 'text/xml':
+            if self.env.get('CONTENT_TYPE') == 'text/xml' and self.path == 'xmlrpc':
                 self.handle_xmlrpc()
             else:
                 self.inner_main()
@@ -722,6 +722,10 @@ class Client:
                         pass
                     username, password = decoded.split(':', 1)
                     try:
+                        # Current user may not be None, otherwise
+                        # instatiation of the login action will fail.
+                        # So we set the user to anonymous first.
+                        self.make_user_anonymous()
                         login = self.get_action_class('login')(self)
                         login.verifyLogin(username, password)
                     except LoginError, err:

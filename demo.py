@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 #
 # Copyright (c) 2003 Richard Jones (richard@mechanicalcat.net)
 #
@@ -8,7 +8,6 @@ import os
 import socket
 import sys
 import urlparse
-from glob import glob
 import getopt
 
 from roundup import configuration
@@ -80,6 +79,9 @@ def install_demo(home, backend, template):
 
     # write the config
     config['INSTANT_REGISTRATION'] = 1
+    # FIXME: Move template-specific demo initialization into the templates.
+    if template == 'responsive':
+        config['STATIC_FILES'] = "static"
     config.save(os.path.join(home, config.INI_FILE))
 
     # open the tracker and initialise
@@ -89,7 +91,7 @@ def install_demo(home, backend, template):
     # add the "demo" user
     db = tracker.open('admin')
     # FIXME: Move tracker-specific demo initialization into the tracker templates.
-    if (template == 'minimal'):
+    if template == 'minimal':
         db.user.create(username='demo', password=password.Password('demo'),
                        roles='User')
     else:

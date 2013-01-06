@@ -437,6 +437,8 @@ class FormTestCase(unittest.TestCase):
         # assume that the "best" algorithm is the first one and doesn't
         # need migration, all others should be migrated.
         for scheme in password.Password.deprecated_schemes:
+            if scheme == 'crypt' and os.name == 'nt':
+                continue  # crypt is not available on Windows
             pw1 = password.Password('foo', scheme=scheme)
             self.assertEqual(pw1.needs_migration(), True)
             self.db.user.set(chef, password=pw1)
@@ -453,13 +455,14 @@ class FormTestCase(unittest.TestCase):
         pw = self.db.user.get(chef, 'password')
         self.assertEqual(pw, 'foo')
         self.assertEqual(pw, pw1)
+        cl.db.close()
 
     def testPasswordConfigOption(self):
         chef = self.db.user.lookup('Chef')
         form = dict(__login_name='Chef', __login_password='foo')
         cl = self._make_client(form)
         self.db.config.PASSWORD_PBKDF2_DEFAULT_ROUNDS = 1000
-        pw1 = password.Password('foo', scheme='crypt')
+        pw1 = password.Password('foo', scheme='MD5')
         self.assertEqual(pw1.needs_migration(), True)
         self.db.user.set(chef, password=pw1)
         self.db.commit()
@@ -467,6 +470,7 @@ class FormTestCase(unittest.TestCase):
         pw = self.db.user.get(chef, 'password')
         self.assertEqual('PBKDF2', pw.scheme)
         self.assertEqual(1000, password.pbkdf2_unpack(pw.password)[0])
+        cl.db.close()
 
     #
     # Boolean

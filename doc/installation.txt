@@ -30,7 +30,7 @@ Roundup scripts
 Prerequisites
 =============
 
-Roundup requires Python 2.3 or newer (but not Python 3) with a functioning
+Roundup requires Python 2.5 or newer (but not Python 3) with a functioning
 anydbm module. Download the latest version from http://www.python.org/.
 It is highly recommended that users install the latest patch version
 of python as these contain many fixes to serious bugs.
@@ -38,11 +38,6 @@ of python as these contain many fixes to serious bugs.
 Some variants of Linux will need an additional "python dev" package
 installed for Roundup installation to work. Debian and derivatives, are
 known to require this.
-
-If you're on windows, you will either need to be using the ActiveState python
-distribution (at http://www.activestate.com/Products/ActivePython/), or you'll
-have to install the win32all package separately (get it from
-http://starship.python.net/crew/mhammond/win32/).
 
 
 Optional Components
@@ -83,11 +78,15 @@ pyme
   configured, you can require email to be cryptographically signed
   before roundup will allow it to make modifications to issues.
 
+Windows Service
+  You can run Roundup as a Windows service if pywin32_ is installed.
+
 .. _Xapian: http://xapian.org/
 .. _pytz: http://www.python.org/pypi/pytz
 .. _Olson tz database: http://www.twinsun.com/tz/tz-link.htm
 .. _pyopenssl: http://pyopenssl.sourceforge.net
 .. _pyme: http://pyme.sourceforge.net
+.. _pywin32: http://pypi.python.org/pypi/pywin32
 
 
 Getting Roundup
@@ -101,15 +100,12 @@ Getting Roundup
 
 Download the latest version from http://www.roundup-tracker.org/.
 
-If you're using WinZIP's "classic" interface, make sure the "Use
-folder names" check box is checked before you extract the files.
-
-
 For The Really Impatient
 ========================
 
-If you just want to give Roundup a whirl Right Now, then simply run
-``roundup-demo``.
+If you just want to give Roundup a whirl Right Now, then simply unpack
+and run ``demo.py`` (it will be available as ``roundup-demo`` script
+after installation).
 
 This will set up a simple demo tracker on your machine. [1]_
 When it's done, it'll print out a URL to point your web browser at
