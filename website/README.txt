@@ -13,8 +13,8 @@ issues.roundup-tracker.org:
       sudo /etc/init.d/roundup restart
 
 [1] All services hosted on sf.net:
- * log into sf.net
-   http://sourceforge.net/apps/trac/sourceforge/wiki/Shell%20service
+ * log into sf.net (Generic sf instructions can be found here:
+   http://sourceforge.net/apps/trac/sourceforge/wiki/Shell%20service )
       ssh -t <user>,roundup@shell.sourceforge.net create
  * set project_home:
       project_home=/home/project-web/roundup
@@ -23,10 +23,11 @@ issues.roundup-tracker.org:
       vim ${project_home}/logbuch.txt
  * update the working copy of the SCM roundup source (includes www and wiki)
       cd ${project_home}/src/roundup
-      hg pull -u /home/scm_hg/r/ro/roundup/roundup
-   (The warning about "Not trusting file
-   /home/scm_hg/r/ro/roundup/roundup/.hg/hgrc from untrusted user"
-   can be ignored.)
+      hg pull -u
+   (The warning about "Not trusting file /home/hg/p/roundup/code/.hg/hgrc
+   from untrusted user" can be ignored.)
+ * When done working in the shell, you can destroy it early to free resources:
+      shutdown
 
 www.roundup-tracker.org:
  * follow [1].
@@ -48,6 +49,8 @@ www.roundup-tracker.org:
 
 wiki.roundup-tracker.org:
  * follow [1].
+ * the main wiki configuration is here
+      vim persistent/wiki/wikiconfig.py
  * go to the now current source directory
       cd ${project_home}/src/roundup/website/wiki
  * copy the files into the right places:

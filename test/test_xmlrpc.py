@@ -6,10 +6,13 @@
 
 import unittest, os, shutil, errno, sys, difflib, cgi, re
 
+from xmlrpclib import MultiCall
 from roundup.cgi.exceptions import *
 from roundup import init, instance, password, hyperdb, date
-from roundup.xmlrpc import RoundupInstance
+from roundup.xmlrpc import RoundupInstance, RoundupDispatcher
 from roundup.backends import list_backends
+from roundup.hyperdb import String
+from roundup.cgi import TranslationService
 
 import db_test_base
 
@@ -26,6 +29,8 @@ class TestCase(unittest.TestCase):
 
         # open the database
         self.db = self.instance.open('admin')
+
+        # Get user id (user4 maybe). Used later to get data from db.
         self.joeid = 'user' + self.db.user.create(username='joe',
             password=password.Password('random'), address='random@home.org',
             realname='Joe Random', roles='User')
@@ -33,6 +38,19 @@ class TestCase(unittest.TestCase):
         self.db.commit()
         self.db.close()
         self.db = self.instance.open('joe')
+
+        self.db.tx_Source = 'web'
+
+        self.db.issue.addprop(tx_Source=hyperdb.String())
+        self.db.msg.addprop(tx_Source=hyperdb.String())
+
+        self.db.post_init()
+
+        thisdir = os.path.dirname(__file__)
+        vars = {}
+        execfile(os.path.join(thisdir, "tx_Source_detector.py"), vars)
+        vars['init'](self.db)
+
         self.server = RoundupInstance(self.db, self.instance.actions, None)
 
     def tearDown(self):
@@ -66,6 +84,7 @@ class TestCase(unittest.TestCase):
         issueid = 'issue' + results
         results = self.server.display(issueid, 'title')
         self.assertEqual(results['title'], 'foo')
+        self.assertEqual(self.db.issue.get('1', "tx_Source"), 'web')
 
     def testFileCreate(self):
         results = self.server.create('file', 'content=hello\r\nthere')
@@ -183,6 +202,12 @@ class TestCase(unittest.TestCase):
 
         self.db.close()
         self.db = self.instance.open('chef')
+        self.db.tx_Source = 'web'
+
+        self.db.issue.addprop(tx_Source=hyperdb.String())
+        self.db.msg.addprop(tx_Source=hyperdb.String())
+        self.db.post_init()
+
         self.server = RoundupInstance(self.db, self.instance.actions, None)
 
         # Filter on keyword works for role 'Project':
@@ -196,6 +221,31 @@ class TestCase(unittest.TestCase):
         self.assertEqual(r, ['2', '3', '1'])
         r = self.server.filter('issue', None, {}, group=keygroup)
         self.assertEqual(r, ['2', '3', '1'])
+
+    def testMulticall(self):
+        translator = TranslationService.get_translation(
+            language=self.instance.config["TRACKER_LANGUAGE"],
+            tracker_home=self.instance.config["TRACKER_HOME"])
+        self.server = RoundupDispatcher(self.db, self.instance.actions,
+            translator, allow_none = True)
+        class S:
+            multicall=self.server.funcs['system.multicall']
+        self.server.system = S()
+        self.db.issue.create(title='i1')
+        self.db.issue.create(title='i2')
+        m = MultiCall(self.server)
+        m.display('issue1')
+        m.display('issue2')
+        result = m()
+        results = [
+            {'files': [], 'status': '1', 'tx_Source': 'web',
+             'keyword': [], 'title': 'i1', 'nosy': [], 'messages': [],
+             'priority': None, 'assignedto': None, 'superseder': []},
+            {'files': [], 'status': '1', 'tx_Source': 'web',
+             'keyword': [], 'title': 'i2', 'nosy': [], 'messages': [],
+             'priority': None, 'assignedto': None, 'superseder': []}]
+        for n, r in enumerate(result):
+            self.assertEqual(r, results[n])
 
 def test_suite():
     suite = unittest.TestSuite()

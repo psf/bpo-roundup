@@ -61,33 +61,8 @@ del _mo_path
 # Roundup text domain
 DOMAIN = "roundup"
 
-if hasattr(gettext_module.GNUTranslations, "ngettext"):
-    # gettext_module has everything needed
-    RoundupNullTranslations = gettext_module.NullTranslations
-    RoundupTranslations = gettext_module.GNUTranslations
-else:
-    # prior to 2.3, there was no plural forms.  mix simple emulation in
-    class PluralFormsMixIn:
-        def ngettext(self, singular, plural, count):
-            if count == 1:
-                _msg = singular
-            else:
-                _msg = plural
-            return self.gettext(_msg)
-        def ungettext(self, singular, plural, count):
-            if count == 1:
-                _msg = singular
-            else:
-                _msg = plural
-            return self.ugettext(_msg)
-    class RoundupNullTranslations(
-        gettext_module.NullTranslations, PluralFormsMixIn
-    ):
-        pass
-    class RoundupTranslations(
-        gettext_module.GNUTranslations, PluralFormsMixIn
-    ):
-        pass
+RoundupNullTranslations = gettext_module.NullTranslations
+RoundupTranslations = gettext_module.GNUTranslations
 
 def find_locales(language=None):
     """Return normalized list of locale names to try for given language
@@ -206,13 +181,20 @@ def get_translation(language=None, tracker_home=None,
             mofiles.append(get_mofile(locales, system_locale, DOMAIN))
     # filter out elements that are not found
     mofiles = filter(None, mofiles)
-    if mofiles:
-        translator = translation_class(open(mofiles[0], "rb"))
-        for mofile in mofiles[1:]:
-            # note: current implementation of gettext_module
-            #   always adds fallback to the end of the fallback chain.
-            translator.add_fallback(translation_class(open(mofile, "rb")))
-    else:
+    translator = None
+    for mofile in mofiles:
+        try:
+            mo = open(mofile, "rb")
+            if translator is None:
+                translator = translation_class(mo)
+            else:
+                # note: current implementation of gettext_module
+                #   always adds fallback to the end of the fallback chain.
+                translator.add_fallback(translation_class(mo))
+        except IOError:
+            # ignore unreadable .mo files
+            pass
+    if translator is None:
         translator = null_translation_class()
     return translator
 

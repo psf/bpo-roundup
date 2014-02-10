@@ -42,13 +42,18 @@ def create(journaltag, create=True, debug=False):
     execfile(initial_data, vars)
 
     # load standard detectors
-    dirname = os.path.join(os.path.dirname(__file__),
+    thisdir = os.path.dirname(__file__)
+    dirname = os.path.join(thisdir,
         '../share/roundup/templates/classic/detectors')
     for fn in os.listdir(dirname):
         if not fn.endswith('.py'): continue
         vars = {}
         execfile(os.path.join(dirname, fn), vars)
         vars['init'](db)
+
+    vars = {}
+    execfile(os.path.join(thisdir, "tx_Source_detector.py"), vars)
+    vars['init'](db)
 
     '''
     status = Class(db, "status", name=String())
@@ -194,6 +199,7 @@ class Database(back_anydbm.Database):
         self.newnodes = {}      # keep track of the new nodes by class
         self.destroyednodes = {}# keep track of the destroyed nodes by class
         self.transactions = []
+        self.tx_Source = None
 
     def filename(self, classname, nodeid, property=None, create=0):
         shutil.copyfile(__file__, __file__+'.dummy')

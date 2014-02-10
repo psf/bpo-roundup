@@ -1,0 +1,37 @@
+<hr>
+<form method="GET" action='{{ request.classname }}'>
+  <div class='row-fluid'>
+    <div class='span6'>
+      <span class='label label-info'>{{ i18n.gettext('Sort on') }}</span>
+      {% for i in range(2) %}
+        <p>
+          <select name='@sort{{i}}'>
+            {% for prop in context.properties() %}
+              <option value='{{ prop._name }}'>{{ prop._name }}</option>
+            {% endfor %}
+          </select>
+          <em>Descending</em>
+          <input type="checkbox" name='@sortdir{{i}}'>
+        </p>
+      {% endfor %}
+    </div>
+    <div class='span6'>
+      <span class='label label-info'>{{ i18n.gettext('Group on') }}</span>
+      {% for i in range(2) %}
+        <p>
+          <select name='@group{{i}}'>
+            {% for prop in context.properties() %}
+              <option value='{{ prop._name }}'>{{ prop._name }}</option>
+            {% endfor %}
+          </select>
+          <em>Descending</em>
+          <input type="checkbox" name='@groupdir{{i}}'>
+        </p>
+      {% endfor %}
+    </div>
+  </div>
+  <div class='form-actions'>
+    <input type='submit' value='{{ i18n.gettext("Redisplay") }}' class='btn btn-primary'>
+    {{ request.indexargs_form(sort=0, group=0) }}
+  </div>
+</form>

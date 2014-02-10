@@ -21,15 +21,18 @@
 
 from roundup.dist.command.build_doc import build_doc
 from roundup.dist.command.build_scripts import build_scripts
-from roundup.dist.command.build_py import build_py
 from roundup.dist.command.build import build, list_message_files
 from roundup.dist.command.bdist_rpm import bdist_rpm
 from roundup.dist.command.install_lib import install_lib
 
-try:
-    from setuptools import setup
-except ImportError:
-    from distutils.core import setup
+# FIXME: setuptools breaks the --manifest-only option to setup.py and
+# doesn't seem to generate a MANIFEST file. Since I'm not familiar with
+# the way setuptools handles the files to include I'm commenting this
+# for now -- Ralf Schlatterbeck
+#try:
+#    from setuptools import setup
+#except ImportError:
+from distutils.core import setup
 
 import sys, os
 from glob import glob
@@ -69,7 +72,6 @@ def main():
         'roundup.backends',
         'roundup.scripts',
     ]
-    py_modules = ['roundup.demo',]
 
     # build list of scripts from their implementation modules
     scripts = [scriptname(f) for f in glob('roundup/scripts/[!_]*.py')]
@@ -86,7 +88,7 @@ def main():
     templates = [t['path']
                  for t in listTemplates('share/roundup/templates').values()]
     for tdir in templates:
-        for idir in '. detectors extensions html static'.split():
+        for idir in '. detectors extensions html html/layout static'.split():
             data_files.append(include(os.path.join(tdir, idir), '*'))
 
     # add message files
@@ -96,6 +98,9 @@ def main():
 
     # add docs
     data_files.append(include('share/doc/roundup/html', '*'))
+    data_files.append(include('share/doc/roundup/html/_images', '*'))
+    data_files.append(include('share/doc/roundup/html/_sources', '*'))
+    data_files.append(include('share/doc/roundup/html/_static', '*'))
 
     # perform the setup action
     from roundup import __version__
@@ -118,6 +123,8 @@ def main():
           version=__version__,
           author="Richard Jones",
           author_email="richard@users.sourceforge.net",
+          maintainer="Ralf Schlatterbeck",
+          maintainer_email="rsc@runtux.com",
           description="A simple-to-use and -install issue-tracking system"
             " with command-line, web and e-mail interfaces. Highly"
             " customisable.",
@@ -143,13 +150,11 @@ def main():
           # Override certain command classes with our own ones
           cmdclass= {'build_doc': build_doc,
                      'build_scripts': build_scripts,
-                     'build_py': build_py,
                      'build': build,
                      'bdist_rpm': bdist_rpm,
                      'install_lib': install_lib,
                      },
           packages=packages,
-          py_modules=py_modules,
           scripts=scripts,
           data_files=data_files)
 

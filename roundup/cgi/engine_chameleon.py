@@ -3,24 +3,17 @@
 __docformat__ = 'restructuredtext'
 
 import os.path
-from chameleon import PageTemplateLoader
+import chameleon
 
-from roundup.cgi.templating import StringIO, context, find_template, TemplatesBase
+from roundup.cgi.templating import StringIO, context, TALLoaderBase
 
-class Templates(TemplatesBase):
+class Loader(TALLoaderBase):
     def __init__(self, dir):
         self.dir = dir
-        self.loader = PageTemplateLoader(dir)
+        self.loader = chameleon.PageTemplateLoader(dir)
 
-    def get(self, name, extension=None):
-        # default the name to "home"
-        if name is None:
-            name = 'home'
-        elif extension is None and '.' in name:
-            # split name
-            name, extension = name.split('.')
-
-        src, filename = find_template(self.dir, name, extension)
+    def load(self, tplname):
+        src, filename = self._find(tplname)
         return RoundupPageTemplate(self.loader.load(src))
 
 class RoundupPageTemplate(object):

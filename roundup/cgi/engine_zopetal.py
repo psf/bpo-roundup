@@ -8,38 +8,22 @@ import mimetypes
 import os
 import os.path
 
-from roundup.cgi.templating import StringIO, context, translationService, find_template, TemplatesBase
+from roundup.cgi.templating import StringIO, context, translationService, TALLoaderBase
 from roundup.cgi.PageTemplates import PageTemplate, GlobalTranslationService
 from roundup.cgi.PageTemplates.Expressions import getEngine
 from roundup.cgi.TAL import TALInterpreter
 
 GlobalTranslationService.setGlobalTranslationService(translationService)
 
-class Templates(TemplatesBase):
+class Loader(TALLoaderBase):
     templates = {}
 
     def __init__(self, dir):
         self.dir = dir
 
-    def get(self, name, extension=None):
-        """ Interface to get a template, possibly loading a compiled template.
-
-            "name" and "extension" indicate the template we're after, which in
-            most cases will be "name.extension". If "extension" is None, then
-            we look for a template just called "name" with no extension.
-
-            If the file "name.extension" doesn't exist, we look for
-            "_generic.extension" as a fallback.
-        """
-        # default the name to "home"
-        if name is None:
-            name = 'home'
-        elif extension is None and '.' in name:
-            # split name
-            name, extension = name.split('.')
-
+    def load(self, tplname):
         # find the source
-        src, filename = find_template(self.dir, name, extension)
+        src, filename = self._find(tplname)
 
         # has it changed?
         try:

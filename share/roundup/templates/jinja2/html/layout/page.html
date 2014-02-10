@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <meta name="description" content="Roundup is a python-based, MIT licensed issue-tracking system with command-line, web and e-mail interfaces">
+    <meta name="viewport" content="width=device-width">
+    <title>{% block head_title %}{% endblock %}</title>
+    <link rel="stylesheet" type="text/css" href="@@file/bootstrap.min.css">
+    <link rel="stylesheet" type="text/css" href="@@file/bootstrap-responsive.min.css">
+    <link rel="stylesheet" type="text/css" href="@@file/style.css">
+    {% block extracss %} {% endblock %}
+  </head>
+  <body>
+    {% block navbar %}
+      {% include 'layout/banner.html' %}
+    {% endblock %}
+
+    {% block page_content %}
+      <div class='container-fluid'>
+        <div class='row-fluid'>
+          <div class='span3 navigation'>
+            {% block leftnav %}
+              {% include 'layout/navigation.html' %}
+            {% endblock %}
+          </div>
+
+          {% autoescape true %}
+          <div class='span9'>
+              <div class='page-header'>
+                <h1> {% block page_header %} {% endblock %} </h1>
+                {% if options.error_message %}
+                  {% for m in options.error_message %}
+                    <p class='alert alert-block alert-error fade in'> 
+                      {{ m }}
+                      <button type='button' class='close' data-dismiss='alert'>X</button>
+                    </p>
+                  {% endfor %}
+                {% endif %}
+                {% if options.ok_message %}
+                  {% for m in options.ok_message %}
+                    <p class='alert alert-block alert-success fade in'> 
+                      {{ m }}
+                      <button type='button' class='close' data-dismiss='alert'>X</button>
+                    </p>
+                  {% endfor %}
+                {% endif %}
+              </div>
+            {% block content %}
+            {% endblock %}
+          </div>
+          {% endautoescape %}
+        </div>
+      </div>
+    {% endblock %}
+
+    {% block footer %}
+      {% include 'layout/footer.html' %}
+    {% endblock %}
+
+    <script src='@@file/jquery-1.9.0.min.js'></script>
+    <script src='@@file/bootstrap.min.js'></script>
+    {% block extrajs %} {% endblock %}
+  </body>
+</html>

@@ -1,0 +1,90 @@
+{% extends 'layout/page.html' %}
+
+{% block head_title %}
+  {{ i18n.gettext('Registration') }} - {{ config.TRACKER_NAME }}
+{% endblock %}
+
+{% block page_header %}
+  {{ i18n.gettext('Registration') }} - {{ config.TRACKER_NAME }}
+{% endblock %}
+
+{% block content %}
+
+  <form method="POST"
+        name ="itemSynopsis"
+        enctype ="multipart/form-data"
+        action ='{{  context.designator() }}'>
+    <table>
+      <tr>
+        <th>{{ i18n.gettext('Name') }}</th>
+        <td>
+          <input type='text' name="realname">
+        </td>
+      </tr>
+      <tr>
+        <th>{{ i18n.gettext('Login Name') }}</th>
+        <td>
+          <input type='text' name='username' required>
+        </td>
+      </tr>
+      <tr>
+        <th>{{ i18n.gettext('Login Password') }}</th>
+        <td>
+          <input type='password' name='password' required>
+        </td>
+      </tr>
+      <tr>
+        <th>{{ i18n.gettext('Confirm Password') }}</th>
+        <td>
+          <input type='password' name='@confirm@password'>
+        </td>
+      </tr>
+      {% if request.user.hasPermission('Web Roles') %}
+        <tr>
+          <th>{{ i18n.gettext('Roles <br>(comma separated)') }}</th>
+          <td>
+            <input type='text' name='roles' value='{{ context.roles }}'>
+          </td>
+        </tr>
+      {% endif %}
+      <tr>
+        <th>{{ i18n.gettext('Phone') }}</th>
+        <td>
+          <input type='text' name='phone'>
+        </td>
+      </tr>
+      <tr>
+        <th>{{ i18n.gettext('Organisation') }}</th>
+        <td>
+          <input type='text' name='organisation'>
+        </td>
+      </tr>
+      <tr>
+        <th>{{ i18n.gettext('Timezone') }}</th>
+        <td>
+          <input type='text' name='timezone'>
+        </td>
+      </tr>
+      <tr>
+        <th>{{ i18n.gettext('Email') }}</th>
+        <td>
+          <input type='text' name='address' required>
+        </td>
+      </tr>
+      <tr>
+        <th>{{ i18n.gettext('Alternate email address <br>One address per line') }}</th>
+        <td>
+          {{ context.alternate_addresses.multiline() }}
+        </td>
+      </tr>
+      <tr class='form-actions'>
+        <td>
+        <input type="hidden" name="@template" value="register">
+        <input type="hidden" name="@action" value="register">
+        <input type="submit" name="submit" value="{{ i18n.gettext('Register') }}">
+        </td>
+      </tr>
+    </table>
+  </form>
+
+{% endblock %}

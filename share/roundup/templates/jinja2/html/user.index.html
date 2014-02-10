@@ -1,0 +1,50 @@
+{% extends 'layout/page.html' %}
+
+{% block head_title %}
+  {{ i18n.gettext('User listing') }} - {{ config.TRACKER_NAME }}
+{% endblock %}
+
+{% block page_header %}
+  {{ i18n.gettext('User listing') }}
+{% endblock %}
+
+{% block content %}
+
+  {% include 'layout/permission.html' %}
+
+  {% if context.is_view_ok() %}
+    <table class='table'>
+      <tr class='info'>
+        <td>{{ i18n.gettext('Username') }}</td>
+        <td>{{ i18n.gettext('Real name') }}</td>
+        <td>{{ i18n.gettext('Organisation') }}</td>
+        <td>{{ i18n.gettext('Email address') }}</td>
+        <td>{{ i18n.gettext('Phone number') }}</td>
+        {% if context.is_retire_ok() %}
+          <td>{{ i18n.gettext('Retire') }}</td>
+        {% endif %}
+      </tr>
+      {% for user in context.list() %}
+        <tr>
+          <td>
+            <a href='user{{ user.id }}'>{{ user.username }}</a>
+          </td>
+          <td>{{ user.realname.plain() }}</td>
+          <td>{{ user.organisation.plain() }}</td>
+          <td>{{ user.address.email() }}</td>
+          <td>{{ user.phone.plain() }}</td>
+          {% if context.is_retire_ok() %}
+            <td>
+              <form method="POST" action='user{{ user.id }}' class='form-inline'>
+                <input type="hidden" name="@template" value="index">
+                <input type="hidden" name="@action" value="retire">
+                <input type="submit" value="{{ i18n.gettext('retire') }}" class='btn btn-small'>
+              </form>
+            </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+
+{% endblock %}

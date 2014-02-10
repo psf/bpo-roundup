@@ -1,0 +1,30 @@
+{% extends 'layout/page.html' %}
+
+{% block head_title %}
+  {{ i18n.gettext('List of classes') }}
+{% endblock %}
+
+{% block page_header %}
+  {{ i18n.gettext('List of classes') }}
+{% endblock %}
+
+{% block content %}
+
+  <div class='row-fluid'>
+    {% for cl in db.classes() %}
+      <div class='span4'>
+        <h4>
+          <a href='{{cl.classname}}'>{{ cl.classname.capitalize() }}</a>
+        </h4>
+
+        {% for prop in cl.properties() %}
+          <p>
+            <b>{{ prop._name }}</b> -&nbsp;
+            {{ prop._prop }}
+          </p>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </div>
+
+{% endblock %}

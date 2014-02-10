@@ -43,29 +43,13 @@ def makeForm(args):
 cm = client.clean_message
 class MessageTestCase(unittest.TestCase):
     # Note: We used to allow some html tags in error message. Now *only*
-    # newlines are allowed which are translated to <br />.
-    # All other tags are escaped.
+    # newlines are allowed and messages are split at newlines.
+    # Note that tags are no longer escaped, see doc/upgrading.txt for
+    # the changes needed in the templates (Migrating from 1.5.0 to 1.5.1)
     def testCleanMessageOK(self):
-        self.assertEqual(cm('a\nb'), 'a<br />\nb')
-        self.assertEqual(cm('a\nb\nc\n'), 'a<br />\nb<br />\nc<br />\n')
-
-    def testCleanMessageBAD(self):
-        self.assertEqual(cm('<script>x</script>'),
-            '&lt;script&gt;x&lt;/script&gt;')
-        self.assertEqual(cm('<iframe>x</iframe>'),
-            '&lt;iframe&gt;x&lt;/iframe&gt;')
-        self.assertEqual(cm('<<script >>alert(42);5<</script >>'),
-            '&lt;&lt;script &gt;&gt;alert(42);5&lt;&lt;/script &gt;&gt;')
-        self.assertEqual(cm('<a href="y">x</a>'),
-            '&lt;a href="y"&gt;x&lt;/a&gt;')
-        self.assertEqual(cm('<A HREF="y">x</A>'),
-            '&lt;A HREF="y"&gt;x&lt;/A&gt;')
-        self.assertEqual(cm('<br>x<br />'), '&lt;br&gt;x&lt;br /&gt;')
-        self.assertEqual(cm('<i>x</i>'), '&lt;i&gt;x&lt;/i&gt;')
-        self.assertEqual(cm('<b>x</b>'), '&lt;b&gt;x&lt;/b&gt;')
-        self.assertEqual(cm('<BR>x<BR />'), '&lt;BR&gt;x&lt;BR /&gt;')
-        self.assertEqual(cm('<I>x</I>'), '&lt;I&gt;x&lt;/I&gt;')
-        self.assertEqual(cm('<B>x</B>'), '&lt;B&gt;x&lt;/B&gt;')
+        self.assertEqual(cm('a'), ['a'])
+        self.assertEqual(cm('a\nb'), ['a','b'])
+        self.assertEqual(cm('a\nb\nc\n'), ['a','b','c',''])
 
 class FormTestCase(unittest.TestCase):
     def setUp(self):
@@ -75,10 +59,21 @@ class FormTestCase(unittest.TestCase):
 
         # open the database
         self.db = self.instance.open('admin')
+        self.db.tx_Source = "web"
         self.db.user.create(username='Chef', address='chef@bork.bork.bork',
             realname='Bork, Chef', roles='User')
         self.db.user.create(username='mary', address='mary@test.test',
             roles='User', realname='Contrary, Mary')
+
+        self.db.issue.addprop(tx_Source=hyperdb.String())
+        self.db.msg.addprop(tx_Source=hyperdb.String())
+
+        self.db.post_init()
+
+        vars = {}
+        thisdir = os.path.dirname(__file__)
+        execfile(os.path.join(thisdir, "tx_Source_detector.py"), vars)
+        vars['init'](self.db)
 
         test = self.instance.backend.Class(self.db, "test",
             string=hyperdb.String(), number=hyperdb.Number(),
@@ -207,6 +202,7 @@ class FormTestCase(unittest.TestCase):
         self.assertEqual(self.db.issue.get(issue,'status'),'1')
         self.assertEqual(self.db.status.lookup('1'),'2')
         self.assertEqual(self.db.status.lookup('2'),'1')
+        self.assertEqual(self.db.issue.get('1','tx_Source'),'web')
         form = cgi.FieldStorage()
         cl = client.Client(self.instance, None, {'PATH_INFO':'/'}, form)
         cl.classname = 'issue'
@@ -226,6 +222,7 @@ class FormTestCase(unittest.TestCase):
         self.assertEqual(self.db.issue.get(issue,'keyword'),['1'])
         self.assertEqual(self.db.keyword.lookup('1'),'2')
         self.assertEqual(self.db.keyword.lookup('2'),'1')
+        self.assertEqual(self.db.issue.get(issue,'tx_Source'),'web')
         form = cgi.FieldStorage()
         cl = client.Client(self.instance, None, {'PATH_INFO':'/'}, form)
         cl.classname = 'issue'
@@ -271,11 +268,13 @@ class FormTestCase(unittest.TestCase):
         nodeid = self.db.issue.create(status='unread')
         self.assertEqual(self.parseForm({'status': 'unread'}, 'issue', nodeid),
             ({('issue', nodeid): {}}, []))
+        self.assertEqual(self.db.issue.get(nodeid,'tx_Source'),'web')
 
     def testUnsetLink(self):
         nodeid = self.db.issue.create(status='unread')
         self.assertEqual(self.parseForm({'status': '-1'}, 'issue', nodeid),
             ({('issue', nodeid): {'status': None}}, []))
+        self.assertEqual(self.db.issue.get(nodeid,'tx_Source'),'web')
 
     def testInvalidLinkValue(self):
 # XXX This is not the current behaviour - should we enforce this?

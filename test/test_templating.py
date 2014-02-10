@@ -336,12 +336,11 @@ class NoTemplate(Exception):
 class Unauthorised(Exception):
     def __init__(self, action, klass):
     def __str__(self):
-def find_template(dir, name, extension):
 
-class Templates:
+class Loader:
     def __init__(self, dir):
     def precompileTemplates(self):
-    def get(self, name, extension=None):
+    def load(self, name, extension=None):
     def __getitem__(self, name):
 
 class RoundupPageTemplate(PageTemplate.PageTemplate):

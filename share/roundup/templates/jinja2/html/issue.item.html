@@ -1,0 +1,76 @@
+{% extends 'layout/page.html' %}
+
+{% block head_title %}
+  {% if context.id %}
+    Issue {{ context.id }}: {{ context.title }} - {{ config.TRACKER_NAME }}
+  {% else %}
+    New Issue - {{ config.TRACKER_NAME }}
+  {% endif %}
+{% endblock %}
+
+{% block page_header %}
+  {% if not (context.id or context.is_edit_ok()) %}
+    New Issue
+  {% elif not context.id and context.is_edit_ok() %}
+    New Issue Editing
+  {% else %}
+    Issue {{ context.id }}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+
+  {% include 'layout/permission.html' %}
+
+  {% if context.is_view_ok() %}
+    {% if context.is_edit_ok() %}
+      {% include 'issue.item.edit.html' %}
+    {% else %}
+      {% include 'issue.item.readonly.html' %}
+    {% endif %}
+  {% endif %}
+
+  {% if context.id %}
+    <p>
+      Created on <b>{{ context.creation }}</b>
+      by <b>{{ context.creator }}</b>,
+      last changed <b>{{ context.activity }}</b>
+      by <b>{{ context.actor }}</b>.
+    </p>
+  {% endif %}
+
+  {% if context.files %}
+    {% include 'file.index.html' %}
+  {% endif %}
+
+  {% if context.messages %}
+    <h4>Messages</h4>
+    {% for msg in context.messages.reverse() %}
+      <div class='row-fluid'>
+        <div class='span2'>
+          <a href='msg{{ msg.id }}'>msg{{msg.id}} (view)</a>
+        </div>
+        <div class='span4'>
+          Author: {{ msg.author }}, Date: {{ msg.date }}
+        </div>
+        <div class='pull-right'>
+          {% if context.is_edit_ok %}
+            <form method="POST" action='issue{{ context.id }}' class='form-inline'>
+              <input type="hidden" name="@remove@messages" value='{{ msg.id }}'>
+              <input type="hidden" name="@action" value="edit">
+              <input type="submit" value="remove">
+            </form>
+          {% endif %}
+        </div>
+      </div>
+      <div class='row-fluid'>
+        <pre>{{ msg.content.hyperlinked() }}</pre>
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  <div class='vspace-five'></div>
+
+  {{ context.history() }}
+
+{% endblock %}

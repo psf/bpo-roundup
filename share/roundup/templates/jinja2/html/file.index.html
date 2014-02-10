@@ -1,0 +1,33 @@
+<h4>{{ i18n.gettext('Files') }}</h4>
+<table class='table'>
+  <tr>
+    <th>{{ i18n.gettext('File name') }}</th>
+    <th>{{ i18n.gettext('Uploaded') }}</th>
+    <th>{{ i18n.gettext('Type') }}</th>
+    <th>{{ i18n.gettext('Edit') }}</th>
+    <th>{{ i18n.gettext('Remove') }}</th>
+  </tr>
+  {% for file in context.files %}
+    <tr>
+      <td>
+        <a href='{{ file.download_url() }}'>{{ file.name }}</a>
+      </td>
+      <td>{{ file.creator }}, {{ file.creation }}</td>
+      <td>{{ file.type }}</td>
+      {% if file.is_edit_ok %}
+        <td>
+          <a href='file{{ file.id }}'>{{ i18n.gettext('edit') }}</a>
+        </td>
+      {% endif %}
+      {% if context.is_edit_ok %}
+        <td>
+          <form method="POST" action='issue{{ context.id }}'>
+            <input type="hidden" name="@remove@files" value='{{ file.id }}'>
+            <input type="hidden" name="@action" value="{{ i18n.gettext('edit') }}">
+            <input type="submit" value="{{ i18n.gettext('remove') }}">
+          </form>
+        </td>
+      {% endif %}
+    </tr>
+  {% endfor %}
+</table>

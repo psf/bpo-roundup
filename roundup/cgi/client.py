@@ -49,7 +49,12 @@ def initialiseSecurity(security):
     security.addPermissionToRole('Admin', p)
 
 def clean_message(msg):
-    return cgi.escape (msg).replace ('\n', '<br />\n')
+    """ A multi-line message is now split at line boundaries.
+        The templates will do the right thing to format this message.
+        Note that we no longer need to escape the message as this is now
+        taken care of by the template.
+    """
+    return msg.split('\n')
 
 error_message = ''"""<html><head><title>An error has occurred</title></head>
 <body><h1>An error has occurred</h1>
@@ -617,15 +622,17 @@ class Client:
         """
         # look for client charset
         charset_parameter = 0
-        if '@charset' in self.form:
+        # Python 2.6 form may raise a TypeError if list in form is None
+        charset = None
+        try:
             charset = self.form['@charset'].value
             if charset.lower() == "none":
                 charset = ""
             charset_parameter = 1
-        elif 'roundup_charset' in self.cookie:
+        except (KeyError, TypeError):
+            pass
+        if charset is None and 'roundup_charset' in self.cookie:
             charset = self.cookie['roundup_charset'].value
-        else:
-            charset = None
         if charset:
             # make sure the charset is recognized
             try:
@@ -674,18 +681,23 @@ class Client:
         # look for language parameter
         # then for language cookie
         # last for the Accept-Language header
-        if "@language" in self.form:
+        # Python 2.6 form may raise a TypeError if list in form is None
+        language = None
+        try:
             language = self.form["@language"].value
             if language.lower() == "none":
                 language = ""
             self.add_cookie("roundup_language", language)
-        elif "roundup_language" in self.cookie:
-            language = self.cookie["roundup_language"].value
-        elif self.instance.config["WEB_USE_BROWSER_LANGUAGE"]:
-            hal = self.env.get('HTTP_ACCEPT_LANGUAGE')
-            language = accept_language.parse(hal)
-        else:
-            language = ""
+        except (KeyError, TypeError):
+            pass
+        if language is None:
+            if "roundup_language" in self.cookie:
+                language = self.cookie["roundup_language"].value
+            elif self.instance.config["WEB_USE_BROWSER_LANGUAGE"]:
+                hal = self.env.get('HTTP_ACCEPT_LANGUAGE')
+                language = accept_language.parse(hal)
+            else:
+                language = ""
 
         self.language = language
         if language:
@@ -768,12 +780,14 @@ class Client:
         # allow Anonymous to use the "login" and "register" actions (noting
         # that "register" has its own "Register" permission check)
 
-        if ':action' in self.form:
-            action = self.form[':action']
-        elif '@action' in self.form:
-            action = self.form['@action']
-        else:
-            action = ''
+        action = ''
+        try:
+            if ':action' in self.form:
+                action = self.form[':action']
+            elif '@action' in self.form:
+                action = self.form['@action']
+        except TypeError:
+            pass
         if isinstance(action, list):
             raise SeriousError('broken form: multiple @action values submitted')
         elif action != '':
@@ -808,12 +822,15 @@ class Client:
         # open the database or only set the user
         if not hasattr(self, 'db'):
             self.db = self.instance.open(username)
+            self.db.tx_Source = "web"
         else:
             if self.instance.optimize:
                 self.db.setCurrentUser(username)
+                self.db.tx_Source = "web"
             else:
                 self.db.close()
                 self.db = self.instance.open(username)
+                self.db.tx_Source = "web"
                 # The old session API refers to the closed database;
                 # we can no longer use it.
                 self.session_api = Session(self)
@@ -865,7 +882,11 @@ class Client:
 
         # see if a template or messages are specified
         template_override = ok_message = error_message = None
-        for key in self.form:
+        try:
+            keys = self.form.keys()
+        except TypeError:
+            keys = ()
+        for key in keys:
             if self.FV_TEMPLATE.match(key):
                 template_override = self.form[key].value
             elif self.FV_OK_MESSAGE.match(key):
@@ -877,9 +898,9 @@ class Client:
 
         # see if we were passed in a message
         if ok_message:
-            self.ok_message.append(ok_message)
+            self.ok_message.extend(ok_message)
         if error_message:
-            self.error_message.append(error_message)
+            self.error_message.extend(error_message)
 
         # determine the classname and possibly nodeid
         path = self.path.split('/')
@@ -1083,11 +1104,50 @@ class Client:
         self.error_message.append(message)
         self.write_html(self.renderContext())
 
+    def selectTemplate(self, name, view):
+        """ Choose existing template for the given combination of
+            classname (name parameter) and template request variable
+            (view parameter) and return its name.
+
+            In most cases the name will be "classname.view", but
+            if "view" is None, then template name "classname" will
+            be returned.
+
+            If "classname.view" template doesn't exist, the
+            "_generic.view" is used as a fallback.
+
+            [ ] cover with tests
+        """
+        loader = self.instance.templates
+
+        # if classname is not set, use "home" template
+        if name is None:
+            name = 'home'
+
+        tplname = name     
+        if view:
+            tplname = '%s.%s' % (name, view)
+
+        if loader.check(tplname):
+            return tplname
+
+        # rendering class/context with generic template for this view.
+        # with no view it's impossible to choose which generic template to use
+        if not view:
+            raise templating.NoTemplate('Template "%s" doesn\'t exist' % name)
+
+        generic = '_generic.%s' % view
+        if loader.check(generic):
+            return generic
+
+        raise templating.NoTemplate('No template file exists for templating '
+            '"%s" with template "%s" (neither "%s" nor "%s")' % (name, view,
+            tplname, generic))
+
     def renderContext(self):
         """ Return a PageTemplate for the named page
         """
-        name = self.classname
-        extension = self.template
+        tplname = self.selectTemplate(self.classname, self.template)
 
         # catch errors so we can handle PT rendering errors more nicely
         args = {
@@ -1095,7 +1155,7 @@ class Client:
             'error_message': self.error_message
         }
         try:
-            pt = self.instance.templates.get(name, extension)
+            pt = self.instance.templates.load(tplname)
             # let the template render figure stuff out
             result = pt.render(self, None, None, **args)
             self.additional_headers['Content-Type'] = pt.content_type
@@ -1168,11 +1228,15 @@ class Client:
             We explicitly catch Reject and ValueError exceptions and
             present their messages to the user.
         """
-        if ':action' in self.form:
-            action = self.form[':action']
-        elif '@action' in self.form:
-            action = self.form['@action']
-        else:
+        action = None
+        try:
+            if ':action' in self.form:
+                action = self.form[':action']
+            elif '@action' in self.form:
+                action = self.form['@action']
+        except TypeError:
+            pass
+        if action is None:
             return None
 
         if isinstance(action, list):

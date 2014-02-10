@@ -1,0 +1,47 @@
+body {
+  color: #333;
+}
+
+h1,
+h2 {
+  font-weight: normal;
+  margin: 10px 0 20px 0;
+  text-transform: uppercase;
+}
+
+h1 {
+  text-align: center;
+  font-size: 24px;
+  letter-spacing: 2px;
+  line-height: 24px;
+}
+
+.navbar {
+  margin: 20px 0;
+}
+
+.navbar form {
+  margin: 8px;
+}
+
+.navbar .btn {
+  margin-top: 0;
+}
+
+.navbar .brand {
+  color: #B31B1B;
+}
+
+footer {
+  font-size: 1.2em;
+}
+
+.vspace-one { margin-top: 1em; }
+.vspace-two { margin-top: 2em; }
+.vspace-three { margin-top: 3em; }
+.vspace-four { margin-top: 4em; }
+.vspace-five { margin-top: 5em; }
+
+.navigation {
+  border-right: 1px solid #ddd;
+}

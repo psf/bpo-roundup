@@ -8,7 +8,7 @@ body
   padding: 0 3em 0 13em;
 }
 body > .header { margin: 0 0 0 -13em;}
-body > .footer { margin: 0 0 0 -13em; clear:both;}
+body > .footer { margin: 1em 0 0 -13em; clear:both;}
 body > .navigation 
 {
   margin-left: -13em;
@@ -96,6 +96,10 @@ body
   color: lightgrey;
 }
 
+.footer img {
+  vertical-align: middle;
+}
+
 .content
 { 
   padding: 1em;
@@ -124,3 +128,10 @@ table
 }
 
 input, textarea { border-width: 1px; }
+
+
+/* Contact page */
+div#contact table td {
+  white-space: nowrap;
+  padding: 1pt 1em;
+}

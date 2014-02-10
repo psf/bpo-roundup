@@ -61,12 +61,12 @@ class Tracker:
         self.libdir = os.path.isdir(libdir) and libdir or ''
 
         self.load_interfaces()
-        self.templates = templating.get_templates(self.config["TEMPLATES"],
+        self.templates = templating.get_loader(self.config["TEMPLATES"],
             self.config["TEMPLATE_ENGINE"])
         self.backend = backends.get_backend(self.get_backend_name())
 
         if self.optimize:
-            self.templates.precompileTemplates()
+            self.templates.precompile()
             # initialize tracker extensions
             for extension in self.get_extensions('extensions'):
                 extension(self)
@@ -121,6 +121,8 @@ class Tracker:
                 extension(self)
             detectors = self.get_extensions('detectors')
         db = env['db']
+        db.tx_Source = None
+
         # apply the detectors
         for detector in detectors:
             detector(db)
@@ -288,9 +290,9 @@ class OldStyleTrackers:
         tracker.dbinit.config = tracker.config
 
         tracker.optimize = optimize
-        tracker.templates = templating.Templates(tracker.config["TEMPLATES"])
+        tracker.templates = templating.get_loader(tracker.config["TEMPLATES"])
         if optimize:
-            tracker.templates.precompileTemplates()
+            tracker.templates.precompile()
 
         return tracker
 

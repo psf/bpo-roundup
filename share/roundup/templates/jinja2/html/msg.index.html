@@ -1,0 +1,30 @@
+{% extends 'layout/page.html' %}
+
+{% block head_title %}
+  {{ i18n.gettext('List of messages') }}
+{% endblock %}
+
+{% block page_header %}
+  {{ i18n.gettext('List of messages') }}
+{% endblock %}
+
+{% block content %}
+
+  {% for msg in context.list() %}
+    <div class='row-fluid'>
+      <dl class='span5 dl-horizontal'>
+        <dt>{{ i18n.gettext('Author') }}</dt>
+        <dd>{{ msg.author }}</dd>
+        <dt>{{ i18n.gettext('Date') }}</dt>
+        <dd>{{ msg.date }}</dd>
+        <dt>{{ i18n.gettext('Message id') }}</dt>
+        <dd>{{ msg.id }}</dd>
+      </dl>
+      <div class='span7'>
+        <pre>{{ msg.content }}</pre>
+      </div>
+    </div>
+    <hr>
+  {% endfor %}
+
+{% endblock %}

@@ -1,9 +1,9 @@
-from __future__ import nested_scopes
-
 """Implements the API used in the HTML templating for the web interface.
 """
 
 todo = """
+- Document parameters to Template.render() method
+- Add tests for Loader.load() method
 - Most methods should have a "default" arg to supply a value
   when none appears in the hyperdb or request.
 - Multilink property additions: change_note and new_upload
@@ -76,52 +76,56 @@ class Unauthorised(Exception):
             'items of class %(class)s') % {
             'action': self.action, 'class': self.klass}
 
-def find_template(dir, name, view):
-    """ Find a template in the nominated dir
-    """
-    # find the source
-    if view:
-        filename = '%s.%s'%(name, view)
-    else:
-        filename = name
 
-    # try old-style
-    src = os.path.join(dir, filename)
-    if os.path.exists(src):
-        return (src, filename)
+# --- Template Loader API
 
-    # try with a .html or .xml extension (new-style)
-    for extension in '.html', '.xml':
-        f = filename + extension
-        src = os.path.join(dir, f)
-        if os.path.exists(src):
-            return (src, f)
+class LoaderBase:
+    """ Base for engine-specific template Loader class."""
+    def __init__(self, dir):
+        # loaders are given the template directory as a first argument
+        pass
 
-    # no view == no generic template is possible
-    if not view:
-        raise NoTemplate, 'Template file "%s" doesn\'t exist'%name
-
-    # try for a _generic template
-    generic = '_generic.%s'%view
-    src = os.path.join(dir, generic)
-    if os.path.exists(src):
-        return (src, generic)
-
-    # finally, try _generic.html
-    generic = generic + '.html'
-    src = os.path.join(dir, generic)
-    if os.path.exists(src):
-        return (src, generic)
-
-    raise NoTemplate('No template file exists for templating "%s" '
-        'with template "%s" (neither "%s" nor "%s")'%(name, view,
-        filename, generic))
-
-class TemplatesBase:
-    """Base for engine-specific Templates class."""
-    def precompileTemplates(self):
-        """ Go through a directory and precompile all the templates therein
+    def precompile(self):
+        """ This method may be called when tracker is loaded to precompile
+            templates that support this ability.
         """
+        pass
+
+    def load(self, tplname):
+        """ Load template and return template object with render() method.
+
+            "tplname" is a template name. For filesystem loaders it is a
+            filename without extensions, typically in the "classname.view"
+            format.
+        """
+        raise NotImplementedError
+
+    def check(self, name):
+        """ Check if template with the given name exists. Should return
+            false if template can not be found.
+        """
+        raise NotImplementedError
+
+class TALLoaderBase(LoaderBase):
+    """ Common methods for the legacy TAL loaders."""
+
+    def __init__(self, dir):
+        self.dir = dir
+
+    def _find(self, name):
+        """ Find template, return full path and filename of the
+            template if it is found, None otherwise."""
+        for extension in ['', '.html', '.xml']:
+            f = name + extension
+            src = os.path.join(self.dir, f)
+            if os.path.exists(src):
+                return (src, f)
+
+    def check(self, name):
+        return bool(self._find(name))
+
+    def precompile(self):
+        """ Precompile templates in load directory by loading them """
         for filename in os.listdir(self.dir):
             # skip subdirs
             if os.path.isdir(filename):
@@ -136,29 +140,73 @@ class TemplatesBase:
 
             # remove extension
             filename = filename[:-len(extension)]
-
-            # load the template
-            if '.' in filename:
-                name, extension = filename.split('.', 1)
-                self.get(name, extension)
-            else:
-                self.get(filename, None)
+            self.load(filename)
 
     def __getitem__(self, name):
-        name, extension = os.path.splitext(name)
-        if extension:
-            extension = extension[1:]
+        """Special method to access templates by loader['name']"""
         try:
-            return self.get(name, extension)
+            return self.load(name)
         except NoTemplate, message:
             raise KeyError, message
 
-def get_templates(dir, engine_name):
-    if engine_name == 'chameleon':
-        import engine_chameleon as engine
+class MultiLoader(LoaderBase):
+    def __init__(self):
+        self.loaders = []
+
+    def add_loader(self, loader):
+        self.loaders.append(loader)
+      
+    def check(self, name):
+        for l in self.loaders:
+            if l.check(name):
+                return True
+
+    def load(self, name):    
+        for l in self.loaders:
+            if l.check(name):
+                return l.load(name)
+
+    def __getitem__(self, name):
+        """Needed for TAL templates compatibility"""
+        # [ ] document root and helper templates
+        try:
+            return self.load(name)
+        except NoTemplate, message:
+            raise KeyError, message
+        
+
+class TemplateBase:
+    content_type = 'text/html'
+
+
+def get_loader(dir, template_engine):
+
+    # Support for multiple engines using fallback mechanizm
+    # meaning that if first engine can't find template, we
+    # use the second
+
+    engines = template_engine.split(',')
+    engines = [x.strip() for x in engines]
+    ml = MultiLoader()
+
+    for engine_name in engines:
+        if engine_name == 'chameleon':
+            from engine_chameleon import Loader
+        elif engine_name == 'jinja2':
+            from engine_jinja2 import Jinja2Loader as Loader
+        elif engine_name == 'zopetal':
+            from engine_zopetal import Loader
+        else:
+            raise Exception('Unknown template engine "%s"' % engine_name)
+        ml.add_loader(Loader(dir))
+    
+    if len(engines) == 1:
+        return ml.loaders[0]
     else:
-        import engine_zopetal as engine
-    return engine.Templates(dir)
+        return ml
+
+# --/ Template Loader API
+
 
 def context(client, template=None, classname=None, request=None):
     """Return the rendering context dictionary
@@ -461,7 +509,6 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
             raise KeyError, 'No such property "%s" on %s'%(item, self.classname)
 
         # look up the correct HTMLProperty class
-        form = self._client.form
         for klass, htmlklass in propclasses:
             if not isinstance(prop, klass):
                 continue
@@ -592,7 +639,8 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
 
     def classhelp(self, properties=None, label=''"(list)", width='500',
             height='400', property='', form='itemSynopsis',
-            pagesize=50, inputtype="checkbox", sort=None, filter=None):
+            pagesize=50, inputtype="checkbox", html_kwargs={},
+            sort=None, filter=None):
         """Pop up a javascript window with class help
 
         This generates a link to a popup window which displays the
@@ -656,8 +704,9 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
                    sort, pagesize, filter)
         onclick = "javascript:help_window('%s', '%s', '%s');return false;" % \
                   (help_url, width, height)
-        return '<a class="classhelp" href="%s" onclick="%s">%s</a>' % \
-               (help_url, onclick, self._(label))
+        return '<a class="classhelp" href="%s" onclick="%s" %s>%s</a>' % \
+               (help_url, onclick, cgi_escape_attrs(**html_kwargs),
+                self._(label))
 
     def submit(self, label=''"Submit New Entry", action="new"):
         """ Generate a submit button (and action hidden element)
@@ -685,7 +734,9 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
         req.update(kwargs)
 
         # new template, using the specified classname and request
-        pt = self._client.instance.templates.get(self.classname, name)
+        # [ ] this code is too similar to client.renderContext()
+        tplname = self._client.selectTemplate(self.classname, name)
+        pt = self._client.instance.templates.load(tplname)
 
         # use our fabricated request
         args = {
@@ -830,15 +881,14 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
                     isinstance(self._props[prop_n], hyperdb.Link)):
                 classname = self._props[prop_n].classname
                 try:
-                    template = find_template(self._db.config.TEMPLATES,
-                        classname, 'item')
-                    if template[1].startswith('_generic'):
+                    template = self._client.selectTemplate(classname, 'item')
+                    if template.startswith('_generic.'):
                         raise NoTemplate, 'not really...'
                 except NoTemplate:
                     pass
                 else:
                     id = self._klass.get(self._nodeid, prop_n, None)
-                    current[prop_n] = '<a href="%s%s">%s</a>'%(
+                    current[prop_n] = '<a rel="nofollow" href="%s%s">%s</a>'%(
                         classname, id, current[prop_n])
 
         # get the journal, sort and reverse
@@ -859,7 +909,7 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
             if action == 'link' and type(args) == type(()):
                 if len(args) == 3:
                     linkcl, linkid, key = args
-                    arg_s += '<a href="%s%s">%s%s %s</a>'%(linkcl, linkid,
+                    arg_s += '<a rel="nofollow" href="%s%s">%s%s %s</a>'%(linkcl, linkid,
                         linkcl, linkid, key)
                 else:
                     arg_s = str(args)
@@ -867,7 +917,7 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
             elif action == 'unlink' and type(args) == type(()):
                 if len(args) == 3:
                     linkcl, linkid, key = args
-                    arg_s += '<a href="%s%s">%s%s %s</a>'%(linkcl, linkid,
+                    arg_s += '<a rel="nofollow" href="%s%s">%s%s %s</a>'%(linkcl, linkid,
                         linkcl, linkid, key)
                 else:
                     arg_s = str(args)
@@ -902,9 +952,9 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
                             ) % locals()
                         labelprop = linkcl.labelprop(1)
                         try:
-                            template = find_template(self._db.config.TEMPLATES,
-                                classname, 'item')
-                            if template[1].startswith('_generic'):
+                            template = self._client.selectTemplate(classname,
+                               'item')
+                            if template.startswith('_generic.'):
                                 raise NoTemplate, 'not really...'
                             hrefable = 1
                         except NoTemplate:
@@ -937,7 +987,7 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
                                     subml.append('<strike>%s</strike>'%label)
                                 else:
                                     if hrefable:
-                                        subml.append('<a href="%s%s">%s</a>'%(
+                                        subml.append('<a rel="nofollow" href="%s%s">%s</a>'%(
                                             classname, linkid, label))
                                     elif label is None:
                                         subml.append('%s%s'%(classname,
@@ -964,7 +1014,7 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
                                 label = None
                         if label is not None:
                             if hrefable:
-                                old = '<a href="%s%s">%s</a>'%(classname,
+                                old = '<a ref="nofollow" href="%s%s">%s</a>'%(classname,
                                     args[k], label)
                             else:
                                 old = label;
@@ -1072,7 +1122,10 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
             '&@queryname=%s'%urllib.quote(name))
 
         # new template, using the specified classname and request
-        pt = self._client.instance.templates.get(req.classname, 'search')
+        # [ ] the custom logic for search page doesn't belong to
+        #     generic templating module (techtonik)
+        tplname = self._client.selectTemplate(req.classname, 'search')
+        pt = self._client.instance.templates.load(tplname)
         # The context for a search page should be the class, not any
         # node.
         self._client.nodeid = None
@@ -1106,7 +1159,12 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
         }
         for name in self._props.keys():
             if name not in exclude:
-                query[name] = self[name].plain()
+                prop = self._props[name]
+                if not isinstance(prop, hyperdb.Multilink):
+                    query[name] = self[name].plain()
+                else:
+                    query[name] = ",".join(self._klass.get(self._nodeid, name))
+
         return self._classname + "?" + "&".join(
             ["%s=%s" % (key, urllib.quote(value))
                 for key, value in query.items()])
@@ -1171,7 +1229,11 @@ class HTMLProperty(HTMLInputMixin, HTMLPermissions):
         # If no value is already present for this property, see if one
         # is specified in the current form.
         form = self._client.form
-        if not self._value and form.has_key(self._formname):
+        try:
+            is_in = form.has_key(self._formname)
+        except TypeError:
+            is_in = False
+        if not self._value and is_in:
             if isinstance(prop, hyperdb.Multilink):
                 value = lookupIds(self._db, prop,
                                   handleListCGIValue(form[self._formname]),
@@ -1550,10 +1612,21 @@ class BooleanHTMLProperty(HTMLProperty):
             return ''
         return self._value and self._("Yes") or self._("No")
 
-    def field(self, **kwargs):
+    def field(self, labelfirst=False, y_label=None, n_label=None,
+              u_label=None, **kwargs):
         """ Render a form edit field for the property
 
             If not editable, just display the value via plain().
+
+            In addition to being able to set arbitrary html properties
+            using prop=val arguments, the thre arguments:
+
+              y_label, n_label, u_label let you control the labels
+              associated with the yes, no (and optionally unknown/empty)
+              values.
+
+           Also the labels can be placed before the radiobuttons by setting
+           labelfirst=True.
         """
         if not self.is_edit_ok():
             return self.plain(escape=1)
@@ -1563,21 +1636,45 @@ class BooleanHTMLProperty(HTMLProperty):
             value = value.strip().lower() in ('checked', 'yes', 'true',
                 'on', '1')
 
+        if ( not y_label ):
+            y_label = '<label class="rblabel" for="%s_%s">'%(self._formname, 'yes')
+            y_label += self._('Yes')
+            y_label += '</label>'
+
+        if ( not n_label ):
+            n_label = '<label class="rblabel" for="%s_%s">'%(self._formname, 'no')
+            n_label += self._('No')
+            n_label += '</label>'
+
         checked = value and "checked" or ""
         if value:
-            s = self.input(type="radio", name=self._formname, value="yes",
-                checked="checked", **kwargs)
-            s += self._('Yes')
-            s +=self.input(type="radio", name=self._formname,  value="no",
-                           **kwargs)
-            s += self._('No')
+            y_rb = self.input(type="radio", name=self._formname, value="yes",
+                checked="checked", id="%s_%s"%(self._formname, 'yes'), **kwargs)
+
+            n_rb =self.input(type="radio", name=self._formname,  value="no",
+                           id="%s_%s"%(self._formname, 'no'), **kwargs)
         else:
-            s = self.input(type="radio", name=self._formname,  value="yes",
-                           **kwargs)
-            s += self._('Yes')
-            s +=self.input(type="radio", name=self._formname, value="no",
-                checked="checked", **kwargs)
-            s += self._('No')
+            y_rb = self.input(type="radio", name=self._formname, value="yes",
+                              id="%s_%s"%(self._formname, 'yes'), **kwargs)
+
+            n_rb = self.input(type="radio", name=self._formname,  value="no",
+                checked="checked", id="%s_%s"%(self._formname, 'no'), **kwargs)
+
+        if ( u_label ):
+            if (u_label is True): # it was set via u_label=True
+                u_label = '' # make it empty but a string not boolean
+            u_rb = self.input(type="radio", name=self._formname,  value="",
+                id="%s_%s"%(self._formname, 'unk'), **kwargs)
+        else:
+            # don't generate a trivalue radiobutton.
+            u_label = ''
+            u_rb=''
+            
+        if ( labelfirst ):
+            s = u_label + u_rb + y_label + y_rb + n_label + n_rb
+        else:
+            s = u_label + u_rb +y_rb + y_label +  n_rb + n_label
+
         return s
 
 class DateHTMLProperty(HTMLProperty):
@@ -1607,7 +1704,11 @@ class DateHTMLProperty(HTMLProperty):
             offset = self._db.getUserTimezone()
         else:
             offset = self._offset
-        return str(self._value.local(offset))
+        try:
+            return str(self._value.local(offset))
+        except AttributeError:
+            # not a date value, e.g. from unsaved form data
+            return str(self._value)
 
     def now(self, str_interval=None):
         """ Return the current time.
@@ -1947,12 +2048,13 @@ class LinkHTMLProperty(HTMLProperty):
                 if isinstance(prop, hyperdb.Link):
                     cl = self._db.getclass(prop.classname)
                     labelprop = cl.labelprop()
-                    fn = lambda optionid: cl.get(linkcl.get(optionid,
-                                                            propname),
-                                                 labelprop)
+                    fn = lambda optionid, \
+                                propname=propname, labelprop=labelprop: \
+                            cl.get(linkcl.get(optionid, propname), labelprop)
                 else:
-                    fn = lambda optionid: linkcl.get(optionid, propname)
-            additional_fns.append(fn)
+                    fn = lambda optionid, propname=propname: \
+                            linkcl.get(optionid, propname)
+                additional_fns.append(fn)
 
         for optionid in options:
             # get the option value, and if it's None use an empty string
@@ -2179,12 +2281,13 @@ class MultilinkHTMLProperty(HTMLProperty):
                 if isinstance(prop, hyperdb.Link):
                     cl = self._db.getclass(prop.classname)
                     labelprop = cl.labelprop()
-                    fn = lambda optionid: cl.get(linkcl.get(optionid,
-                                                            propname),
-                                                 labelprop)
+                    fn = lambda optionid, \
+                                propname=propname, labelprop=labelprop: \
+                            cl.get(linkcl.get(optionid, propname), labelprop)
                 else:
-                    fn = lambda optionid: linkcl.get(optionid, propname)
-            additional_fns.append(fn)
+                    fn = lambda optionid, propname=propname: \
+                            linkcl.get(optionid, propname)
+                additional_fns.append(fn)
 
         for optionid in options:
             # get the option value, and if it's None use an empty string
@@ -2337,7 +2440,7 @@ class HTMLRequest(HTMLInputMixin):
         for special in '@:':
             idx = 0
             key = '%s%s%d'%(special, name, idx)
-            while key in self.form:
+            while self._form_has_key(key):
                 self.special_char = special
                 fields.append(self.form.getfirst(key))
                 dirkey = '%s%sdir%d'%(special, name, idx)
@@ -2350,7 +2453,7 @@ class HTMLRequest(HTMLInputMixin):
             # backward compatible (and query) URL format
             key = special + name
             dirkey = key + 'dir'
-            if key in self.form and not fields:
+            if self._form_has_key(key) and not fields:
                 fields = handleListCGIValue(self.form[key])
                 if dirkey in self.form:
                     dirs.append(self.form.getfirst(dirkey))
@@ -2373,13 +2476,20 @@ class HTMLRequest(HTMLInputMixin):
             else:
                 var.append((dir, name))
 
+    def _form_has_key(self, name):
+        try:
+            return self.form.has_key(name)
+        except TypeError:
+            pass
+        return False
+
     def _post_init(self):
         """ Set attributes based on self.form
         """
         # extract the index display information from the form
         self.columns = []
         for name in ':columns @columns'.split():
-            if self.form.has_key(name):
+            if self._form_has_key(name):
                 self.special_char = name[0]
                 self.columns = handleListCGIValue(self.form[name])
                 break
@@ -2398,7 +2508,7 @@ class HTMLRequest(HTMLInputMixin):
         # filtering
         self.filter = []
         for name in ':filter @filter'.split():
-            if self.form.has_key(name):
+            if self._form_has_key(name):
                 self.special_char = name[0]
                 self.filter = handleListCGIValue(self.form[name])
 
@@ -2407,7 +2517,7 @@ class HTMLRequest(HTMLInputMixin):
         if self.classname is not None:
             cls = db.getclass (self.classname)
             for name in self.filter:
-                if not self.form.has_key(name):
+                if not self._form_has_key(name):
                     continue
                 prop = cls.get_transitive_prop (name)
                 fv = self.form[name]
@@ -2429,7 +2539,7 @@ class HTMLRequest(HTMLInputMixin):
         # full-text search argument
         self.search_text = None
         for name in ':search_text @search_text'.split():
-            if self.form.has_key(name):
+            if self._form_has_key(name):
                 self.special_char = name[0]
                 self.search_text = self.form.getfirst(name)
 
@@ -2437,7 +2547,7 @@ class HTMLRequest(HTMLInputMixin):
         # figure batch args
         self.pagesize = 50
         for name in ':pagesize @pagesize'.split():
-            if self.form.has_key(name):
+            if self._form_has_key(name):
                 self.special_char = name[0]
                 try:
                     self.pagesize = int(self.form.getfirst(name))
@@ -2447,7 +2557,7 @@ class HTMLRequest(HTMLInputMixin):
 
         self.startwith = 0
         for name in ':startwith @startwith'.split():
-            if self.form.has_key(name):
+            if self._form_has_key(name):
                 self.special_char = name[0]
                 try:
                     self.startwith = int(self.form.getfirst(name))
@@ -2456,7 +2566,7 @@ class HTMLRequest(HTMLInputMixin):
                     pass
 
         # dispname
-        if self.form.has_key('@dispname'):
+        if self._form_has_key('@dispname'):
             self.dispname = self.form.getfirst('@dispname')
         else:
             self.dispname = None

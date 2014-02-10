@@ -16,6 +16,7 @@
 # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 
 import unittest, os, shutil, errno, imp, sys, time, pprint, base64, os.path
+import logging
 import gpgmelib
 from email.parser import FeedParser
 
@@ -34,7 +35,6 @@ config.RDBMS_HOST = "localhost"
 config.RDBMS_USER = "rounduptest"
 config.RDBMS_PASSWORD = "rounduptest"
 config.RDBMS_TEMPLATE = "template0"
-#config.logging = MockNull()
 # these TRACKER_WEB and MAIL_DOMAIN values are used in mailgw tests
 config.MAIL_DOMAIN = "your.tracker.email.domain.example"
 config.TRACKER_WEB = "http://tracker.example/cgi-bin/roundup.cgi/bugs/"
@@ -73,7 +73,9 @@ def setupTracker(dirname, backend="anydbm"):
     return tracker
 
 def setupSchema(db, create, module):
-    status = module.Class(db, "status", name=String())
+    mls = module.Class(db, "mls", name=String())
+    mls.setkey("name")
+    status = module.Class(db, "status", name=String(), mls=Multilink("mls"))
     status.setkey("name")
     priority = module.Class(db, "priority", name=String(), order=String())
     priority.setkey("name")
@@ -104,7 +106,9 @@ def setupSchema(db, create, module):
             password=password.Password('sekrit'))
         user.create(username="fred", roles='User',
             password=password.Password('sekrit'), address='fred@example.com')
-        status.create(name="unread")
+        u1 = mls.create(name="unread_1")
+        u2 = mls.create(name="unread_2")
+        status.create(name="unread",mls=[u1, u2])
         status.create(name="in-progress")
         status.create(name="testing")
         status.create(name="resolved")
@@ -128,10 +132,8 @@ class MyTestCase(unittest.TestCase):
 
 
 if os.environ.has_key('LOGGING_LEVEL'):
-    from roundup import rlog
-    config.logging = rlog.BasicLogging()
-    config.logging.setLevel(os.environ['LOGGING_LEVEL'])
-    config.logging.getLogger('roundup.hyperdb').setFormat('%(message)s')
+    logger = logging.getLogger('roundup.hyperdb')
+    logger.setLevel(os.environ['LOGGING_LEVEL'])
 
 class commonDBTest(MyTestCase):
     def setUp(self):
@@ -1237,6 +1239,39 @@ class DBTest(commonDBTest):
             ae(filt(None, {'title': ['one', 'two']}, ('+','id'), (None,None)),
                 [])
 
+    def testFilteringStringCase(self):
+        """
+        Similar to testFilteringString except the search parameters
+        have different capitalization.
+        """
+        ae, filter, filter_iter = self.filteringSetup()
+        for filt in filter, filter_iter:
+            ae(filt(None, {'title': ['One']}, ('+','id'), (None,None)), ['1'])
+            ae(filt(None, {'title': ['Issue One']}, ('+','id'), (None,None)),
+                ['1'])
+            ae(filt(None, {'title': ['ISSUE', 'ONE']}, ('+','id'), (None,None)),
+                ['1'])
+            ae(filt(None, {'title': ['iSSUE']}, ('+','id'), (None,None)),
+                ['1','2','3'])
+            ae(filt(None, {'title': ['One', 'Two']}, ('+','id'), (None,None)),
+                [])
+
+    def testFilteringSpecialChars(self):
+        """ Special characters in SQL search are '%' and '_', some used
+            to lead to a traceback.
+        """
+        ae, filter, filter_iter = self.filteringSetup()
+        self.db.issue.set('1', title="With % symbol")
+        self.db.issue.set('2', title="With _ symbol")
+        self.db.issue.set('3', title="With \\ symbol")
+        self.db.issue.set('4', title="With ' symbol")
+        d = dict (status = '1')
+        for filt in filter, filter_iter:
+            ae(filt(None, dict(title='%'), ('+','id'), (None,None)), ['1'])
+            ae(filt(None, dict(title='_'), ('+','id'), (None,None)), ['2'])
+            ae(filt(None, dict(title='\\'), ('+','id'), (None,None)), ['3'])
+            ae(filt(None, dict(title="'"), ('+','id'), (None,None)), ['4'])
+
     def testFilteringLink(self):
         ae, filter, filter_iter = self.filteringSetup()
         a = 'assignedto'
@@ -1248,6 +1283,14 @@ class DBTest(commonDBTest):
             ae(filt(None, {a: [None]}, ('+','id'), grp), ['3','4'])
             ae(filt(None, {a: ['-1', None]}, ('+','id'), grp), ['3','4'])
             ae(filt(None, {a: ['1', None]}, ('+','id'), grp), ['1', '3','4'])
+
+    def testFilteringLinkSortSearchMultilink(self):
+        ae, filter, filter_iter = self.filteringSetup()
+        a = 'assignedto'
+        grp = (None, None)
+        for filt in filter, filter_iter:
+            ae(filt(None, {'status.mls': '1'}, ('+','status')), ['2','3'])
+            ae(filt(None, {'status.mls': '2'}, ('+','status')), ['2','3'])
 
     def testFilteringMultilinkAndGroup(self):
         """testFilteringMultilinkAndGroup:

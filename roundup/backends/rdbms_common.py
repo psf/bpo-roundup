@@ -243,10 +243,16 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
             if not row: break
             yield row
 
-    def sql_stringquote(self, value):
-        """ Quote the string so it's safe to put in the 'sql quotes'
+    def search_stringquote(self, value):
+        """ Quote a search string to escape magic search characters
+            '%' and '_', also need to quote '\' (first)
+            Then put '%' around resulting string for LIKE (or ILIKE) operator
         """
-        return re.sub("'", "''", str(value))
+        v = value.replace('\\', '\\\\')
+        v = v.replace('%', '\\%')
+        v = v.replace('_', '\\_')
+        return '%' + v + '%'
+
 
     def init_dbschema(self):
         self.database_schema = {
@@ -277,7 +283,10 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
             We should now confirm that the schema defined by our "classes"
             attribute actually matches the schema in the database.
         """
-        save = 0
+
+        # upgrade the database for column type changes, new internal
+        # tables, etc.
+        save = self.upgrade_db()
 
         # handle changes in the schema
         tables = self.database_schema['tables']
@@ -297,10 +306,6 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
                 self.drop_class(classname, tables[classname])
                 del tables[classname]
                 save = 1
-
-        # now upgrade the database for column type changes, new internal
-        # tables, etc.
-        save = save | self.upgrade_db()
 
         # update the database version of the schema
         if save:
@@ -348,9 +353,11 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
             self.fix_version_2_tables()
 
         if version < 4:
+            self.log_info('upgrade to version 4')
             self.fix_version_3_tables()
 
         if version < 5:
+            self.log_info('upgrade to version 5')
             self.fix_version_4_tables()
 
         self.database_schema['version'] = self.current_db_version
@@ -648,7 +655,12 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
     def add_class_key_required_unique_constraint(self, cn, key):
         sql = '''create unique index _%s_key_retired_idx
             on _%s(__retired__, _%s)'''%(cn, cn, key)
-        self.sql(sql)
+        try:
+            self.sql(sql)
+        except StandardError:
+            # XXX catch e.g.:
+            # _sqlite.DatabaseError: index _status_key_retired_idx already exists
+            pass
 
     def drop_class_table_indexes(self, cn, key):
         # drop the old table indexes first
@@ -1463,6 +1475,10 @@ class Class(hyperdb.Class):
         All methods except __repr__ and getnode must be implemented by a
         concrete backend Class.
     """
+    # For many databases the LIKE operator ignores case.
+    # Postgres and Oracle have an ILIKE operator to support this.
+    # We define the default here, can be changed in derivative class
+    case_insensitive_like = 'LIKE'
 
     def schema(self):
         """ A dumpable version of the schema that we can store in the
@@ -2419,7 +2435,7 @@ class Class(hyperdb.Class):
                         # where clause will always be false, and we
                         # can optimize the query away.
                         if not v:
-                            return []
+                            return None
                         s = ','.join([a for x in v])
                         where.append('_%s.%s in (%s)'%(pln, k, s))
                         args = args + v
@@ -2433,16 +2449,24 @@ class Class(hyperdb.Class):
                     if not isinstance(v, type([])):
                         v = [v]
 
-                    # Quote the bits in the string that need it and then embed
-                    # in a "substring" search. Note - need to quote the '%' so
-                    # they make it through the python layer happily
-                    v = ['%%'+self.db.sql_stringquote(s)+'%%' for s in v]
+                    # Quote special search characters '%' and '_' for
+                    # correct matching with LIKE/ILIKE
+                    # Note that we now pass the elements of v as query
+                    # arguments and don't interpolate the quoted string
+                    # into the sql statement. Should be safer.
+                    v = [self.db.search_stringquote(s) for s in v]
 
                     # now add to the where clause
                     where.append('('
-                        +' and '.join(["_%s._%s LIKE '%s'"%(pln, k, s) for s in v])
+                        +' and '.join(["_%s._%s %s %s ESCAPE %s"%(
+                                    pln,
+                                    k,
+                                    self.case_insensitive_like,
+                                    a,
+                                    a) for s in v])
                         +')')
-                    # note: args are embedded in the query string now
+                    for vv in v:
+                        args.extend((vv, '\\'))
                 if 'sort' in p.need_for:
                     oc = ac = 'lower(_%s._%s)'%(pln, k)
             elif isinstance(propclass, Link):

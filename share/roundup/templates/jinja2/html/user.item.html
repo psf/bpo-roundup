@@ -1,0 +1,114 @@
+{% extends 'layout/page.html' %}
+
+{% block head_title %}
+  {% if context.id %}
+    {{ i18n.gettext('User') }} {{ context.id }} - {{ config.TRACKER_NAME }}
+  {% else %}
+    {{ i18n.gettext('New User') }} - {{ config.TRACKER_NAME }}
+  {% endif %}
+{% endblock %}
+
+{% block page_header %}
+  {% if not (context.id or context.is_edit_ok()) %}
+    {{ i18n.gettext('New User') }}
+  {% elif not context.id and context.is_edit_ok() %}
+    {{ i18n.gettext('New User Editing') }}
+  {% elif context.id and not context.is_edit_ok() %}
+    {{ i18n.gettext('User') }}{{ context.id }}
+  {% elif context.id and context.is_edit_ok() %}
+    {{ i18n.gettext('User') }}{{ context.id }} {{ i18n.gettext('editing') }}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+
+  {% include 'layout/permission.html' %}
+
+  {% if context.is_view_ok() %}
+    <form method="POST"
+          name ="itemSynopsis"
+          enctype ="multipart/form-data"
+          action ='{{  context.designator() }}'>
+      <table>
+        <tr>
+          <th>{{ i18n.gettext('Name') }}</th>
+          <td>
+            <input type='text' name="realname" value='{{ context.realname }}'>
+          </td>
+        </tr>
+        <tr>
+          <th>{{ i18n.gettext('Login Name') }}</th>
+          <td>
+            <input type='text' name='username' value='{{ context.username }}'>
+          </td>
+        </tr>
+        {% if context.is_edit_ok() %}
+          <tr>
+            <th>{{ i18n.gettext('Login Password') }}</th>
+            <td>
+              <input type='password' name='password'>
+            </td>
+          </tr>
+          <tr>
+            <th>{{ i18n.gettext('Confirm Password') }}</th>
+            <td>
+              <input type='password' name='@confirm@password'>
+            </td>
+          </tr>
+        {% endif %}
+        {% if request.user.hasPermission('Web Roles') %}
+          <tr>
+            <th>{{ i18n.gettext('Roles <br>(comma separated)') }}</th>
+            <td>
+              <input type='text' name='roles' value='{{ context.roles }}'>
+            </td>
+          </tr>
+        {% endif %}
+        <tr>
+          <th>{{ i18n.gettext('Phone') }}</th>
+          <td>
+            <input type='text' name='phone' value='{{ context.phone }}'>
+          </td>
+        </tr>
+        <tr>
+          <th>{{ i18n.gettext('Organisation') }}</th>
+          <td>
+            <input type='text' name='organisation' value='{{ context.organisation }}'>
+          </td>
+        </tr>
+        {% if context.timezone %}
+          <tr>
+            <th>{{ i18n.gettext('Timezone') }}</th>
+            <td>
+              <input type='text' name='timezone' value='{{ context.timezone}}'>
+            </td>
+          </tr>
+        {% endif %}
+        <tr>
+          <th>{{ i18n.gettext('Email') }}</th>
+          <td>
+            <input type='text' name='address' value='{{ context.address }}'>
+          </td>
+        </tr>
+        <tr>
+          <th>{{ i18n.gettext('Alternate email address <br>One address per line') }}</th>
+          <td>
+            {{ context.alternate_addresses.multiline() }}
+          </td>
+        </tr>
+        {% if context.is_edit_ok() %}
+          <tr class='form-actions'>
+            <td>
+            <input type="hidden" name="@template" value="item">
+            {{ context.submit() }}
+            </td>
+          </tr>
+        {% endif %}
+      </table>
+    </form>
+  {% endif %}
+
+  <div class='vspace-five'></div>
+  {{ context.history() }}
+
+{% endblock %}
