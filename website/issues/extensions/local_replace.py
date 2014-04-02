@@ -1,15 +1,14 @@
 import re
 
-substitutions = [ (re.compile('debian:\#(?P<id>\d+)'),
-                   '<a href="http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=\g<id>">debian#\g<id></a>' ),
-                  (re.compile('\#(?P<ws>\s*)(?P<id>\d+)'),
-                   "<a href='issue\g<id>'>#\g<ws>\g<id></a>" ),
-                  (re.compile('(?P<prews>\s+)revision(?P<ws>\s*)(?P<revision>\d+)'),
-                   "\g<prews><a href='http://svn.roundup-tracker.org/viewvc/roundup?view=rev&rev=\g<revision>'>revision\g<ws>\g<revision></a>"),
-                  (re.compile('(?P<prews>\s+)rev(?P<ws>\s*)(?P<revision>\d+)'),
-                   "\g<prews><a href='http://svn.roundup-tracker.org/viewvc/roundup?view=rev&rev=\g<revision>'>rev\g<ws>\g<revision></a>"),
-                  (re.compile('(?P<prews>\s+)(?P<revstr>r|r\s+)(?P<revision>\d+)'),
-                   "\g<prews><a href='http://svn.roundup-tracker.org/viewvc/roundup?view=rev&rev=\g<revision>'>\g<revstr>\g<revision></a>"),
+substitutions = [ (re.compile(r'debian:\#(?P<id>\d+)'),
+                   r'<a href="http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=\g<id>">debian#\g<id></a>' ),
+                  (re.compile(r'\#(?P<ws>\s*)(?P<id>\d+)'),
+                   r"<a href='issue\g<id>'>#\g<ws>\g<id></a>" ),
+                  (re.compile(r'(?P<prews>^|\s+)issue(?P<ws>\s*)(?P<id>\d+)'),
+                   r"\g<prews><a href='issue\g<id>'>issue\g<ws>\g<id></a>" ),
+                  # matching hg revison number or hash
+                  (re.compile(r'(?P<prews>^|\s+)(?P<revstr>(revision|rev|r)\s?)(?P<revision>([1-9][0-9]*)|[0-9a-fA-F]{4,40})(?P<post>\W+|$)'),
+                   r"\g<prews><a href='http://sourceforge.net/p/roundup/code/ci/\g<revision>'>\g<revstr>\g<revision></a>\g<post>"),
                   ]
 
 def local_replace(message):
@@ -18,18 +17,32 @@ def local_replace(message):
         message = cre.sub(replacement, message)
 
     return message
-        
-    
-    
+
+
 def init(instance):
     instance.registerUtil('localReplace', local_replace)
-    
+
+def quicktest(msgstr, should_replace = True):
+    if not should_replace:
+        print "(no)",
+    print "'%s' -> '%s'" % (msgstr, local_replace(msgstr))
 
 if "__main__" == __name__:
-    print " debian:#222", local_replace(" debian:#222")
-    print " revision 222", local_replace(" revision 222")
-    print " wordthatendswithr 222", local_replace(" wordthatendswithr 222")
-    print " r222", local_replace(" r222")
-    print " r 222", local_replace(" r 222")
-    print " #555", local_replace(" #555")
-    
+    print "Replacement examples. '(no)' should result in no replacement:"
+    quicktest(" debian:#222")
+    quicktest(" #555")
+    quicktest("issue333")
+    quicktest(" revision 222")
+    quicktest(" r 222")
+    quicktest(" wordthatendswithr 222", False)
+    quicktest(" references", False)
+    quicktest(" too many spaces r  222", False)
+    quicktest("re-evaluate", False)
+    quicktest("rex140eb", False)
+    quicktest("rev 012", False) # too short for a hg hash
+    quicktest("rev 0123")
+    quicktest("re140eb")
+    quicktest(" r7140eb")
+    quicktest(" rev7140eb ")
+    quicktest("rev7140eb")
+    quicktest("rev7140eb,")

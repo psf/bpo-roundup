@@ -398,7 +398,7 @@ def input_xhtml(**attrs):
     _set_input_default_args(attrs)
     return '<input %s/>'%cgi_escape_attrs(**attrs)
 
-class HTMLInputMixin:
+class HTMLInputMixin(object):
     """ requires a _client property """
     def __init__(self):
         html_version = 'html4'
@@ -421,7 +421,7 @@ class HTMLInputMixin:
 
     _ = gettext
 
-class HTMLPermissions:
+class HTMLPermissions(object):
 
     def view_check(self):
         """ Raise the Unauthorised exception if the user's not permitted to
@@ -740,8 +740,8 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
 
         # use our fabricated request
         args = {
-            'ok_message': self._client.ok_message,
-            'error_message': self._client.error_message
+            'ok_message': self._client._ok_message,
+            'error_message': self._client._error_message
         }
         return pt.render(self._client, self.classname, req, **args)
 
@@ -1933,6 +1933,17 @@ class LinkHTMLProperty(HTMLProperty):
         i = HTMLItem(self._client, self._prop.classname, self._value)
         return getattr(i, attr)
 
+    def __getitem__(self, item):
+        """Explicitly define __getitem__ -- this used to work earlier
+           due to __getattr__ returning the __getitem__ of HTMLItem -- this
+           lookup doesn't work for new-style classes.
+        """
+        if not self._value:
+            msg = self._('Attempt to look up %(item)s on a missing value')
+            return MissingValue(msg%locals())
+        i = HTMLItem(self._client, self._prop.classname, self._value)
+        return i[item]
+
     def plain(self, escape=0):
         """ Render a "plain" representation of the property
         """
@@ -2870,7 +2881,8 @@ class Batch(ZTUtils.Batch):
         if self.last_item is None:
             return 1
         for property in properties:
-            if property == 'id' or isinstance (self.last_item[property], list):
+            if property == 'id' or property.endswith ('.id')\
+               or isinstance (self.last_item[property], list):
                 if (str(self.last_item[property]) !=
                     str(self.current_item[property])):
                     return 1
@@ -3031,7 +3043,7 @@ class TemplatingUtils:
         res.append('</table></td></tr></table>')
         return "\n".join(res)
 
-class MissingValue:
+class MissingValue(object):
     def __init__(self, description, **kwargs):
         self.__description = description
         for key, value in kwargs.items():

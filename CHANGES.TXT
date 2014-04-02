@@ -1,18 +1,43 @@
-This file contains significant changes to Roundup over time.
-Entries are given with the most recent entry first.
+
+Please read doc/upgrading.txt to see how to bring you Roundup version
+up to date with changes listed in this file. This may require schema
+and template changes not listed here.
+
 Each entry has the developer who committed the change in brackets.
 Entries without name were done by Richard Jones.
 
-2013-??-??: 1.5.1
+
+2014-??-??: 1.5.1
+
+Pay attention:
+
+  If you have installed an intermediate version from our version control
+  system and have modified your tracker instance to escape OK and
+  error-messages in the HTML templates you need to revert this change.
+  If you're upgrading from a previous roundup release version
+  you should look into ``doc/upgrading.txt``.  (Ralf Schlatterbeck)
 
 Features:
 
+- The example local_replace.py has been updated to show how to link to
+  modern revision systems using hex revsion numbers. This extension is used
+  to expand shortcuts in msgs. (Bernhard Reiter)
 - Drop comment in user settings about numeric hour offsets instead of using
   pytz timezone names. Due to DST these are wrong half of the year, it is
   much better to use timezone names. (Thomas Arendsen Hein)
+- issue2550793: Wrap messages with very long lines in the web interface.
+  (Thomas Arendsen Hein)
+- New Link / Multilink option "try_id_parsing": Sometimes the key of a
+  class can be numeric -- in that case roundup will try to parse the
+  value as an ID when evaluating form values -- not as a key. Specifying
+  try_id_parsing='no' for these Link/Multilink will skip the ID step,
+  default is 'yes'.
 
 Fixed:
 
+- issue2550830 An empty LinkHTMLProperty cannot be compared successfully. 
+  Improves the query editing page. Reported and fixed by R David Murray 
+  (Bernhard Reiter).
 - Fix Release-date of 1.5.0 in this file (thanks to Bernhard for
   discovery) (Ralf Schlatterbeck)
 - Pythons cgi form code can return a TypeError, we now guard for this
@@ -48,13 +73,23 @@ Fixed:
   JOIN clause was missing in generated SQL. (Ralf Schlatterbeck)
 - Fix another XSS issue2550817. Note that the code that triggers that
   particular bug is no longer in roundup core. But the change to the
-  templates we suggest is a *lot* safer as it always escapes the error
-  and ok messages now. Thanks to Thibault Fevry for the original
+  templates we suggest is a *lot* safer as it by default escapes the
+  error and ok messages now. Thanks to Thibault Fevry for the original
   bug-report.
-  If you are upgrading: you *MUST* read doc/upgrading.txt and do the
-  necessary changes to your templates, the escaping now happens in the
-  template and not in the roundup code. So if you don't make the
-  necessary changes *you are vulnerable*. (Ralf Schlatterbeck)
+- issue2117897: Fixed two more places in date.py where seconds can be
+  rounded to 60.0 and causing exceptions. Change them to 59.999 as was
+  done in the fix for issue2550802. (Thomas Arendsen Hein)
+- Fix batch.propchanged for transitive id properties (would result in a
+  backtrace when trying to group by property.id)
+- Fix issue2550835, the test checks for date-range queries with an
+  interval that depends on the local time. Put the queried date a little
+  later to avoid a race condition where the queried interval doesn't
+  match the date because the clock has advanced. (Ralf Schlatterbeck)
+- Apply german translation fixes from Debian team in issue2550761,
+  thanks to Kai Storbeck for taking the time to report these.
+
+Minor:
+- demo.py usage message improved: explains "nuke" now. (Bernhard Reiter)
 
 
 2013-07-06: 1.5.0
@@ -303,10 +338,10 @@ Fixed:
   issue2550689, but is untested if this really works in browsers.
   Thanks to Joseph Myers for reporting. (Ralf)
 - Fix another XSS with the ok- and error message, see issue2550724. We
-  solve this differently from the proposals in the bug-report by not
-  allowing *any* html-tags in ok/error messages anymore. Thanks to
-  David Benjamin for the bug-report and to Ezio Melotti for several
-  proposed fixes. (Ralf)
+  now escape messages when added to the list so we can decide whether to
+  escape a message individually for each message. The default is to
+  escape. Thanks to David Benjamin for the bug-report and to Ezio
+  Melotti for several proposed fixes. (Ralf)
 
 
 2011-07-15: 1.4.19

@@ -25,6 +25,7 @@ from roundup.hyperdb import String, Password, Link, Multilink, Date, \
 from roundup.mailer import Mailer
 from roundup import date, password, init, instance, configuration, \
     roundupdb, i18n
+from roundup.cgi.templating import HTMLItem
 
 from mocknull import MockNull
 
@@ -428,6 +429,19 @@ class DBTest(commonDBTest):
             self.db.issue.set(nid, deadline=None)
             if commit: self.db.commit()
             self.assertEqual(self.db.issue.get(nid, "deadline"), None)
+
+    def testDateSort(self):
+        d1 = date.Date('.')
+        ae, filter, filter_iter = self.filteringSetup()
+        nid = self.db.issue.create(title="nodeadline", status='1')
+        self.db.commit()
+        for filt in filter, filter_iter:
+            ae(filt(None, {}, ('+','deadline')), ['5', '2', '1', '3', '4'])
+            ae(filt(None, {}, ('+','id'), ('+', 'deadline')),
+                ['5', '2', '1', '3', '4'])
+            ae(filt(None, {}, ('-','id'), ('-', 'deadline')),
+                ['4', '3', '1', '2', '5'])
+
 
     # Interval
     def testIntervalChange(self):
@@ -1367,16 +1381,25 @@ class DBTest(commonDBTest):
 
     def testFilteringRangeGeekInterval(self):
         ae, filter, filter_iter = self.filteringSetup()
+        # Note: When querying, create date one minute later than the
+        # timespan later queried to avoid race conditions where the
+        # creation of the deadline is more than a second ago when
+        # queried -- in that case we wouldn't get the expected result.
+        # By extending the interval by a minute we would need a very
+        # slow machine for this test to fail :-)
         for issue in (
-                { 'deadline': date.Date('. -2d')},
-                { 'deadline': date.Date('. -1d')},
-                { 'deadline': date.Date('. -8d')},
+                { 'deadline': date.Date('. -2d') + date.Interval ('00:01')},
+                { 'deadline': date.Date('. -1d') + date.Interval ('00:01')},
+                { 'deadline': date.Date('. -8d') + date.Interval ('00:01')},
                 ):
             self.db.issue.create(**issue)
         for filt in filter, filter_iter:
             ae(filt(None, {'deadline': '-2d;'}), ['5', '6'])
             ae(filt(None, {'deadline': '-1d;'}), ['6'])
             ae(filt(None, {'deadline': '-1w;'}), ['5', '6'])
+            ae(filt(None, {'deadline': '. -2d;'}), ['5', '6'])
+            ae(filt(None, {'deadline': '. -1d;'}), ['6'])
+            ae(filt(None, {'deadline': '. -1w;'}), ['5', '6'])
 
     def testFilteringIntervalSort(self):
         # 1: '1:10'
@@ -2419,18 +2442,27 @@ class FilterCacheTest(commonDBTest):
         ae (result, ['4', '5', '6', '7', '8', '1', '2', '3'])
 
 
-class ClassicInitTest(unittest.TestCase):
+class ClassicInitBase(unittest.TestCase):
     count = 0
     db = None
 
     def setUp(self):
-        ClassicInitTest.count = ClassicInitTest.count + 1
+        ClassicInitBase.count = ClassicInitBase.count + 1
         self.dirname = '_test_init_%s'%self.count
         try:
             shutil.rmtree(self.dirname)
         except OSError, error:
             if error.errno not in (errno.ENOENT, errno.ESRCH): raise
 
+    def tearDown(self):
+        if self.db is not None:
+            self.db.close()
+        try:
+            shutil.rmtree(self.dirname)
+        except OSError, error:
+            if error.errno not in (errno.ENOENT, errno.ESRCH): raise
+
+class ClassicInitTest(ClassicInitBase):
     def testCreation(self):
         ae = self.assertEqual
 
@@ -2458,15 +2490,8 @@ class ClassicInitTest(unittest.TestCase):
         l = db.issue.list()
         ae(l, [])
 
-    def tearDown(self):
-        if self.db is not None:
-            self.db.close()
-        try:
-            shutil.rmtree(self.dirname)
-        except OSError, error:
-            if error.errno not in (errno.ENOENT, errno.ESRCH): raise
 
-class ConcurrentDBTest(ClassicInitTest):
+class ConcurrentDBTest(ClassicInitBase):
     def testConcurrency(self):
         # The idea here is a read-modify-update cycle in the presence of
         # a cache that has to be properly handled. The same applies if
@@ -2497,5 +2522,91 @@ class ConcurrentDBTest(ClassicInitTest):
         self.assertEqual(db2.priority.get(prio, 'order'), 3.0)
         db2.close()
 
+class HTMLItemTest(ClassicInitBase):
+    class Request :
+        """ Fake html request """
+        rfile = None
+        def start_response (self, a, b) :
+            pass
+        # end def start_response
+    # end class Request
+
+    def setUp(self):
+        super(HTMLItemTest, self).setUp()    
+        self.tracker = tracker = setupTracker(self.dirname, self.backend)
+        db = self.db = tracker.open('admin')
+        req = self.Request()
+        env = dict (PATH_INFO='', REQUEST_METHOD='GET', QUERY_STRING='')
+        self.client = self.tracker.Client(self.tracker, req, env, None)
+        self.client.db = db
+        self.client.language = None
+        self.client.userid = db.getuid()
+        self.client.classname = 'issue'
+        user = {'username': 'worker5', 'realname': 'Worker', 'roles': 'User'}
+        u = self.db.user.create(**user)
+        u_m = self.db.msg.create(author = u, content = 'bla'
+            , date = date.Date ('2006-01-01'))
+        issue = {'title': 'ts1', 'status': '2', 'assignedto': '3',
+                'priority': '3', 'messages' : [u_m], 'nosy' : ['3']}
+        self.db.issue.create(**issue)
+        issue = {'title': 'ts2', 'status': '2',
+                'messages' : [u_m], 'nosy' : ['3']}
+        self.db.issue.create(**issue)
+
+    def testHTMLItemAttributes(self):
+        issue = HTMLItem(self.client, 'issue', '1')
+        ae = self.assertEqual
+        ae(issue.title.plain(),'ts1')
+        ae(issue ['title'].plain(),'ts1')
+        ae(issue.status.plain(),'deferred')
+        ae(issue ['status'].plain(),'deferred')
+        ae(issue.assignedto.plain(),'worker5')
+        ae(issue ['assignedto'].plain(),'worker5')
+        ae(issue.priority.plain(),'bug')
+        ae(issue ['priority'].plain(),'bug')
+        ae(issue.messages.plain(),'1')
+        ae(issue ['messages'].plain(),'1')
+        ae(issue.nosy.plain(),'worker5')
+        ae(issue ['nosy'].plain(),'worker5')
+        ae(len(issue.messages),1)
+        ae(len(issue ['messages']),1)
+        ae(len(issue.nosy),1)
+        ae(len(issue ['nosy']),1)
+
+    def testHTMLItemDereference(self):
+        issue = HTMLItem(self.client, 'issue', '1')
+        ae = self.assertEqual
+        ae(str(issue.priority.name),'bug')
+        ae(str(issue.priority['name']),'bug')
+        ae(str(issue ['priority']['name']),'bug')
+        ae(str(issue ['priority'].name),'bug')
+        ae(str(issue.assignedto.username),'worker5')
+        ae(str(issue.assignedto['username']),'worker5')
+        ae(str(issue ['assignedto']['username']),'worker5')
+        ae(str(issue ['assignedto'].username),'worker5')
+        for n in issue.nosy:
+            ae(n.username.plain(),'worker5')
+            ae(n['username'].plain(),'worker5')
+        for n in issue.messages:
+            ae(n.author.username.plain(),'worker5')
+            ae(n.author['username'].plain(),'worker5')
+            ae(n['author'].username.plain(),'worker5')
+            ae(n['author']['username'].plain(),'worker5')
+
+
+    def testHTMLItemDerefFail(self):
+        issue = HTMLItem(self.client, 'issue', '2')
+        ae = self.assertEqual
+        ae(issue.assignedto.plain(),'')
+        ae(issue ['assignedto'].plain(),'')
+        ae(issue.priority.plain(),'')
+        ae(issue ['priority'].plain(),'')
+        m = '[Attempt to look up %s on a missing value]'
+        ae(str(issue.priority.name),m%'name')
+        ae(str(issue ['priority'].name),m%'name')
+        ae(str(issue.assignedto.username),m%'username')
+        ae(str(issue ['assignedto'].username),m%'username')
+        ae(bool(issue ['assignedto']['username']),False)
+        ae(bool(issue ['priority']['name']),False)
 
 # vim: set et sts=4 sw=4 :
