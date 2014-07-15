@@ -10,6 +10,26 @@ Public domain work by:
 import re
 
 
+# --- Example URL mapping
+
+class NamedObject(object):
+    """Object that outputs given name when printed"""
+    def __init__(self, name):
+        self.name = name
+    def __repr__(self):
+        return self.name
+
+ExampleHandler = NamedObject('ExampleHandler')
+ExampleFileHandler = NamedObject('ExampleFileHandler')
+
+EXAMPLE_URLMAP = (
+    '/static/(.*)', ExampleFileHandler,
+    '/', ExampleHandler
+)
+
+
+# --- Regexp based router
+
 class Router(object):
 
     def __init__(self, urlmap=[]):

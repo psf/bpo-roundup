@@ -34,7 +34,26 @@ needed for human readability.
 
 Status for Roundup URL map check:
 
-    [ ] urlmap component
+    [ ] check urlpath values for
+      [ ] example.com
+      [ ] example.com/
+      [ ] example.com/tracker
+      [ ] example.com/tracker/
+      [ ] example.com/tracker/item
+      [ ] example.com/tracker?anything
+      [ ] example.com/tracker/?anything
+      [ ] example.com/tracker/item?anything
+
+    [ ] get full list of url handlers
+
+    [ ] check url handling for db scheme paths
+
+      [ ] example.com/tracker/class
+      [ ] example.com/tracker/class/
+      [ ] example.com/tracker/class1
+      [ ] example.com/tracker/class1/
+
+    [ ] check url handling for static files
 
     /_file/(.*) 
       StaticFileHandler
@@ -46,3 +65,4 @@ Status for Roundup URL map check:
        [ ] /@@file
        [ ] /@@file/
        [ ] /@@file/name
+
