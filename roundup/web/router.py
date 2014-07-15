@@ -50,3 +50,21 @@ class Router(object):
             if match:
                 return handler, match.groups()
         return (None, ())
+
+
+
+# [ ] len(urlmap) should be even to avoid errors
+#     (find a way to explain this to users)
+
+if __name__ == '__main__':
+
+    import unittest
+    class test_Router(unittest.TestCase):
+        def test_example_routes(self):
+            router = Router(EXAMPLE_URLMAP)
+            self.assertEquals(router.get_handler(''), (None, ()))
+            handler, params = router.get_handler('/')
+            self.assertEquals(handler, ExampleHandler)
+            self.assertEquals(params, tuple())
+
+    unittest.main()
