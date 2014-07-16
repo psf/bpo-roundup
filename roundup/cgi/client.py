@@ -209,7 +209,7 @@ class Client:
 
     Client attributes at instantiation:
 
-    - "path" is the PATH_INFO inside the instance (with no leading '/')
+    - "path" is the PATH_INFO inside the instance with stripped leading '/'
     - "base" is the base URL for the instance
     - "form" is the cgi form, an instance of FieldStorage from the standard
       cgi module
@@ -294,7 +294,7 @@ class Client:
         self.mailer = Mailer(instance.config)
 
         # save off the path
-        self.path = env['PATH_INFO']
+        self.path = env['PATH_INFO'].lstrip('/')
 
         # this is the base URL for this tracker
         self.base = self.instance.config.TRACKER_WEB

@@ -53,8 +53,6 @@ class RequestDispatcher(object):
 
         tracker = roundup.instance.open(self.home, not self.debug)
 
-        # need to strip the leading '/'
-        environ["PATH_INFO"] = environ["PATH_INFO"][1:]
         if request.timing:
             environ["CGI_SHOW_TIMING"] = request.timing
 

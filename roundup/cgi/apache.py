@@ -121,11 +121,6 @@ def handler(req):
     # Note: cookies are read from HTTP variables, so we need all HTTP vars
     req.add_common_vars()
     _env = dict(req.subprocess_env)
-    # XXX classname must be the first item in PATH_INFO.  roundup.cgi does:
-    #       path = string.split(os.environ.get('PATH_INFO', '/'), '/')
-    #       os.environ['PATH_INFO'] = string.join(path[2:], '/')
-    #   we just remove the first character ('/')
-    _env["PATH_INFO"] = req.path_info[1:]
     if _timing:
         _env["CGI_SHOW_TIMING"] = _timing
     _form = cgi.FieldStorage(req, environ=_env)
