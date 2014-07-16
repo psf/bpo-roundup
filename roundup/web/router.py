@@ -22,9 +22,10 @@ class NamedObject(object):
 ExampleHandler = NamedObject('ExampleHandler')
 ExampleFileHandler = NamedObject('ExampleFileHandler')
 
+
 EXAMPLE_URLMAP = (
-    '/static/(.*)', ExampleFileHandler,
-    '/', ExampleHandler
+    'static/(.*)', ExampleFileHandler,
+    '', ExampleHandler
 )
 
 
@@ -35,15 +36,19 @@ class Router(object):
     def __init__(self, urlmap=[]):
         """
         `urlmap` is a list (pattern, handler, pattern, ...)
+        pattern should have no leading slash
         """
         self.urlmap = urlmap
 
     def get_handler(self, urlpath):
         """
         `urlpath` is a part of url /that/looks?like=this
+        (leading slash is optional)
 
         returns tuple (handler, arguments) or (None, ())
         """
+        # strip leading slashes before matching
+        path = urlpath.lstrip('/')
         for i in range(0, len(self.urlmap), 2):
             pattern, handler = self.urlmap[i], self.urlmap[i+1]
             match = re.match(pattern, urlpath)
