@@ -25,7 +25,7 @@ ExampleFileHandler = NamedObject('ExampleFileHandler')
 
 EXAMPLE_URLMAP = (
     'static/(.*)', ExampleFileHandler,
-    '', ExampleHandler
+    'index', ExampleHandler
 )
 
 
@@ -51,7 +51,7 @@ class Router(object):
         path = urlpath.lstrip('/')
         for i in range(0, len(self.urlmap), 2):
             pattern, handler = self.urlmap[i], self.urlmap[i+1]
-            match = re.match(pattern, urlpath)
+            match = re.match(pattern, path)
             if match:
                 return handler, match.groups()
         return (None, ())
@@ -68,7 +68,7 @@ if __name__ == '__main__':
         def test_example_routes(self):
             router = Router(EXAMPLE_URLMAP)
             self.assertEquals(router.get_handler(''), (None, ()))
-            handler, params = router.get_handler('/')
+            handler, params = router.get_handler('/index')
             self.assertEquals(handler, ExampleHandler)
             self.assertEquals(params, tuple())
 
