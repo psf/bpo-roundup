@@ -44,7 +44,15 @@ Status for Roundup URL map check:
       [ ] example.com/tracker/?anything
       [ ] example.com/tracker/item?anything
 
-    [ ] get full list of url handlers
+    [x] get full list of url handlers
+        (1.5.0, entrypoing: cgi.client.main)
+      [x] /xmlrpc     - hardcoded xmlrpc endpoint
+      [x] /           - main home page
+          /index
+          /home
+      [x] /_file      - static resources
+          /@@file
+      [x] /<class>    - dynamic handler based on db
 
     [ ] check url handling for db scheme paths
 

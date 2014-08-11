@@ -22,6 +22,9 @@ from roundup.mailer import Mailer, MessageSendError, encode_quopri
 from roundup.cgi import accept_language
 from roundup import xmlrpc
 
+# new namespace for universal web components
+from roundup.web.router import Router
+
 from roundup.anypy.cookie_ import CookieError, BaseCookie, SimpleCookie, \
     get_cookie_date
 from roundup.anypy.io_ import StringIO
@@ -348,6 +351,12 @@ class Client:
         self.classname = None
         self.template = None
 
+        # routing maps URL requests to handlers by path component
+        self.urlmap = [
+            'xmlrpc', self.handle_xmlrpc,
+        ]
+        self.router = Router(self.urlmap)
+
     def setTranslator(self, translator=None):
         """Replace the translation engine
 
@@ -369,9 +378,10 @@ class Client:
     def main(self):
         """ Wrap the real main in a try/finally so we always close off the db.
         """
+        handler, params = self.router.get_handler(self.path)
         try:
-            if self.env.get('CONTENT_TYPE') == 'text/xml' and self.path == 'xmlrpc':
-                self.handle_xmlrpc()
+            if handler:
+                handler()
             else:
                 self.inner_main()
         finally:

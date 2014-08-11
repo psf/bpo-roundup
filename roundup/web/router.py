@@ -23,7 +23,7 @@ ExampleHandler = NamedObject('ExampleHandler')
 ExampleFileHandler = NamedObject('ExampleFileHandler')
 
 
-EXAMPLE_URLMAP = (
+EXAMPLE_URL_MAP = (
     'static/(.*)', ExampleFileHandler,
     'index', ExampleHandler
 )
@@ -66,7 +66,7 @@ if __name__ == '__main__':
     import unittest
     class test_Router(unittest.TestCase):
         def test_example_routes(self):
-            router = Router(EXAMPLE_URLMAP)
+            router = Router(EXAMPLE_URL_MAP)
             self.assertEquals(router.get_handler(''), (None, ()))
             handler, params = router.get_handler('/index')
             self.assertEquals(handler, ExampleHandler)
