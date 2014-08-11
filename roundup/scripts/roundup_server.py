@@ -277,12 +277,12 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def inner_run_cgi(self):
         ''' This is the inner part of the CGI handling
         '''
-        rest = self.path
 
-        # file-like object for the favicon.ico file information
-        favicon_fileobj = None
+        # self.path is /some/path?with&all=stuff
+        if self.path == '/favicon.ico':
+            # file-like object for the favicon.ico file information
+            favicon_fileobj = None
 
-        if rest == '/favicon.ico':
             # check to see if a custom favicon was specified, and set
             # favicon_fileobj to the input file
             if self.CONFIG is not None:
@@ -314,10 +314,12 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
             return
 
-        i = rest.rfind('?')
+        i = self.path.rfind('?')
         if i >= 0:
-            rest, query = rest[:i], rest[i+1:]
+            # rest starts with /, query is without ?
+            rest, query = self.path[:i], self.path[i+1:]
         else:
+            rest = self.path
             query = ''
 
         # no tracker - spit out the index
@@ -334,7 +336,9 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.send_response(301)
             # redirect - XXX https??
             protocol = 'http'
-            url = '%s://%s%s/'%(protocol, self.headers['host'], self.path)
+            url = '%s://%s%s/'%(protocol, self.headers['host'], rest)
+            if query:
+               url += '?' + query
             self.send_header('Location', url)
             self.end_headers()
             self.wfile.write('Moved Permanently')
