@@ -32,7 +32,7 @@ needed for human readability.
 
 ### Router
 
-Status for Roundup URL map check:
+Roundup URL map check for backward compatibility:
 
     [ ] check urlpath values for
       [ ] example.com
@@ -65,12 +65,14 @@ Status for Roundup URL map check:
 
     /_file/(.*) 
       StaticFileHandler
-       [ ] /_file
-       [ ] /_file/
-       [ ] /_file/name
+       [x] /_file       - 500 TypeError: join()
+       [x] /_file/      - 404
+       [x] /_file/name  - 200 from STATIC_FILES or
+                              TEMPLATES
     /@@file/(.*)
       StaticFileHandler
-       [ ] /@@file
-       [ ] /@@file/
-       [ ] /@@file/name
+       [x] /@@file      - 500 TypeError: join()
+       [x] /@@file/     - 404
+       [x] /@@file/name - 200 from STATIC_FILES or
+                              TEMPLATES 
 

@@ -354,6 +354,8 @@ class Client:
         # routing maps URL requests to handlers by path component
         self.urlmap = [
             'xmlrpc', self.handle_xmlrpc,
+            '_file/(.*)',  self.serve_static_file,
+            '@@file/(.*)', self.serve_static_file,
         ]
         self.router = Router(self.urlmap)
 
@@ -381,7 +383,7 @@ class Client:
         handler, params = self.router.get_handler(self.path)
         try:
             if handler:
-                handler()
+                handler(*params)
             else:
                 self.inner_main()
         finally:
@@ -449,8 +451,8 @@ class Client:
         - HTTP Redirect  (generally raised by an action)
         - SendFile       (generally raised by determine_context)
           serve up a FileClass "content" property
-        - SendStaticFile (generally raised by determine_context)
-          serve up a file from the tracker "html" directory
+        - SendStaticFile (may be raised by an action)
+          serve up a file from static or template directory
         - Unauthorised   (generally raised by an action)
           the action is cancelled, the request is rendered and an error
           message is displayed indicating that permission was not
@@ -852,10 +854,6 @@ class Client:
         is generally only one entry long.
 
         - if there is no path, then we are in the "home" context.
-        - if the path is "_file", then the additional path entry
-          specifies the filename of a static file we're to serve up
-          from the instance "html" directory. Raises a SendStaticFile
-          exception.(*)
         - if there is something in the path (eg "issue"), it identifies
           the tracker class we're to display.
         - if the path is an item designator (eg "issue123"), then we're
@@ -917,8 +915,6 @@ class Client:
             else:
                 self.template = ''
             return
-        elif path[0] in ('_file', '@@file'):
-            raise SendStaticFile(os.path.join(*path[1:]))
         else:
             self.classname = path[0]
             if len(path) > 1:
@@ -1022,9 +1018,8 @@ class Client:
         self._serve_file(lmt, mime_type, content, filename)
 
     def serve_static_file(self, file):
-        """ Serve up the file named from the templates dir
+        """ Send file from STATIC_FILES or TEMPLATES dir
         """
-        # figure the filename - try STATIC_FILES, then TEMPLATES dir
         for dir_option in ('STATIC_FILES', 'TEMPLATES'):
             prefix = self.instance.config[dir_option]
             if not prefix:
