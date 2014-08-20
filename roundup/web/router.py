@@ -7,8 +7,10 @@ Public domain work by:
   anatoly techtonik <techtonik@gmail.com>
 """
 
-import re
+DEBUG = False
 
+
+import re
 
 # --- Example URL mapping
 
@@ -51,6 +53,8 @@ class Router(object):
         path = urlpath.lstrip('/')
         for i in range(0, len(self.urlmap), 2):
             pattern, handler = self.urlmap[i], self.urlmap[i+1]
+            if DEBUG:
+                print('router: matching %s' % pattern)
             match = re.match(pattern, path)
             if match:
                 return handler, match.groups()
