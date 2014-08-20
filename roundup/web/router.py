@@ -15,7 +15,7 @@ import re
 # --- Example URL mapping
 
 class NamedObject(object):
-    """Object that outputs given name when printed"""
+    """Object that outputs its name when printed"""
     def __init__(self, name):
         self.name = name
     def __repr__(self):
@@ -38,14 +38,14 @@ class Router(object):
     def __init__(self, urlmap=[]):
         """
         `urlmap` is a list (pattern, handler, pattern, ...)
-        pattern should have no leading slash
+        leading slash in pattern is stripped
         """
         self.urlmap = urlmap
 
     def get_handler(self, urlpath):
         """
         `urlpath` is a part of url /that/looks?like=this
-        (leading slash is optional)
+        (leading slash is optional, will be stripped anyway)
 
         returns tuple (handler, arguments) or (None, ())
         """
@@ -53,6 +53,7 @@ class Router(object):
         path = urlpath.lstrip('/')
         for i in range(0, len(self.urlmap), 2):
             pattern, handler = self.urlmap[i], self.urlmap[i+1]
+            pattern = pattern.lstrip('/')
             if DEBUG:
                 print('router: matching %s' % pattern)
             match = re.match(pattern, path)
@@ -75,5 +76,15 @@ if __name__ == '__main__':
             handler, params = router.get_handler('/index')
             self.assertEquals(handler, ExampleHandler)
             self.assertEquals(params, tuple())
+
+        def test_route_param(self):
+            def echo_handler(args):
+                return args
+            router = Router(('/files/(.*)', echo_handler))
+            self.assertEquals(router.get_handler(''), (None, ()))
+            self.assertEquals(router.get_handler('/files'), (None, ()))
+            handler, params = router.get_handler('/files/filename')
+            self.assertEquals(handler, echo_handler)
+            self.assertEquals(params, ('filename',))
 
     unittest.main()
