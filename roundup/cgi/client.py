@@ -351,13 +351,22 @@ class Client:
         self.classname = None
         self.template = None
 
-        # routing maps URL requests to handlers by path component
+        # setup routing to map URL requests to handlers by path component
+        # [ ] this code is run on each request, but it doesn't have to
         self.urlmap = [
             'xmlrpc', self.handle_xmlrpc,
             '_file/(.*)',  self.serve_static_file,
             '@@file/(.*)', self.serve_static_file,
         ]
+        for route, handler in self.instance.web_handlers.iteritems():
+            # no nested lists are created here
+            self.urlmap += [route, self.wrap_handler(handler)]
         self.router = Router(self.urlmap)
+
+    def wrap_handler(self, function):
+        def wrapper():
+            self.write(function())
+        return wrapper
 
     def setTranslator(self, translator=None):
         """Replace the translation engine

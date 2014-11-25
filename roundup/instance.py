@@ -53,9 +53,11 @@ class Tracker:
         # for regression tests
         self.schema_hook = None
         self.config = configuration.CoreConfig(tracker_home)
+
         self.actions = {}
         self.cgi_actions = {}
         self.templating_utils = {}
+        self.web_handlers = {}
 
         libdir = os.path.join(self.tracker_home, 'lib')
         self.libdir = os.path.isdir(libdir) and libdir or ''
@@ -231,6 +233,14 @@ class Tracker:
                 self.cgi_actions[name] = action
         else:
             self.cgi_actions[name] = action
+
+    def registerHandler(self, urlpath, function):
+        """Add handler for urlpath. `urlpath` is a simple rule for
+        roundup.web.router that is matched before Roundup makes DB
+        lookups for classes that are available to render.
+
+        New in version 1.6.x"""
+        self.web_handlers[urlpath] = function
 
     def registerUtil(self, name, function):
         self.templating_utils[name] = function

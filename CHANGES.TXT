@@ -1,5 +1,5 @@
 
-Please read doc/upgrading.txt to see how to bring you Roundup version
+Please read ``doc/upgrading.txt`` to see how to bring you Roundup version
 up to date with changes listed in this file. This may require schema
 and template changes not listed here.
 
@@ -10,6 +10,19 @@ Entries without name were done by Richard Jones.
 Python v2.5. Support for Python v2.5 will be dropped with the v1.6
 release of Roundup, at which point users will need to run Roundup using
 either Python v2.6 or v2.7.
+
+
+201?-??-??: 1.6.0
+
+Features:
+
+- Introducing Router API (anatoly techtonik)
+- roundup.web.router component for mapping URLs to handlers. This enables
+  extensions to define own URLs with custom web pages (anatoly techtonik)
+- New instance.Tracker.registerHandler() API for registering URL handlers
+  from extensions (anatoly techtonik)
+- Example of custompage extension that adds /staticpage and /version URLs
+  to ``plugins/extensions/custompage.py`` (anatoly techtonik)
 
 
 2014-??-??: 1.5.1
