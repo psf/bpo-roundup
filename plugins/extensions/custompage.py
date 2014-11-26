@@ -14,7 +14,7 @@ def render_html():
 def render_version():
   """
   Page with some 'dynamic' content demonstrating that extension
-  doesn't may import Roundup to access its API, but doesn't need
+  may import Roundup to access its API, but doesn't need
   to depend on it.
   """
   import roundup
