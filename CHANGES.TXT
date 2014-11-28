@@ -62,6 +62,10 @@ Features:
   (Ralf Schlatterbeck)
 - /xmlrpc endpoint now shows link to XML-RPC documentation if accessed
   through browser, without text/xml Content-Type (anatoly techtonik)
+- docs: New dedicated chapter for extensions in ``doc/customizing.txt``
+  (anatoly techtonik)
+- Increase default height of classhelp windows from 400 to 600.
+  (Thomas Arendsen Hein)
 
 Fixed:
 
@@ -138,9 +142,13 @@ Fixed:
   debug this. (Ralf Schlatterbeck)
 - Correctly recreate the database directory when re-initialising a tracker
   instance. (John Kristensen)
-
-Minor:
+- In case of an error, date fields would lose the calendar help, fixed.
+  (Ralf Schlatterbeck)
 - demo.py usage message improved: explains "nuke" now. (Bernhard Reiter)
+- Fix issue2550735 Missing doc for xmlrpc schema. Thanks to Cédric Krier
+  for the patch. (anatoly techtonik)
+- Fix two line-break accidents in devel and responsive milestone.item.html
+  (Thomas Arendsen Hein)
 
 
 2013-07-06: 1.5.0

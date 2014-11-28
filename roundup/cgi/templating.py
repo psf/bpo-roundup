@@ -638,7 +638,7 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
         return l
 
     def classhelp(self, properties=None, label=''"(list)", width='500',
-            height='400', property='', form='itemSynopsis',
+            height='600', property='', form='itemSynopsis',
             pagesize=50, inputtype="checkbox", html_kwargs={},
             sort=None, filter=None):
         """Pop up a javascript window with class help
@@ -1771,8 +1771,11 @@ class DateHTMLProperty(HTMLProperty):
         elif isinstance(value, str) or isinstance(value, unicode):
             # most likely erroneous input to be passed back to user
             if isinstance(value, unicode): value = value.encode('utf8')
-            return self.input(name=self._formname, value=value, size=size,
+            s = self.input(name=self._formname, value=value, size=size,
                               **kwargs)
+            if popcal:
+                s += self.popcal()
+            return s
         else:
             raw_value = value
 
