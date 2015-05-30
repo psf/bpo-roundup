@@ -3,8 +3,9 @@
 __docformat__ = 'restructuredtext'
 
 import base64, binascii, cgi, codecs, mimetypes, os
-import quopri, random, re, rfc822, stat, sys, time
+import quopri, random, re, stat, sys, time
 import socket, errno
+import email.utils
 from traceback import format_exc
 
 try:
@@ -31,6 +32,7 @@ from roundup.anypy import urllib_
 from email.MIMEBase import MIMEBase
 from email.MIMEText import MIMEText
 from email.MIMEMultipart import MIMEMultipart
+import roundup.anypy.email_
 
 def initialiseSecurity(security):
     '''Create some Permissions and Roles on the security object
@@ -374,7 +376,7 @@ class Client:
         """ Wrap the real main in a try/finally so we always close off the db.
         """
         try:
-            if self.env.get('CONTENT_TYPE') == 'text/xml' and self.path == 'xmlrpc':
+            if self.path == 'xmlrpc':
                 self.handle_xmlrpc()
             else:
                 self.inner_main()
@@ -384,6 +386,11 @@ class Client:
 
 
     def handle_xmlrpc(self):
+        if self.env.get('CONTENT_TYPE') != 'text/xml':
+            self.write("This is the endpoint of Roundup <a href='" +
+                "http://www.roundup-tracker.org/docs/xmlrpc.html'>" +
+                "XML-RPC interface</a>.")
+            return
 
         # Pull the raw XML out of the form.  The "value" attribute
         # will be the raw content of the POST request.
@@ -493,7 +500,8 @@ class Client:
                 #    date = time.time() - 1
                 #else:
                 #    date = time.time() + 5
-                self.additional_headers['Expires'] = rfc822.formatdate(date)
+                self.additional_headers['Expires'] = \
+                    email.utils.formatdate(date, usegmt=True)
 
                 # render the content
                 self.write_html(self.renderContext())
@@ -535,11 +543,11 @@ class Client:
                                "Basic realm=\"%s\"" % realm)
             else:
                 self.response_code = http_.client.FORBIDDEN
-            self.renderFrontPage(message)
+            self.renderFrontPage(str(message))
         except Unauthorised, message:
             # users may always see the front page
             self.response_code = 403
-            self.renderFrontPage(message)
+            self.renderFrontPage(str(message))
         except NotModified:
             # send the 304 response
             self.response_code = 304
@@ -987,6 +995,32 @@ class Client:
             raise Unauthorised(self._("You are not allowed to view "
                 "this file."))
 
+
+        # --- mime-type security
+        # mime type detection is performed in cgi.form_parser
+
+        # everything not here is served as 'application/octet-stream'
+        whitelist = [
+            'text/plain',
+            'text/x-csrc',   # .c
+            'text/x-chdr',   # .h
+            'text/x-patch',  # .patch and .diff
+            'text/x-python', # .py
+            'text/xml',
+            'text/csv',
+            'text/css',
+            'application/pdf',
+            'image/gif',
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'audio/ogg',
+            'video/webm',
+        ]
+
+        if self.instance.config['WEB_ALLOW_HTML_FILE']:
+            whitelist.append('text/html')
+
         try:
             mime_type = klass.get(nodeid, 'type')
         except IndexError, e:
@@ -995,12 +1029,11 @@ class Client:
         if not mime_type:
             mime_type = 'text/plain'
 
-        # if the mime_type is HTML-ish then make sure we're allowed to serve up
-        # HTML-ish content
-        if mime_type in ('text/html', 'text/x-html'):
-            if not self.instance.config['WEB_ALLOW_HTML_FILE']:
-                # do NOT serve the content up as HTML
-                mime_type = 'application/octet-stream'
+        if mime_type not in whitelist:
+            mime_type = 'application/octet-stream'
+
+        # --/ mime-type security
+
 
         # If this object is a file (i.e., an instance of FileClass),
         # see if we can find it in the filesystem.  If so, we may be
@@ -1063,7 +1096,7 @@ class Client:
 
         # spit out headers
         self.additional_headers['Content-Type'] = mime_type
-        self.additional_headers['Last-Modified'] = rfc822.formatdate(lmt)
+        self.additional_headers['Last-Modified'] = email.utils.formatdate(lmt)
 
         ims = None
         # see if there's an if-modified-since...
@@ -1074,7 +1107,7 @@ class Client:
             # cgi will put the header in the env var
             ims = self.env['HTTP_IF_MODIFIED_SINCE']
         if ims:
-            ims = rfc822.parsedate(ims)[:6]
+            ims = email.utils.parsedate(ims)[:6]
             lmtt = time.gmtime(lmt)[:6]
             if lmtt <= ims:
                 raise NotModified

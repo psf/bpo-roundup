@@ -11,10 +11,9 @@
 
 # TODO: test bcc
 
-import unittest, tempfile, os, shutil, errno, imp, sys, difflib, rfc822, time
+import email
 import gpgmelib
-from email.parser import FeedParser
-
+import unittest, tempfile, os, shutil, errno, imp, sys, difflib, time
 
 try:
     import pyme, pyme.core
@@ -31,7 +30,7 @@ SENDMAILDEBUG = os.environ['SENDMAILDEBUG']
 from roundup import mailgw, i18n, roundupdb
 from roundup.mailgw import MailGW, Unauthorized, uidFromAddress, \
     parseContent, IgnoreLoop, IgnoreBulk, MailUsageError, MailUsageHelp
-from roundup import init, instance, password, rfc2822, __version__
+from roundup import init, instance, password, __version__
 from roundup.anypy.sets_ import set
 
 #import db_test_base
@@ -43,14 +42,13 @@ def expectedFailure(method):
     """
     return lambda x: 0
 
-class Message(rfc822.Message):
-    """String-based Message class with equivalence test."""
-    def __init__(self, s):
-        rfc822.Message.__init__(self, StringIO(s.strip()))
 
-    def __eq__(self, other):
-        return (self.dict == other.dict and
-                self.fp.read() == other.fp.read())
+def get_body(message):
+    if not message.is_multipart():
+        return message.get_payload()
+
+    return message.as_string().split('\n\n', 1)[-1]
+
 
 class Tracker(object):
     def open(self, journaltag):
@@ -58,11 +56,21 @@ class Tracker(object):
 
 class DiffHelper:
     def compareMessages(self, new, old):
-        """Compare messages for semantic equivalence."""
-        new, old = Message(new), Message(old)
+        """Compare messages for semantic equivalence.
+
+        Will raise an AssertionError with a diff for inequality.
+
+        Note that header fieldnames are case-insensitive.
+        So if a header fieldname appears more than once in different casing
+        and the values are not equal, there will be more than one entry
+        in the diff. Typical examples are "From:"/ "FROM:" and "TO:"/"To:".
+        """
+        new = email.message_from_string(new.strip())
+        old = email.message_from_string(old.strip())
 
         # all Roundup-generated messages have "Precedence: bulk"
-        old['Precedence'] = 'bulk'
+        if 'Precedence' not in old:
+            old['Precedence'] = 'bulk'
 
         # don't try to compare the date
         del new['date'], old['date']
@@ -86,11 +94,14 @@ class DiffHelper:
                     oldmime = old.get(key, '').split('=',1)[-1].strip('"')
                     replace ['--' + newmime] = '--' + oldmime
                     replace ['--' + newmime + '--'] = '--' + oldmime + '--'
-                elif new.get(key, '') != old.get(key, ''):
-                    res.append('  %s: %r != %r' % (key, old.get(key, ''),
-                        new.get(key, '')))
+                elif new.get_all(key, '') != old.get_all(key, ''):
+                    # check that all other headers are identical, including
+                    # headers that appear more than once.
+                    res.append('  %s: %r != %r' % (key, old.get_all(key, ''),
+                        new.get_all(key, '')))
 
-            body_diff = self.compareStrings(new.fp.read(), old.fp.read(),
+            # TODO replace the string comparision with a mimepart comparison
+            body_diff = self.compareStrings(get_body(new), get_body(old),
                 replace=replace)
             if body_diff:
                 res.append('')
@@ -194,6 +205,11 @@ class MailgwTestAbstractBase(unittest.TestCase, DiffHelper):
         return handler.main(StringIO(message))
 
     def _get_mail(self):
+        """Reads an email that has been written to file via debug output.
+
+        Note: the resulting email will have three leading extra lines
+        written by the self.debug code branch in Mailer.smtp_send().
+        """
         f = open(SENDMAILDEBUG)
         try:
             return f.read()
@@ -449,7 +465,7 @@ This is a test submission of a new issue.
 ''')
         self.compareMessages(self._get_mail(),
 '''FROM: roundup-admin@your.tracker.email.domain.example
-TO: chef@bork.bork.bork, mary@test.test, richard@test.test
+TO: mary@test.test, richard@test.test
 Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: mary@test.test, richard@test.test
@@ -492,7 +508,7 @@ This is a test submission of a new issue.
 ''')
         self.compareMessages(self._get_mail(),
 '''FROM: roundup-admin@your.tracker.email.domain.example
-TO: chef@bork.bork.bork, mary@test.test, richard@test.test
+TO: mary@test.test, richard@test.test
 Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: mary@test.test, richard@test.test
@@ -997,7 +1013,8 @@ PGh0bWw+dW1sYXV0IMOkw7bDvMOEw5bDnMOfPC9odG1sPgo=
             self.assertEqual(f.name, name)
         self.assertEqual(msg.content, 'First part: Text')
         self.compareMessages(self._get_mail(),
-'''TO: chef@bork.bork.bork, richard@test.test
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, richard@test.test
 Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
@@ -2036,7 +2053,7 @@ This is a test submission of a new issue.
         # trap_exc=1: we want a bounce message:
         ret = self._handle_mail(message, trap_exc=1)
         self.compareMessages(self._get_mail(),
-'''FROM: Roundup issue tracker <roundup-admin@your.tracker.email.domain.example>
+'''FROM: roundup-admin@your.tracker.email.domain.example
 TO: nonexisting@bork.bork.bork
 From nobody Tue Jul 14 12:04:11 2009
 Content-Type: multipart/mixed; boundary="===============0639262320=="
@@ -2049,7 +2066,6 @@ Precedence: bulk
 X-Roundup-Name: Roundup issue tracker
 X-Roundup-Loop: hello
 X-Roundup-Version: 1.4.8
-MIME-Version: 1.0
 
 --===============0639262320==
 Content-Type: text/plain; charset="us-ascii"
@@ -2518,13 +2534,6 @@ sig
         i = uidFromAddress(self.db, ('', 'user@foo.com'), 1)
         self.assertNotEqual(uidFromAddress(self.db, ('', 'user@bar.com'), 1), i)
 
-    def testRFC2822(self):
-        ascii_header = "[issue243] This is a \"test\" - with 'quotation' marks"
-        unicode_header = '[issue244] \xd0\xb0\xd0\xbd\xd0\xb4\xd1\x80\xd0\xb5\xd0\xb9'
-        unicode_encoded = '=?utf-8?q?[issue244]_=D0=B0=D0=BD=D0=B4=D1=80=D0=B5=D0=B9?='
-        self.assertEqual(rfc2822.encode_header(ascii_header), ascii_header)
-        self.assertEqual(rfc2822.encode_header(unicode_header), unicode_encoded)
-
     def testRegistrationConfirmation(self):
         otk = "Aj4euk4LZSAdwePohj90SME5SpopLETL"
         self.db.getOTKManager().set(otk, username='johannes')
@@ -2989,7 +2998,7 @@ Just a test reply
         assert os.path.exists(SENDMAILDEBUG)
         self.compareMessages(self._get_mail(),
 '''FROM: roundup-admin@your.tracker.email.domain.example
-TO: chef@bork.bork.bork, richard@test.test
+TO: richard@test.test
 Content-Type: text/plain; charset="utf-8"
 Subject: [issue1] Testing...
 To: richard@test.test
@@ -3253,107 +3262,6 @@ Stack trace:
         fileid = self.db.msg.get(msgid, 'files')[0]
         self.assertEqual(self.db.file.get(fileid, 'type'), 'message/rfc822')
 
-pgp_test_key = """
------BEGIN PGP PRIVATE KEY BLOCK-----
-Version: GnuPG v1.4.10 (GNU/Linux)
-
-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
-=3uFZ
------END PGP PRIVATE KEY BLOCK-----
-"""
-
-john_doe_key = """
------BEGIN PGP PRIVATE KEY BLOCK-----
-Version: GnuPG v1.4.10 (GNU/Linux)
-
-lQHYBE6NwvABBACxg7QqV2qHywwM3wae6HAHJVEo7EeYA6Lv0pZlW3Aw4CCCnpgJ
-jA7CekGFcmGmoCaN9ezuVAPTgUlK4yt8a7P6cT0vw1q341Om9IEKAu59RpNZN/H9
-6GfZ95bU51W/hdTFysH1DRwbCR3MowvLeA6Pk4cZlPsYHD0SD3De2i1BewARAQAB
-AAP+IRi4L6jKwPS3k3LFrj0SHhL0Fdgv5QTQjTxLNCyfN02iYhglqqoFWncm3jWc
-RU/YwGEYwrrBV97kBmVihzkhfgFRsxynE9PMGKKEAuRcAl21RPJDFA6Dlnp6M2No
-rR6eoAhrlZ8+KsK9JaXSMalzO/Yh4u3mOinq3f3XL96wAEkCAMAxeZMF5pnXARNR
-Y7u2clhNNnLuf+BzpENCFMaWzWPyTcvbf4xNK7ZHPxFVZpX5/qAPJ8rnTaOTHxnN
-5PgqbO8CAOxyrTw/muakTJLg+FXdn8BgxZGJXMT7KmkU9SReefjo7c1WlnZxKIAy
-6vLIG8WMGpdfCFDve0YLr/GGyDtOjDUB/RN3gn6qnAJThBnVk2wESZVx41fihbIF
-ACCKc9heFskzwurtvvp+bunM3quwrSH1hWvxiWJlDmGSn8zQFypGChifgLQZSm9o
-biBEb2UgPGpvaG5AdGVzdC50ZXN0Poi4BBMBAgAiBQJOjcLwAhsDBgsJCAcDAgYV
-CAIJCgsEFgIDAQIeAQIXgAAKCRC/z7qg+FujnPWiA/9T5SOGraRNIVVIyvJvYwkG
-OTAfQ0K3QMlLoQMPmaEbx9Q+isF15M9sOMcl1XGO4UNWuCPIIN8z/y/OLgAB0ZuL
-GlnAPPOOZ+MlaUXiMYo8oi416QZrMDf2H/Nkc10csiXm+zMl8RqeIQBEeljNyJ+t
-MG1EWn/PHTwFTd/VePuQdJ0B2AROjcLwAQQApw+72jKy0/wqg5SAtnVSkA1F3Jna
-/OG+ufz5dX57jkMFRvFoksWIWqHmiCjdE5QV8j+XTnjElhLsmrgjl7aAFveb30R6
-ImmcpKMN31vAp4RZlnyYbYUCY4IXFuz3n1CaUL+mRx5yNJykrZNfpWNf2pwozkZq
-lcDI69ymIW5acXUAEQEAAQAD/R7Jdf98l1scngMYo228ikYUxBqm2eX/fiQNXDWM
-ZR2u+TJ9O53MvFejfXX7Pd6lTDQUBwDFncjgXO0YYSrMzabhqpqoKLqOIpZmBuWC
-Hh1lvcFoIYoDR2LkiJ9EPBUEVUBDsUO8ajkILEE3G+DDpCaf9Vo82lCVyhDESqyt
-v4lxAgDOLpoq1Whv5Ejr6FifTWytCiQjH2P1SmePlQmy6oEJRUYA1t4zYrzCJUX8
-VAvPjh9JXilP6mhDbyQArWllewV9AgDPbVOf75ktRwfhje26tZsukqWYJCc1XvoH
-3PTzA7vH1HZZq7dvxa87PiSnkOLEsIAsI+4jpeMxpPlQRxUvHf1ZAf9rK3v3HMJ/
-2xVzwK24Oaj+g2O7D/fdqtLFGe5S5JobnTyp9xArDAhaZ/AKfDMYjUIKMP+bdNAf
-y8fQUtuawFltm1GInwQYAQIACQUCTo3C8AIbDAAKCRC/z7qg+FujnDzYA/9EU6Pv
-Ci1+DCtxjnq7IOvOjqExhFNGvN9Dw17Tl8HcyW3if9v5RxeSWYKl0DhzVdzMQgH/
-78q4F4W1q2IkB7SCpXizHLIc3eh8iZkbWZE+CGPvTpqyF03Yi16qhxpAbkGs2Yhq
-jTx5oJ4CL5fybBOZLg+BTlK4HIee6xEcbNoq+A==
-=ZKBW
------END PGP PRIVATE KEY BLOCK-----
-"""
-
-ownertrust = """
-723762CD5A5FECB76DC72DF85ADCFD5631C38741:6:
-2940C247A1FBAD508A1AF24BBFCFBAA0F85BA39C:6:
-"""
-
 class MailgwPGPTestCase(MailgwTestAbstractBase):
     pgphome = gpgmelib.pgphome
     def setUp(self):
@@ -3504,7 +3412,7 @@ P81iDOWUp/uyIe5ZfvNI38BBxEYslPTUlDk2GB8J2Vun7IWHoj9a4tY3IotC9jBr
         # trap_exc=1: we want a bounce message:
         self._handle_mail(self.encrypted_msg, trap_exc=1)
         m = self._get_mail()
-        fp = FeedParser()
+        fp = email.parser.FeedParser()
         fp.feed(m)
         parts = fp.close().get_payload()
         self.assertEqual(len(parts),2)
@@ -3515,7 +3423,7 @@ P81iDOWUp/uyIe5ZfvNI38BBxEYslPTUlDk2GB8J2Vun7IWHoj9a4tY3IotC9jBr
         res = ctx.op_decrypt(crypt, plain)
         self.assertEqual(res, None)
         plain.seek(0,0)
-        fp = FeedParser()
+        fp = email.parser.FeedParser()
         fp.feed(plain.read())
         parts = fp.close().get_payload()
         self.assertEqual(len(parts),2)

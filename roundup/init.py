@@ -138,13 +138,16 @@ def loadTemplateInfo(path):
         return None
 
     # load up the template's information
-    with open(tif) as f:
+    try:
+        f = open(tif)
         m = email.parser.Parser().parse(f, True)
         ti = {}
         ti['name'] = m['name']
         ti['description'] = m['description']
         ti['intended-for'] = m['intended-for']
         ti['path'] = path
+    finally:
+        f.close()
     return ti
 
 def writeHeader(name, value):
@@ -172,12 +175,15 @@ def saveTemplateInfo(dir, info):
     finally:
         f.close()
 
-def write_select_db(instance_home, backend, dbdir = 'db'):
+def write_select_db(instance_home, backend, dbdir=None):
     ''' Write the file that selects the backend for the tracker
     '''
-    # dbdir may be a relative pathname, os.path.join does the right
-    # thing when the second component of a join is an absolute path
-    dbdir = os.path.join (instance_home, dbdir)
+    # dbdir is only supplied when AdminTool.do_initialise() invokes this
+    # function and the value is fetched from the tracker config which has
+    # already determined the correct path. This is bit of a hack, but it is
+    # likely this function will be removed in v1.6
+    if not dbdir:
+        dbdir = os.path.join(instance_home, 'db')
     if not os.path.exists(dbdir):
         os.makedirs(dbdir)
     f = open(os.path.join(dbdir, 'backend_name'), 'w')

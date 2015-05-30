@@ -1,26 +1,21 @@
 import re
 import binascii
+import email
 from email import quoprimime, base64mime
 
-try:
-    # Python 2.5+
-    from email.parser import FeedParser
-except ImportError:
-    # Python 2.4
-    try :
-        from email.Parser import FeedParser
-    except ImportError:
-        from email.Parser import Parser
-        class FeedParser:
-            def __init__(self):
-                self.content = []
-
-            def feed(self, s):
-                self.content.append(s)
-
-            def close(self):
-                p = Parser()
-                return p.parsestr(''.join(self.content))
+## please import this file if you are using the email module
+#
+# a "monkey patch" to unify the behaviour of python 2.5 2.6 2.7
+# when generating header files, see http://bugs.python.org/issue1974
+# and https://hg.python.org/cpython/rev/5deb27042e5a/
+# can go away once the minimum requirement is python 2.7
+_oldheaderinit = email.Header.Header.__init__
+def _unifiedheaderinit(self, *args, **kw):
+    # override continuation_ws
+    kw['continuation_ws'] = ' '
+    _oldheaderinit(self, *args, **kw)
+email.Header.Header.__dict__['__init__'] = _unifiedheaderinit
+##
 
 # Match encoded-word strings in the form =?charset?q?Hello_World?=
 ecre = re.compile(r'''

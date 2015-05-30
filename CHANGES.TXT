@@ -6,8 +6,13 @@ and template changes not listed here.
 Each entry has the developer who committed the change in brackets.
 Entries without name were done by Richard Jones.
 
+**IMPORTANT** The v1.5.x releases of Roundup will be the last to support
+Python v2.5. Support for Python v2.5 will be dropped with the v1.6
+release of Roundup, at which point users will need to run Roundup using
+either Python v2.6 or v2.7.
 
-2014-??-??: 1.5.1
+
+2015-??-??: 1.5.1
 
 Pay attention:
 
@@ -17,11 +22,13 @@ Pay attention:
   If you're upgrading from a previous roundup release version
   you should look into ``doc/upgrading.txt``.  (Ralf Schlatterbeck)
 
+  Also note the default user permissions, see ``doc/upgrading.txt``.
+
 Features:
 
 - The example local_replace.py has been updated to show how to link to
-  modern revision systems using hex revsion numbers. This extension is used
-  to expand shortcuts in msgs. (Bernhard Reiter)
+  modern revision systems using hex revision identifiers.
+  This extension is used to expand shortcuts in msgs. (Bernhard Reiter)
 - Drop comment in user settings about numeric hour offsets instead of using
   pytz timezone names. Due to DST these are wrong half of the year, it is
   much better to use timezone names. (Thomas Arendsen Hein)
@@ -31,10 +38,31 @@ Features:
   class can be numeric -- in that case roundup will try to parse the
   value as an ID when evaluating form values -- not as a key. Specifying
   try_id_parsing='no' for these Link/Multilink will skip the ID step,
-  default is 'yes'.
+  default is 'yes'. (Ralf Schlatterbeck)
+- New configuration option 'isolation_level' in rdbms section. Currently
+  supported for Postgres and mysql, sets the transaction isolation level.
+  Wrong history entries for concurrent database updates observed in
+  issue2550806 can be prevented by setting this to 'repeatable read' if
+  you want to pay the performance penalty. We test this behaviour in the
+  regression tests for Postgres but not currently for mysql.
+  See http://www.postgresql.org/docs/9.1/static/transaction-iso.html
+  (Ralf Schlatterbeck)
+- /xmlrpc endpoint now shows link to XML-RPC documentation if accessed
+  through browser, without text/xml Content-Type (anatoly techtonik)
+- docs: New dedicated chapter for extensions in ``doc/customizing.txt``
+  (anatoly techtonik)
+- Increase default height of classhelp windows from 400 to 600.
+  (Thomas Arendsen Hein)
+- Date properties now can specify (on input) an explicit timezone suffix
+  (similar to RFC 2822), e.g. +0200 for CEST or -0500 for EST. This also
+  works in the XMLRPC interface. For examples see roundup.date.Date.
+  (Ralf Schlatterbeck)
 
 Fixed:
 
+- issue2550869 Duplicate mail headers (Reply-To, Message-ID, In-Reply-To) 
+  when sending out email. Reported with first fix by Mathias Behrle.
+  (Bernhard Reiter)
 - issue2550830 An empty LinkHTMLProperty cannot be compared successfully. 
   Improves the query editing page. Reported and fixed by R David Murray 
   (Bernhard Reiter).
@@ -64,8 +92,8 @@ Fixed:
 - executable .py scripts need "#!/usr/bin/env python", add this to demo.py,
   remove exec bits from website/wiki/wiki/data/plugin/theme/roundup.py
   (Thomas Arendsen Hein)
-- issue2550822: Fix showing more than one additional property in class menu
-  (James Mack)
+- issue2550822: Fix showing more than one additional property in class menu.
+  Report and fix by James Mack (Thomas Arendsen Hein)
 - Fix String search with special SQL wildcard characters in LIKE/ILIKE
   clause and add testcase (Ralf Schlatterbeck)
 - Fix subtle bug when sorting by a Link that contains a Multilink from
@@ -75,21 +103,65 @@ Fixed:
   particular bug is no longer in roundup core. But the change to the
   templates we suggest is a *lot* safer as it by default escapes the
   error and ok messages now. Thanks to Thibault Fevry for the original
-  bug-report.
+  bug-report. (Ralf Schlatterbeck)
 - issue2117897: Fixed two more places in date.py where seconds can be
   rounded to 60.0 and causing exceptions. Change them to 59.999 as was
   done in the fix for issue2550802. (Thomas Arendsen Hein)
 - Fix batch.propchanged for transitive id properties (would result in a
-  backtrace when trying to group by property.id)
+  backtrace when trying to group by property.id) (Ralf Schlatterbeck)
 - Fix issue2550835, the test checks for date-range queries with an
   interval that depends on the local time. Put the queried date a little
   later to avoid a race condition where the queried interval doesn't
   match the date because the clock has advanced. (Ralf Schlatterbeck)
 - Apply german translation fixes from Debian team in issue2550761,
   thanks to Kai Storbeck for taking the time to report these.
-
-Minor:
+  (Ralf Schlatterbeck)
+- Fix issue2550843 Pass text of Unauthorised and Login exceptions instead
+  of the exception instance to avoid traceback with string operations.
+  (Thomas Arendsen Hein)
+- Fix issue2550841 roundup-demo templates not found in virtualenv (John
+  Kristensen)
+- Security: Default user permissions should not include all user
+  attributes. We now limit this to the username, realname and some
+  further attributes depending on the schema. Note that we no longer
+  include the email addresses, depending on your installation you may
+  want to further restrict this or add some attributes like ``address``
+  and ``alternate_addresses``. (Ralf Schlatterbeck)
+- Correctly recreate the database directory when re-initialising a tracker
+  instance. (John Kristensen)
+- In case of an error, date fields would lose the calendar help, fixed.
+  (Ralf Schlatterbeck)
 - demo.py usage message improved: explains "nuke" now. (Bernhard Reiter)
+- Fix issue2550735 Missing doc for xmlrpc schema. Thanks to Cédric Krier
+  for the patch. (anatoly techtonik)
+- Fix two line-break accidents in devel and responsive milestone.item.html
+  (Thomas Arendsen Hein)
+- Fix broken images in legacy spec.html and original_overview.html, and
+  restore web presence for "Roundup's Design Document" (anatoly techtonik)
+- Template jinja2: Updated URL to point to http://www.roundup-tracker.org/
+  (Bernhard Reiter)
+- Security: Add mime-type whitelist for attachmens that can be safely
+  rendered from Roundup without trigerring security bugs in browser
+  plugins, XSS issues and spam. The option ``allow_html_file`` didn't
+  provide protection for invalid content-type, in which case browser
+  tried to guess the best one. Thanks to Kay Hayen for reporting and
+  helping debug this. issue2550848 (Ralf Schlatterbeck, anatoly techtonik)
+- Fix issue2550866 '"pip install --editable ." fails'. Thanks to tonich for the
+  initial patch (John Kristensen)
+- Documentation: configuration messages_to_author value "nosy" now documented
+  in chapter "customizing". (Bernhard Reiter)
+- issue2550877 Failures in test_mailgw.py because of duplicated headers
+  and more precise comparision. Writing headers with the email module will use 
+  continuation_ws = ' ' now for python 2.5 and 2.6. (Bernhard Reiter)
+- issue2550870 migrate use of 'rfc822' module to the 'email' module
+  (Bernhard Reiter/John Kristensen)
+- Doctests for roundup.date.Date are now really executable and don't
+  fail. Bug-Fixes in range properties, open intervals with 'to' didn't
+  always work. (Ralf Schlatterbeck)
+- issue2550881 demo.py: Add pointer how to access demo from remote host.
+  Suggested by Karl-Philipp Richter. (Bernhard Reiter)
+- issue2550884 roundup-mailgw --help text improved to explain the allowed 
+  parameters better. Suggested by by Karl-Philipp Richter. (Bernhard Reiter)
 
 
 2013-07-06: 1.5.0
@@ -152,6 +224,7 @@ Fixed:
   like sqlite. Reported and fixed by Tom Ekberg. (Bernhard Reiter)
 - Removed some old left over "rlog" references in documentation and code.
   Makes the debugging.txt advise for the database unit tests work again.
+  (Bernhard Reiter)
 - Fixed OpenPGP support for modern versions of libgpgme. (Bernhard Reiter)
 - Restored compatibility with old style trackers (anatoly techtonik)
 - Make roundup play nice with setup tools (for using with virtualenv)

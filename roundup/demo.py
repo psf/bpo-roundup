@@ -127,13 +127,13 @@ def run_demo(home):
 1. Log in as "demo"/"demo" or "admin"/"admin".
 2. Hit Control-C to stop the server.
 3. Re-start the server by running "%(script)s" again.
-4. Re-initialise the server by running "%(script)s nuke".
+4. Reset the tracker by running "%(script)s nuke".
 
-Demo tracker is set up to be accessed by localhost browser.  If you
-run demo on a server host, please stop the demo, open file
-"%(datadir)s/config.ini" with your editor, change the host name in the "web"
-option in section "[tracker]", save the file, then re-run the demo
-program. If you want to change backend types, you must use "nuke".
+By default the demo tracker is set up to be accessed from "localhost".
+If you want to run it on a server,
+edit "%(datadir)s/config.ini"
+and set the "web" option in section "[tracker]" to your host name,
+then restart demo. If you want to change backend types, you must use "nuke".
 
 ''' % dict(url=url, script=sys.argv[0], datadir=TRACKER_HOME)
 
@@ -151,6 +151,8 @@ def usage(msg = ''):
  in %(datadir)s/ subdirectory of %(script)s dir.
 
  'nuke' will re-initialize the demo instance, deleting the old data.
+
+ See docs/installation "For The Really Impatient" for more details.
 
 Options:
  -h                -- print this help message

@@ -80,11 +80,12 @@ __docformat__ = 'restructuredtext'
 
 import string, re, os, mimetools, cStringIO, smtplib, socket, binascii, quopri
 import time, random, sys, logging
-import traceback, rfc822
+import traceback
+import email.utils
 
 from anypy.email_ import decode_header
 
-from roundup import configuration, hyperdb, date, password, rfc2822, exceptions
+from roundup import configuration, hyperdb, date, password, exceptions
 from roundup.mailer import Mailer, MessageSendError
 from roundup.i18n import _
 from roundup.hyperdb import iter_roles
@@ -147,7 +148,7 @@ def getparam(str, param):
         if '=' in f:
             i = f.index('=')
             if f[:i].strip().lower() == param:
-                return rfc822.unquote(f[i+1:].strip())
+                return email.utils.unquote(f[i+1:].strip())
     return None
 
 def gpgh_key_getall(key, attr):
@@ -319,8 +320,9 @@ class Message(mimetools.Message):
             data = self.fp.read()
 
         # Encode message to unicode
-        charset = rfc2822.unaliasCharset(self.getparam("charset"))
+        charset = self.getparam("charset")
         if charset:
+            charset = charset.lower().replace("windows-", 'cp')
             # Do conversion only if charset specified - handle
             # badly-specified charsets
             edata = unicode(data, charset, 'replace').encode('utf-8')
