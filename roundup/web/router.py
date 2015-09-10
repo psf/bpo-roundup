@@ -72,19 +72,19 @@ if __name__ == '__main__':
     class test_Router(unittest.TestCase):
         def test_example_routes(self):
             router = Router(EXAMPLE_URL_MAP)
-            self.assertEquals(router.get_handler(''), (None, ()))
+            self.assertEqual(router.get_handler(''), (None, ()))
             handler, params = router.get_handler('/index')
-            self.assertEquals(handler, ExampleHandler)
-            self.assertEquals(params, tuple())
+            self.assertEqual(handler, ExampleHandler)
+            self.assertEqual(params, tuple())
 
         def test_route_param(self):
             def echo_handler(args):
                 return args
             router = Router(('/files/(.*)', echo_handler))
-            self.assertEquals(router.get_handler(''), (None, ()))
-            self.assertEquals(router.get_handler('/files'), (None, ()))
+            self.assertEqual(router.get_handler(''), (None, ()))
+            self.assertEqual(router.get_handler('/files'), (None, ()))
             handler, params = router.get_handler('/files/filename')
-            self.assertEquals(handler, echo_handler)
-            self.assertEquals(params, ('filename',))
+            self.assertEqual(handler, echo_handler)
+            self.assertEqual(params, ('filename',))
 
     unittest.main()
