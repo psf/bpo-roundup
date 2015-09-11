@@ -1,10 +1,11 @@
 #!/usr/bin/env python
-# This Router component was written by techtonik@gmail.com and it's been
-# placed in the Public Domain. Copy and modify to your heart's content.
+# The Router component is placed into public domain by
+# anatoly techtonik <techtonik@gmail.com>
 
 """
-The purpose of router is to make Roundup URL scheme configurable
-and allow extensions add their own handlers and URLs to tracker.
+Router allows extensions to add handlers for their own URLs to
+tracker. To test how it works, copy
+plugins/extensions/custompage.py module to your tracker.
 """
 
 DEBUG = False
