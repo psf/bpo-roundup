@@ -235,9 +235,10 @@ class Tracker:
             self.cgi_actions[name] = action
 
     def registerHandler(self, urlpath, function):
-        """Add handler for urlpath. `urlpath` is a simple rule for
-        roundup.web.router that is matched before Roundup makes DB
-        lookups for classes that are available to render.
+        """Add handler for urlpath. `urlpath` is a rule for
+        matching urls in Django-like format and is processed
+        by roundup.web.router before Roundup tries to match
+        urls against class names in DB.
 
         New in version 1.6.x"""
         self.web_handlers[urlpath] = function
