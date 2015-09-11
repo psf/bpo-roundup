@@ -358,7 +358,7 @@ class Client:
             '_file/(.*)',  self.serve_static_file,
             '@@file/(.*)', self.serve_static_file,
         ]
-        for route, handler in self.instance.web_handlers.iteritems():
+        for route, handler in self.instance.web_handlers:
             # no nested lists are created here
             self.urlmap += [route, self.wrap_handler(handler)]
         self.router = Router(self.urlmap)

@@ -57,7 +57,7 @@ class Tracker:
         self.actions = {}
         self.cgi_actions = {}
         self.templating_utils = {}
-        self.web_handlers = {}
+        self.web_handlers = []
 
         libdir = os.path.join(self.tracker_home, 'lib')
         self.libdir = os.path.isdir(libdir) and libdir or ''
@@ -241,7 +241,7 @@ class Tracker:
         urls against class names in DB.
 
         New in version 1.6.x"""
-        self.web_handlers[urlpath] = function
+        self.web_handlers.append( [urlpath, function] )
 
     def registerUtil(self, name, function):
         self.templating_utils[name] = function
