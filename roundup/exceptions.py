@@ -21,6 +21,12 @@ class Reject(Exception):
     """
     pass
 
+class UnsupportedMediaType(Exception):
+    pass
+
+class MethodNotAllowed(Exception):
+    pass
+
 class UsageError(ValueError):
     pass
 

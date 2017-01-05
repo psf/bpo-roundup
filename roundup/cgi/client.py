@@ -22,6 +22,7 @@ from roundup.cgi.form_parser import FormParser
 from roundup.mailer import Mailer, MessageSendError, encode_quopri
 from roundup.cgi import accept_language
 from roundup import xmlrpc
+from roundup.pull_request import GitHubHandler
 
 from roundup.anypy.cookie_ import CookieError, BaseCookie, SimpleCookie, \
     get_cookie_date
@@ -378,11 +379,41 @@ class Client:
         try:
             if self.path == 'xmlrpc':
                 self.handle_xmlrpc()
+            elif self.path == 'pull_request':
+                self.handle_pull_request()
             else:
                 self.inner_main()
         finally:
             if hasattr(self, 'db'):
                 self.db.close()
+
+
+    def handle_pull_request(self):
+        # Set the charset and language, since other parts of
+        # Roundup may depend upon that.
+        self.determine_charset()
+        self.determine_language()
+        # Open the database as the correct user.
+        self.determine_user()
+        self.check_anonymous_access()
+
+        try:
+            handler = GitHubHandler(self)
+            handler.dispatch()
+        except Unauthorised as err:
+            self.response_code = 403
+            self.write(err)
+        except UnsupportedMediaType as err:
+            self.response_code = 415
+            self.write(err)
+        except MethodNotAllowed as err:
+            self.response_code = 405
+            self.write(err)
+        except Reject as err:
+            self.response_code = 400
+            self.write(err)
+        else:
+            self.write("")
 
 
     def handle_xmlrpc(self):
@@ -1165,7 +1196,7 @@ class Client:
         if name is None:
             name = 'home'
 
-        tplname = name     
+        tplname = name
         if view:
             tplname = '%s.%s' % (name, view)
 

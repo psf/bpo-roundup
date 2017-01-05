@@ -45,7 +45,8 @@ user = Class(db, "user",
                 alternate_addresses=String(),
                 queries=Multilink('query'),
                 roles=String(),     # comma-separated string of Role names
-                timezone=String())
+                timezone=String(),
+                github=String())
 user.setkey("username")
 db.security.addPermission(name='Register', klass='user',
                           description='User is allowed to register new user')
@@ -65,6 +66,12 @@ msg = FileClass(db, "msg",
 file = FileClass(db, "file",
                 name=String())
 
+pull_request = Class(db, "pull_request",
+                     number=String(),
+                     title=String(),
+                     )
+pull_request.setlabelprop('id')
+
 # IssueClass automatically gets these properties in addition to the Class ones:
 #   title = String()
 #   messages = Multilink("msg")
@@ -75,7 +82,8 @@ issue = IssueClass(db, "issue",
                 assignedto=Link("user"),
                 keyword=Multilink("keyword"),
                 priority=Link("priority"),
-                status=Link("status"))
+                status=Link("status"),
+                pull_requests=Multilink('pull_request'))
 
 #
 # TRACKER SECURITY SETTINGS
@@ -92,7 +100,7 @@ db.security.addPermissionToRole('User', 'Email Access')
 
 # Assign the access and edit Permissions for issue, file and message
 # to regular users now
-for cl in 'issue', 'file', 'msg', 'keyword':
+for cl in 'issue', 'file', 'msg', 'keyword', 'pull_request':
     db.security.addPermissionToRole('User', 'View', cl)
     db.security.addPermissionToRole('User', 'Edit', cl)
     db.security.addPermissionToRole('User', 'Create', cl)
@@ -101,7 +109,7 @@ for cl in 'priority', 'status':
 
 # May users view other user information? Comment these lines out
 # if you don't want them to
-p = db.security.addPermission(name='View', klass='user', 
+p = db.security.addPermission(name='View', klass='user',
     properties=('id', 'organisation', 'phone', 'realname', 'timezone',
     'username'))
 db.security.addPermissionToRole('User', p)
@@ -167,7 +175,7 @@ db.security.addPermissionToRole('Anonymous', 'Register', 'user')
 
 # Allow anonymous users access to view issues (and the related, linked
 # information)
-for cl in 'issue', 'file', 'msg', 'keyword', 'priority', 'status':
+for cl in 'issue', 'file', 'msg', 'keyword', 'priority', 'status', 'pull_request':
     db.security.addPermissionToRole('Anonymous', 'View', cl)
 
 # [OPTIONAL]
