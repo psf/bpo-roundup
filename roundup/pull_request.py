@@ -15,8 +15,7 @@ else:
         return a == b
 
 url_re = re.compile(r'https://github.com/python/cpython/pull/(?P<number>\d+)')
-issue_re = re.compile(r'fixes\s+(?:bpo(\d+))(?:,\s*bpo(\d+))*', re.I)
-issue_id_re = re.compile(r'bpo(\d+)', re.I)
+issue_id_re = re.compile(r'bpo\s*(\d+)', re.I)
 
 class GitHubHandler:
     """
@@ -172,8 +171,13 @@ class PullRequest(Event):
             self.db.setCurrentUser(username)
         action = self.data.get('action', '').encode('utf-8')
         issue_ids = self.get_issue_ids()
-        if issue_ids is None:
-            return
+        if not issue_ids:
+            # no issue id found
+            create_issue = os.environ.get('CREATE_ISSUE', False)
+            if create_issue:
+                # TODO we should fill in the issue with more details
+                title = self.data.get('pull_request').get('title', '').encode('utf-8')
+                issues_ids = set(self.db.issue.create(title=title))
         prid, title = self.get_pr_details()
         if action in ('opened', 'created'):
             self.handle_create(prid, title, issue_ids)
@@ -189,15 +193,7 @@ class PullRequest(Event):
             raise Reject()
         title = pull_request.get('title', '').encode('utf-8')
         body = pull_request.get('body', '').encode('utf-8')
-        match = issue_re.search(body) or issue_re.search(title)
-        if match:
-            return issue_id_re.findall(match.group())
-        # no issue id found
-        create_issue = os.environ.get('CREATE_ISSUE', False)
-        if create_issue:
-            # TODO we should fill in the issue with more details
-            return [self.db.issue.create(title=title)]
-        return None
+        return list(set(issue_id_re.findall(title) + issue_id_re.findall(body)))
 
     def get_pr_details(self):
         """

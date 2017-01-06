@@ -49,7 +49,7 @@ class TestCase(unittest.TestCase):
         dummy_client = client.Client(self.instance, request, self.env, form)
         dummy_client.opendb("anonymous")
         self.db = dummy_client.db
-        self.db.issue.create(title="Hello")
+        self.db.issue.create(title="Issue 1")
         return dummy_client
 
     def testMissingSecretKey(self):
@@ -104,7 +104,7 @@ class TestCase(unittest.TestCase):
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
         prs = self.db.issue.get('1', 'pull_requests')
-        self.assertTrue(len(prs) == 1)
+        self.assertEqual(len(prs), 1)
         number = self.db.pull_request.get(prs[0], 'number')
         self.assertEqual(number, '4')
         user_id = self.db.pull_request.get(prs[0], 'creator')
@@ -132,25 +132,37 @@ class TestCase(unittest.TestCase):
             handler.dispatch()
 
     def testPullRequestEventForTitle(self):
-        # When the title of a PR has string "fixes bpo123"
+        # When the title of a PR has string "bpo123"
         dummy_client = self._make_client("pullrequestevent.txt")
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
         prs = self.db.issue.get('1', 'pull_requests')
-        self.assertTrue(len(prs) == 1)
+        self.assertEqual(len(prs), 1)
+        number = self.db.pull_request.get(prs[0], 'number')
+        self.assertEqual(number, '11')
+        user_id = self.db.pull_request.get(prs[0], 'creator')
+        self.assertEqual(self.db.user.get(user_id, 'username'), 'anonymous')
+
+    def testPullRequestEventForTitle2(self):
+        # When the title of a PR has string with space "bpo 123"
+        dummy_client = self._make_client("pullrequestevent5.txt")
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        prs = self.db.issue.get('1', 'pull_requests')
+        self.assertEqual(len(prs), 1)
         number = self.db.pull_request.get(prs[0], 'number')
         self.assertEqual(number, '11')
         user_id = self.db.pull_request.get(prs[0], 'creator')
         self.assertEqual(self.db.user.get(user_id, 'username'), 'anonymous')
 
     def testPullRequestEventForBody(self):
-        # When the body of a PR has string "fixes bpo123"
+        # When the body of a PR has string "bpo123"
         dummy_client = self._make_client("pullrequestevent1.txt")
         self.db.user.create(username="anish.shah", github="AnishShah")
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
         prs = self.db.issue.get('1', 'pull_requests')
-        self.assertTrue(len(prs) == 1)
+        self.assertEqual(len(prs), 1)
         number = self.db.pull_request.get(prs[0], 'number')
         self.assertEqual(number, '3')
         title = self.db.pull_request.get(prs[0], 'title')
@@ -160,13 +172,13 @@ class TestCase(unittest.TestCase):
 
     def testPullRequestEventForMultipleIssueReferenceInTitle(self):
         dummy_client = self._make_client("pullrequestevent3.txt")
-        self.db.issue.create(title="Python")
-        self.db.issue.create(title="CPython")
+        self.db.issue.create(title="Issue 2")
+        self.db.issue.create(title="Issue 3")
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
         for i in range(1, 4):
             prs = self.db.issue.get(str(i), 'pull_requests')
-            self.assertTrue(len(prs) == 1)
+            self.assertEqual(len(prs), 1)
             number = self.db.pull_request.get(prs[0], 'number')
             self.assertEqual(number, '13')
             title = self.db.pull_request.get(prs[0], 'title')
@@ -174,17 +186,34 @@ class TestCase(unittest.TestCase):
 
     def testPullRequestEventForMultipleIssueReferenceInBody(self):
         dummy_client = self._make_client("pullrequestevent4.txt")
-        self.db.issue.create(title="Python")
-        self.db.issue.create(title="CPython")
+        self.db.issue.create(title="Issue 2")
+        self.db.issue.create(title="Issue 3")
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
         for i in range(1, 4):
             prs = self.db.issue.get(str(i), 'pull_requests')
-            self.assertTrue(len(prs) == 1)
+            self.assertEqual(len(prs), 1)
             number = self.db.pull_request.get(prs[0], 'number')
             self.assertEqual(number, '14')
             title = self.db.pull_request.get(prs[0], 'title')
             self.assertEqual(title, 'update .gitignore')
+
+    def testPullRequestEventForMultipleIssueReferenceInBodyAndTitle(self):
+        # When both title and body of a PR has multiple and duplicated "bpo123"
+        dummy_client = self._make_client("pullrequestevent6.txt")
+        self.db.issue.create(title="Issue 2")
+        self.db.issue.create(title="Issue 3")
+        self.db.issue.create(title="Issue 4")
+        self.db.issue.create(title="Issue 5")
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        for i in range(1, 6):
+            prs = self.db.issue.get(str(i), 'pull_requests')
+            self.assertEqual(len(prs), 1)
+            number = self.db.pull_request.get(prs[0], 'number')
+            self.assertEqual(number, '11')
+            title = self.db.pull_request.get(prs[0], 'title')
+            self.assertEqual(title, 'bpo1 bpo2 bpo 3')
 
     def testPullRequestEventWithoutIssueReference(self):
         # When no issue is referenced in PR and environment variable is set
