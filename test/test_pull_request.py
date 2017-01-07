@@ -99,6 +99,18 @@ class TestCase(unittest.TestCase):
         prs = self.db.issue.get('1', 'pull_requests')
         self.assertTrue(len(prs) == 0)
 
+    def testIssueCommentEvent(self):
+        dummy_client = self._make_client("issuecommentevent.txt")
+        self.db.user.create(username="anish.shah", github="AnishShah")
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        prs = self.db.issue.get('1', 'pull_requests')
+        self.assertEqual(len(prs), 1)
+        number = self.db.pull_request.get(prs[0], 'number')
+        self.assertEqual(number, '1')
+        user_id = self.db.pull_request.get(prs[0], 'creator')
+        self.assertEqual(self.db.user.get(user_id, 'github'), 'AnishShah')
+
     def testPullRequestCommentEvent(self):
         dummy_client = self._make_client("pullrequestcommentevent.txt")
         handler = GitHubHandler(dummy_client)

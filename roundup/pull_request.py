@@ -55,6 +55,10 @@ class GitHubHandler:
             data = json.loads(self.form.value)
             handler = PullRequest(self.db, data)
             handler.dispatch()
+        elif event == 'issue_comment':
+            data = json.loads(self.form.value)
+            handler = IssueComment(self.db, data)
+            handler.dispatch()
 
     def validate_webhook_secret(self):
         """
@@ -94,10 +98,44 @@ class GitHubHandler:
         return self.request.headers.get('X-GitHub-Event', None)
 
 
-class Event:
+class Event(object):
     """
     Event is base class for all GitHub events.
     """
+
+    def __init__(self, db, data):
+        self.db = db
+        self.data = data
+
+    def set_current_user(self):
+        """
+        Helper method used for setting current user for roundup, based
+        on the information from github about event author.
+        """
+        github_username = self.get_github_username()
+        user_id = self.db.user.filter(None, {'github': github_username})
+        # TODO set bpobot as userid when none is found
+        if len(user_id) == 1:
+            # TODO what if multiple bpo users have the same github username?
+            username = self.db.user.get(user_id[0], 'username')
+            self.db.setCurrentUser(username)
+
+    def dispatch(self):
+        """
+        Main method responsible for responding to incoming github event.
+        """
+        self.set_current_user()
+        action = self.data.get('action', '').encode('utf-8')
+        issue_ids = self.get_issue_ids()
+        if not issue_ids:
+            # no issue id found
+            create_issue = os.environ.get('CREATE_ISSUE', False)
+            if create_issue:
+                # TODO we should fill in the issue with more details
+                title = self.data.get('pull_request').get('title', '').encode('utf-8')
+                issue_ids = list(self.db.issue.create(title=title))
+        prid, title = self.get_pr_details()
+        self.handle_action(action, prid, title, issue_ids)
 
     def handle_create(self, prid, title, issue_ids):
         """
@@ -145,6 +183,12 @@ class Event:
             else:
                 self.handle_create(prid, title, [issue_id])
 
+    def handle_action(self, action, prid, title, issue_ids):
+        raise NotImplementedError
+
+    def get_github_username(self):
+        raise NotImplementedError
+
     def get_issue_ids(self):
         raise NotImplementedError
 
@@ -158,27 +202,9 @@ class PullRequest(Event):
     """
 
     def __init__(self, db, data):
-        self.db = db
-        self.data = data
+        super(PullRequest, self).__init__(db, data)
 
-    def dispatch(self):
-        github_username = self.get_github_username()
-        user_id = self.db.user.filter(None, {'github': github_username})
-        # TODO set bpobot as userid when none is found
-        if len(user_id) == 1:
-            # TODO what if multiple bpo users have the same github username?
-            username = self.db.user.get(user_id[0], 'username')
-            self.db.setCurrentUser(username)
-        action = self.data.get('action', '').encode('utf-8')
-        issue_ids = self.get_issue_ids()
-        if not issue_ids:
-            # no issue id found
-            create_issue = os.environ.get('CREATE_ISSUE', False)
-            if create_issue:
-                # TODO we should fill in the issue with more details
-                title = self.data.get('pull_request').get('title', '').encode('utf-8')
-                issues_ids = set(self.db.issue.create(title=title))
-        prid, title = self.get_pr_details()
+    def handle_action(self, action, prid, title, issue_ids):
         if action in ('opened', 'created'):
             self.handle_create(prid, title, issue_ids)
         elif action == 'edited':
@@ -208,7 +234,6 @@ class PullRequest(Event):
         title = pull_request.get('title', '').encode('utf-8')
         return str(number), title
 
-
     def get_github_username(self):
         """
         Extract github username from a pull request.
@@ -217,3 +242,52 @@ class PullRequest(Event):
         if pull_request is None:
             raise Reject()
         return pull_request.get('user', {}).get('login', '').encode('utf-8')
+
+class IssueComment(Event):
+    """
+    Class responsible for handling issue comment events, but only within the
+    scope of a pull request, for now.
+    """
+
+    def __init__(self, db, data):
+        super(IssueComment, self).__init__(db, data)
+
+    def handle_action(self, action, prid, title, issue_ids):
+        if action in ('created', 'edited'):
+            self.handle_create(prid, title, issue_ids)
+
+    def get_issue_ids(self):
+        """
+        Extract issue IDs from comments.
+        """
+        issue = self.data.get('issue')
+        if issue is None:
+            raise Reject()
+        comment = self.data.get('comment')
+        if comment is None:
+            raise Reject()
+        title = issue.get('title', '').encode('utf-8')
+        body = comment.get('body', '').encode('utf-8')
+        return list(set(issue_id_re.findall(title) + issue_id_re.findall(body)))
+
+    def get_pr_details(self):
+        """
+        Extract pull request number and title.
+        """
+        issue = self.data.get('issue')
+        if issue is None:
+            raise Reject()
+        url = issue.get('pull_request', {}).get('html_url')
+        number_match = url_re.search(url)
+        if not number_match:
+            return (None, None)
+        return number_match.group('number'), None
+
+    def get_github_username(self):
+        """
+        Extract github username from a comment.
+        """
+        issue = self.data.get('issue')
+        if issue is None:
+            raise Reject()
+        return issue.get('user', {}).get('login', '').encode('utf-8')
