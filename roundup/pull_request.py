@@ -134,10 +134,10 @@ class Event(object):
                 # TODO we should fill in the issue with more details
                 title = self.data.get('pull_request').get('title', '').encode('utf-8')
                 issue_ids = list(self.db.issue.create(title=title))
-        prid, title = self.get_pr_details()
-        self.handle_action(action, prid, title, issue_ids)
+        prid, title, status = self.get_pr_details()
+        self.handle_action(action, prid, title, status, issue_ids)
 
-    def handle_create(self, prid, title, issue_ids):
+    def handle_create(self, prid, title, status, issue_ids):
         """
         Helper method for linking GitHub pull request with an issue.
         """
@@ -151,15 +151,16 @@ class Event(object):
             if set(prs).intersection(self.db.pull_request.filter(None, {'number': prid})):
                 continue
             # create a new link
-            if title:
-                newpr = self.db.pull_request.create(number=prid, title=title)
-            else:
-                newpr = self.db.pull_request.create(number=prid)
+            if not title:
+                title = ""
+            if not status:
+                status = ""
+            newpr = self.db.pull_request.create(number=prid, title=title, status=status)
             prs.append(newpr)
             self.db.issue.set(issue_id, pull_requests=prs)
             self.db.commit()
 
-    def handle_update(self, prid, title, issue_ids):
+    def handle_update(self, prid, title, status, issue_ids):
         """
         Helper method for updating GitHub pull request.
         """
@@ -177,13 +178,13 @@ class Event(object):
                 for pr in prs:
                     probj = self.db.pull_request.getnode(pr)
                     # check if the number match and title did change, and only then update
-                    if probj.number == prid and probj.title != title:
-                        self.db.pull_request.set(probj.id, title=title)
+                    if probj.number == prid:
+                        self.db.pull_request.set(probj.id, title=title, status=status)
                         self.db.commit()
             else:
-                self.handle_create(prid, title, [issue_id])
+                self.handle_create(prid, title, status, [issue_id])
 
-    def handle_action(self, action, prid, title, issue_ids):
+    def handle_action(self, action, prid, title, status, issue_ids):
         raise NotImplementedError
 
     def get_github_username(self):
@@ -204,11 +205,11 @@ class PullRequest(Event):
     def __init__(self, db, data):
         super(PullRequest, self).__init__(db, data)
 
-    def handle_action(self, action, prid, title, issue_ids):
+    def handle_action(self, action, prid, title, status, issue_ids):
         if action in ('opened', 'created'):
-            self.handle_create(prid, title, issue_ids)
-        elif action == 'edited':
-            self.handle_update(prid, title, issue_ids)
+            self.handle_create(prid, title, status, issue_ids)
+        elif action in ('edited', 'closed'):
+            self.handle_update(prid, title, status, issue_ids)
 
     def get_issue_ids(self):
         """
@@ -232,7 +233,12 @@ class PullRequest(Event):
         if number is None:
             raise Reject()
         title = pull_request.get('title', '').encode('utf-8')
-        return str(number), title
+        status = pull_request.get('state', '').encode('utf-8')
+        # github has two states open and closed, information about pull request
+        # being merged in kept in separate field
+        if pull_request.get('merged', False):
+            status = "merged"
+        return str(number), title, status
 
     def get_github_username(self):
         """
@@ -252,9 +258,9 @@ class IssueComment(Event):
     def __init__(self, db, data):
         super(IssueComment, self).__init__(db, data)
 
-    def handle_action(self, action, prid, title, issue_ids):
+    def handle_action(self, action, prid, title, status, issue_ids):
         if action in ('created', 'edited'):
-            self.handle_create(prid, title, issue_ids)
+            self.handle_create(prid, title, status, issue_ids)
 
     def get_issue_ids(self):
         """
@@ -280,8 +286,8 @@ class IssueComment(Event):
         url = issue.get('pull_request', {}).get('html_url')
         number_match = url_re.search(url)
         if not number_match:
-            return (None, None)
-        return number_match.group('number'), None
+            return (None, None, None)
+        return number_match.group('number'), None, None
 
     def get_github_username(self):
         """

@@ -181,6 +181,8 @@ class TestCase(unittest.TestCase):
         self.assertEqual(title, 'Created using GitHub API')
         user_id = self.db.pull_request.get(prs[0], 'creator')
         self.assertEqual(self.db.user.get(user_id, 'github'), 'AnishShah')
+        status = self.db.pull_request.get(prs[0], 'status')
+        self.assertEqual(status, "open")
 
     def testPullRequestEventForMultipleIssueReferenceInTitle(self):
         dummy_client = self._make_client("pullrequestevent3.txt")
@@ -257,6 +259,42 @@ class TestCase(unittest.TestCase):
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
         self.assertEqual(self.db.issue.count(), 1)
+
+    def testMergedPullRequest(self):
+        # When pull request is merged
+        dummy_client = self._make_client('pullrequestevent.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        prs = self.db.issue.get('1', 'pull_requests')
+        self.assertEqual(len(prs), 1)
+        number = self.db.pull_request.get(prs[0], 'number')
+        self.assertEqual(number, '11')
+        status = self.db.pull_request.get(prs[0], 'status')
+        self.assertEqual(status, 'open')
+        self.db.close()
+        dummy_client = self._make_client('pullrequestmerged.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        status = self.db.pull_request.get(prs[0], 'status')
+        self.assertEqual(status, 'merged')
+
+    def testClosedPullRequest(self):
+        # When pull request is closed
+        dummy_client = self._make_client('pullrequestevent.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        prs = self.db.issue.get('1', 'pull_requests')
+        self.assertEqual(len(prs), 1)
+        number = self.db.pull_request.get(prs[0], 'number')
+        self.assertEqual(number, '11')
+        status = self.db.pull_request.get(prs[0], 'status')
+        self.assertEqual(status, 'open')
+        self.db.close()
+        dummy_client = self._make_client('pullrequestclosed.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        status = self.db.pull_request.get(prs[0], 'status')
+        self.assertEqual(status, 'closed')
 
 
 def test_suite():
