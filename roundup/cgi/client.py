@@ -22,7 +22,7 @@ from roundup.cgi.form_parser import FormParser
 from roundup.mailer import Mailer, MessageSendError, encode_quopri
 from roundup.cgi import accept_language
 from roundup import xmlrpc
-from roundup.pull_request import GitHubHandler
+from roundup.github import GitHubHandler
 
 from roundup.anypy.cookie_ import CookieError, BaseCookie, SimpleCookie, \
     get_cookie_date

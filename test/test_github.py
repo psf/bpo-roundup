@@ -6,7 +6,7 @@ from BaseHTTPServer import BaseHTTPRequestHandler
 from StringIO import StringIO
 from roundup.cgi import client
 from roundup.backends import list_backends
-from roundup.pull_request import GitHubHandler
+from roundup.github import GitHubHandler
 from roundup.exceptions import *
 
 NEEDS_INSTANCE = 1
