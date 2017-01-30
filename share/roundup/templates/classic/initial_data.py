@@ -17,6 +17,13 @@ stat.create(name=''"in-progress", order="5")
 stat.create(name=''"testing", order="6")
 stat.create(name=''"done-cbb", order="7")
 stat.create(name=''"resolved", order="8")
+stat.create(name=''"closed", order="9")
+
+resolution = db.getclass('resolution')
+resolution.create(name=''"fixed", order="1")
+
+stage = db.getclass('stage')
+stage.create(name=''"resolved", order="1")
 
 # create the two default users
 user = db.getclass('user')

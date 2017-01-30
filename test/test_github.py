@@ -296,6 +296,125 @@ class TestCase(unittest.TestCase):
         status = self.db.pull_request.get(prs[0], 'status')
         self.assertEqual(status, 'closed')
 
+    def testPushEventAddsComment(self):
+        dummy_client = self._make_client('pushevent.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        msgs = self.db.issue.get('1', 'messages')
+        self.assertEqual(len(msgs), 1)
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+#1: fix tests.
+https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
+""",
+            content)
+        # issue status
+        status = self.db.issue.get('1', 'status')
+        self.assertNotEqual(self.db.status.get(status, 'name'), 'closed')
+        self.assertIsNone(self.db.issue.get('1', 'resolution'))
+        self.assertIsNone(self.db.issue.get('1', 'stage'))
+
+    def testPushEventAddsCommentAndClose(self):
+        dummy_client = self._make_client('pushevent1.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        msgs = self.db.issue.get('1', 'messages')
+        self.assertEqual(len(msgs), 1)
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+closes issue 1: fix tests.
+https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
+""",
+            content)
+        # issue status
+        status = self.db.issue.get('1', 'status')
+        self.assertEqual(self.db.status.get(status, 'name'), 'closed')
+        resolution = self.db.issue.get('1', 'resolution')
+        self.assertEqual(self.db.resolution.get(resolution, 'name'), 'fixed')
+        stage = self.db.issue.get('1', 'stage')
+        self.assertEqual(self.db.stage.get(stage, 'name'), 'resolved')
+
+    def testPushEventWithMultipleCommitsSingleIssue(self):
+        dummy_client = self._make_client('pushevent2.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        msgs = self.db.issue.get('1', 'messages')
+        self.assertEqual(len(msgs), 1)
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+issue 1: fix tests.
+https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
+
+New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
+#1: fix else.
+https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
+""",
+            content)
+                # issue status
+        status = self.db.issue.get('1', 'status')
+        self.assertNotEqual(self.db.status.get(status, 'name'), 'closed')
+        self.assertIsNone(self.db.issue.get('1', 'resolution'))
+        self.assertIsNone(self.db.issue.get('1', 'stage'))
+
+    def testPushEventWithMultipleCommitsSingleIssueAndClose(self):
+        dummy_client = self._make_client('pushevent3.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        msgs = self.db.issue.get('1', 'messages')
+        self.assertEqual(len(msgs), 1)
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+closing issue 1: fix tests.
+https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
+
+New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
+#1: fix else.
+https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
+""",
+            content)
+        # issue status
+        status = self.db.issue.get('1', 'status')
+        self.assertEqual(self.db.status.get(status, 'name'), 'closed')
+        resolution = self.db.issue.get('1', 'resolution')
+        self.assertEqual(self.db.resolution.get(resolution, 'name'), 'fixed')
+        stage = self.db.issue.get('1', 'stage')
+        self.assertEqual(self.db.stage.get(stage, 'name'), 'resolved')
+
+    def testPushEventWithMultipleCommitsMultipleIssues(self):
+        dummy_client = self._make_client('pushevent4.txt')
+        self.db.issue.create(title="Issue 2")
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        # first issue messages
+        msgs = self.db.issue.get('1', 'messages')
+        self.assertEqual(len(msgs), 1)
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+closes issue 1: fix tests.
+https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
+""",
+            content)
+        # first issue status
+        status = self.db.issue.get('1', 'status')
+        self.assertEqual(self.db.status.get(status, 'name'), 'closed')
+        resolution = self.db.issue.get('1', 'resolution')
+        self.assertEqual(self.db.resolution.get(resolution, 'name'), 'fixed')
+        stage = self.db.issue.get('1', 'stage')
+        self.assertEqual(self.db.stage.get(stage, 'name'), 'resolved')
+        # second issue messages
+        msgs = self.db.issue.get('2', 'messages')
+        self.assertEqual(len(msgs), 1)
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertIn("""New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
+bug 2: fix else.
+https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
+""",
+            content)
+        # second issue status
+        status = self.db.issue.get('2', 'status')
+        self.assertNotEqual(self.db.status.get(status, 'name'), 'closed')
+        self.assertIsNone(self.db.issue.get('2', 'resolution'))
+        self.assertIsNone(self.db.issue.get('2', 'stage'))
 
 def test_suite():
     suite = unittest.TestSuite()

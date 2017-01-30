@@ -21,6 +21,20 @@ stat = Class(db, "status",
                 order=Number())
 stat.setkey("name")
 
+# Stage
+stage = Class(db, 'stage',
+              name = String(),
+              description = String(),
+              order = Number())
+stage.setkey('name')
+
+# Resolution
+resolution = Class(db, "resolution",
+                   name=String(),
+                   description=String(),
+                   order=Number())
+resolution.setkey('name')
+
 # Keywords
 keyword = Class(db, "keyword",
                 name=String())
@@ -84,6 +98,8 @@ issue = IssueClass(db, "issue",
                 keyword=Multilink("keyword"),
                 priority=Link("priority"),
                 status=Link("status"),
+                resolution=Link('resolution'),
+                stage=Link('stage'),
                 pull_requests=Multilink('pull_request'))
 
 #

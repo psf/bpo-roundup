@@ -1,5 +1,3 @@
-from roundup.exceptions import *
-
 import hashlib
 import hmac
 import json
@@ -7,6 +5,8 @@ import re
 import os
 import logging
 
+from roundup.exceptions import Unauthorised, MethodNotAllowed, \
+    UnsupportedMediaType, Reject
 
 if hasattr(hmac, 'compare_digest'):
     compare_digest = hmac.compare_digest
@@ -14,8 +14,17 @@ else:
     def compare_digest(a, b):
         return a == b
 
-url_re = re.compile(r'https://github.com/python/cpython/pull/(?P<number>\d+)')
-issue_id_re = re.compile(r'bpo\s*(\d+)', re.I)
+URL_RE = re.compile(r'https://github.com/python/cpython/pull/(?P<number>\d+)')
+ISSUE_GH_RE = re.compile(r'bpo\s*(\d+)', re.I)
+VERBS = r'(?:\b(?P<verb>close[sd]?|closing|)\s+)?'
+ISSUE_BPO_RE = re.compile(r'%s(?:#|\bissue|\bbug)\s*(?P<issue_id>\d+)'
+                           % VERBS, re.I|re.U)
+
+COMMENT_TEMPLATE = u"""\
+New changeset {changeset_id} by {author} in branch '{branch}':
+{commit_msg}
+{changeset_url}
+"""
 
 class GitHubHandler:
     """
@@ -59,6 +68,10 @@ class GitHubHandler:
             data = json.loads(self.form.value)
             handler = IssueComment(self.db, data)
             handler.dispatch()
+        elif event == 'push':
+            data = json.loads(self.form.value)
+            handler = Push(self.db, data)
+            handler.dispatch()
 
     def validate_webhook_secret(self):
         """
@@ -93,7 +106,7 @@ class GitHubHandler:
 
     def get_event(self):
         """
-        Extracts github event from header field.
+        Extracts GitHub event from header field.
         """
         return self.request.headers.get('X-GitHub-Event', None)
 
@@ -107,24 +120,27 @@ class Event(object):
         self.db = db
         self.data = data
 
-    def set_current_user(self):
+    def set_roundup_user(self):
         """
-        Helper method used for setting current user for roundup, based
-        on the information from github about event author.
+        Helper method used for setting the current user for Roundup, based
+        on the information from GitHub about event author.
         """
         github_username = self.get_github_username()
-        user_id = self.db.user.filter(None, {'github': github_username})
-        # TODO set bpobot as userid when none is found
-        if len(user_id) == 1:
-            # TODO what if multiple bpo users have the same github username?
-            username = self.db.user.get(user_id[0], 'username')
-            self.db.setCurrentUser(username)
+        user_ids = self.db.user.filter(None, {'github': github_username})
+        if not user_ids:
+            # set bpobot as userid when none is found
+            user_ids = self.db.user.filter(None, {'username': 'python-dev'})
+            if not user_ids:
+                # python-dev does not exists, anonymous will be used instead
+                return
+        username = self.db.user.get(user_ids[0], 'username')
+        self.db.setCurrentUser(username)
 
     def dispatch(self):
         """
-        Main method responsible for responding to incoming github event.
+        Main method responsible for responding to incoming GitHub event.
         """
-        self.set_current_user()
+        self.set_roundup_user()
         action = self.data.get('action', '').encode('utf-8')
         issue_ids = self.get_issue_ids()
         if not issue_ids:
@@ -220,7 +236,7 @@ class PullRequest(Event):
             raise Reject()
         title = pull_request.get('title', '').encode('utf-8')
         body = pull_request.get('body', '').encode('utf-8')
-        return list(set(issue_id_re.findall(title) + issue_id_re.findall(body)))
+        return list(set(ISSUE_GH_RE.findall(title) + ISSUE_GH_RE.findall(body)))
 
     def get_pr_details(self):
         """
@@ -234,7 +250,7 @@ class PullRequest(Event):
             raise Reject()
         title = pull_request.get('title', '').encode('utf-8')
         status = pull_request.get('state', '').encode('utf-8')
-        # github has two states open and closed, information about pull request
+        # GitHub has two states open and closed, information about pull request
         # being merged in kept in separate field
         if pull_request.get('merged', False):
             status = "merged"
@@ -242,12 +258,13 @@ class PullRequest(Event):
 
     def get_github_username(self):
         """
-        Extract github username from a pull request.
+        Extract GitHub username from a pull request.
         """
         pull_request = self.data.get('pull_request')
         if pull_request is None:
             raise Reject()
         return pull_request.get('user', {}).get('login', '').encode('utf-8')
+
 
 class IssueComment(Event):
     """
@@ -274,7 +291,7 @@ class IssueComment(Event):
             raise Reject()
         title = issue.get('title', '').encode('utf-8')
         body = comment.get('body', '').encode('utf-8')
-        return list(set(issue_id_re.findall(title) + issue_id_re.findall(body)))
+        return list(set(ISSUE_GH_RE.findall(title) + ISSUE_GH_RE.findall(body)))
 
     def get_pr_details(self):
         """
@@ -284,16 +301,93 @@ class IssueComment(Event):
         if issue is None:
             raise Reject()
         url = issue.get('pull_request', {}).get('html_url')
-        number_match = url_re.search(url)
+        number_match = URL_RE.search(url)
         if not number_match:
             return (None, None, None)
         return number_match.group('number'), None, None
 
     def get_github_username(self):
         """
-        Extract github username from a comment.
+        Extract GitHub username from a comment.
         """
         issue = self.data.get('issue')
         if issue is None:
             raise Reject()
         return issue.get('user', {}).get('login', '').encode('utf-8')
+
+
+class Push(Event):
+    """
+    Class responsible for handling push events.
+    """
+
+    def get_github_username(self):
+        """
+        Extract GitHub username from a push event.
+        """
+        return self.data.get('pusher', []).get('name', '').encode('utf-8')
+
+    def dispatch(self):
+        """
+        Main method responsible for responding to incoming GitHub event.
+        """
+        self.set_roundup_user()
+        commits = self.data.get('commits', [])
+        ref = self.data.get('ref', 'refs/heads/master')
+        # messages dictionary maps issue number to a tuple containing
+        # the message to be posted as a comment an boolean flag informing
+        # if the issue should be 'closed'
+        messages = {}
+        # extract commit messages
+        for commit in commits:
+            msgs = self.handle_action(commit, ref)
+            for issue_id, (msg, close) in msgs.iteritems():
+                if issue_id not in messages:
+                    messages[issue_id] = (u'', False)
+                curr_msg, curr_close = messages[issue_id]
+                # we append the new message to the other and do binary OR
+                # on close, so that at least one information will actually
+                # close the issue
+                messages[issue_id] = (curr_msg + u'\n' + msg, curr_close|close)
+        if not messages:
+            return
+        for issue_id, (msg, close) in messages.iteritems():
+            # add comments to appropriate issues...
+            id = issue_id.encode('utf-8')
+            issue_msgs = self.db.issue.get(id, 'messages')
+            newmsg = self.db.msg.create(content=msg.encode('utf-8'), author=self.db.getuid())
+            issue_msgs.append(newmsg)
+            self.db.issue.set(id, messages=issue_msgs)
+            # ... and close, if needed
+            if close:
+                self.db.issue.set(id,
+                    status=self.db.status.lookup('closed'))
+                self.db.issue.set(id,
+                    resolution=self.db.resolution.lookup('fixed'))
+                self.db.issue.set(id,
+                    stage=self.db.stage.lookup('resolved'))
+        self.db.commit()
+
+    def handle_action(self, commit, ref):
+        """
+        This is implementing the same logic as the mercurial hook from here:
+        https://hg.python.org/hooks/file/tip/hgroundup.py
+        """
+        branch = ref.split('/')[-1]
+        description = commit.get('message', '')
+        matches = ISSUE_BPO_RE.finditer(description)
+        messages = {}
+        for match in matches:
+            data = match.groupdict()
+            # check for duplicated issue numbers in the same commit msg
+            if data['issue_id'] in messages:
+                continue
+            close = data['verb'] is not None
+            messages[data['issue_id']] = (COMMENT_TEMPLATE.format(
+                author=commit.get('committer', {}).get('name', ''),
+                branch=branch,
+                changeset_id=commit.get('id', ''),
+                changeset_url=commit.get('url', ''),
+                commit_msg=description.splitlines()[0],
+            ), close)
+        return messages
