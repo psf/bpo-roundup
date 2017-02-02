@@ -349,27 +349,25 @@ class Push(Event):
                 # we append the new message to the other and do binary OR
                 # on close, so that at least one information will actually
                 # close the issue
-                messages[issue_id] = (curr_msg + u'\n' + msg, curr_close|close)
+                messages[issue_id] = (curr_msg + u'\n' + msg, curr_close or close)
         if not messages:
             return
         for issue_id, (msg, close) in messages.iteritems():
             # add comments to appropriate issues...
             id = issue_id.encode('utf-8')
             issue_msgs = self.db.issue.get(id, 'messages')
-            newmsg = self.db.msg.create(
-                content=msg.encode('utf-8'), author=self.db.getuid(),
-                date=Date('.'),
-            )
+            newmsg = self.db.msg.create(content=msg.encode('utf-8'),
+                author=self.db.getuid(), date=Date('.'))
             issue_msgs.append(newmsg)
-            self.db.issue.set(id, messages=issue_msgs)
             # ... and close, if needed
             if close:
                 self.db.issue.set(id,
-                    status=self.db.status.lookup('closed'))
-                self.db.issue.set(id,
-                    resolution=self.db.resolution.lookup('fixed'))
-                self.db.issue.set(id,
+                    messages=issue_msgs,
+                    status=self.db.status.lookup('closed'),
+                    resolution=self.db.resolution.lookup('fixed'),
                     stage=self.db.stage.lookup('resolved'))
+            else:
+                self.db.issue.set(id, messages=issue_msgs)
         self.db.commit()
 
     def handle_action(self, commit, ref):
@@ -386,7 +384,7 @@ class Push(Event):
             # check for duplicated issue numbers in the same commit msg
             if data['issue_id'] in messages:
                 continue
-            close = data['verb'] is not None
+            close = bool(data.get('verb'))
             messages[data['issue_id']] = (COMMENT_TEMPLATE.format(
                 author=commit.get('committer', {}).get('name', ''),
                 branch=branch,
