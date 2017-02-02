@@ -6,6 +6,7 @@ from BaseHTTPServer import BaseHTTPRequestHandler
 from StringIO import StringIO
 from roundup.cgi import client
 from roundup.backends import list_backends
+from roundup.date import Date
 from roundup.github import GitHubHandler
 from roundup.exceptions import *
 
@@ -308,6 +309,8 @@ class TestCase(unittest.TestCase):
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 """,
             content)
+        self.assertIsInstance(self.db.msg.get(msgs[0], 'creation'), Date)
+        self.assertIsInstance(self.db.msg.get(msgs[0], 'date'), Date)
         # issue status
         status = self.db.issue.get('1', 'status')
         self.assertNotEqual(self.db.status.get(status, 'name'), 'closed')

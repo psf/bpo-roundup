@@ -5,6 +5,7 @@ import re
 import os
 import logging
 
+from roundup.date import Date
 from roundup.exceptions import Unauthorised, MethodNotAllowed, \
     UnsupportedMediaType, Reject
 
@@ -355,7 +356,10 @@ class Push(Event):
             # add comments to appropriate issues...
             id = issue_id.encode('utf-8')
             issue_msgs = self.db.issue.get(id, 'messages')
-            newmsg = self.db.msg.create(content=msg.encode('utf-8'), author=self.db.getuid())
+            newmsg = self.db.msg.create(
+                content=msg.encode('utf-8'), author=self.db.getuid(),
+                date=Date('.'),
+            )
             issue_msgs.append(newmsg)
             self.db.issue.set(id, messages=issue_msgs)
             # ... and close, if needed
