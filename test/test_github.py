@@ -145,7 +145,7 @@ class TestCase(unittest.TestCase):
             handler.dispatch()
 
     def testPullRequestEventForTitle(self):
-        # When the title of a PR has string "bpo123"
+        # When the title of a PR has string "bpo-123"
         dummy_client = self._make_client("pullrequestevent.txt")
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
@@ -156,20 +156,8 @@ class TestCase(unittest.TestCase):
         user_id = self.db.pull_request.get(prs[0], 'creator')
         self.assertEqual(self.db.user.get(user_id, 'username'), 'anonymous')
 
-    def testPullRequestEventForTitle2(self):
-        # When the title of a PR has string with space "bpo 123"
-        dummy_client = self._make_client("pullrequestevent5.txt")
-        handler = GitHubHandler(dummy_client)
-        handler.dispatch()
-        prs = self.db.issue.get('1', 'pull_requests')
-        self.assertEqual(len(prs), 1)
-        number = self.db.pull_request.get(prs[0], 'number')
-        self.assertEqual(number, '11')
-        user_id = self.db.pull_request.get(prs[0], 'creator')
-        self.assertEqual(self.db.user.get(user_id, 'username'), 'anonymous')
-
     def testPullRequestEventForBody(self):
-        # When the body of a PR has string "bpo123"
+        # When the body of a PR has string "bpo-123"
         dummy_client = self._make_client("pullrequestevent1.txt")
         self.db.user.create(username="anish.shah", github="AnishShah")
         handler = GitHubHandler(dummy_client)
@@ -197,7 +185,7 @@ class TestCase(unittest.TestCase):
             number = self.db.pull_request.get(prs[0], 'number')
             self.assertEqual(number, '13')
             title = self.db.pull_request.get(prs[0], 'title')
-            self.assertEqual(title, 'fixes bpo1, bpo2, bpo3')
+            self.assertEqual(title, 'fixes bpo-1, bpo-2, bpo-3')
 
     def testPullRequestEventForMultipleIssueReferenceInBody(self):
         dummy_client = self._make_client("pullrequestevent4.txt")
@@ -214,8 +202,8 @@ class TestCase(unittest.TestCase):
             self.assertEqual(title, 'update .gitignore')
 
     def testPullRequestEventForMultipleIssueReferenceInBodyAndTitle(self):
-        # When both title and body of a PR has multiple and duplicated "bpo123"
-        dummy_client = self._make_client("pullrequestevent6.txt")
+        # When both title and body of a PR has multiple and duplicated "bpo-123"
+        dummy_client = self._make_client("pullrequestevent5.txt")
         self.db.issue.create(title="Issue 2")
         self.db.issue.create(title="Issue 3")
         self.db.issue.create(title="Issue 4")
@@ -228,7 +216,7 @@ class TestCase(unittest.TestCase):
             number = self.db.pull_request.get(prs[0], 'number')
             self.assertEqual(number, '11')
             title = self.db.pull_request.get(prs[0], 'title')
-            self.assertEqual(title, 'bpo1 bpo2 bpo 3')
+            self.assertEqual(title, 'bpo-1 bpo-2 bpo-3')
 
     def testPullRequestEventWithoutIssueReference(self):
         # When no issue is referenced in PR and environment variable is set
@@ -305,7 +293,7 @@ class TestCase(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
         self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
-#1: fix tests.
+bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 """,
             content)
@@ -325,7 +313,7 @@ https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
         self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
-closes issue 1: fix tests.
+closes bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 """,
             content)
@@ -345,11 +333,11 @@ https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
         self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
-issue 1: fix tests.
+bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 
 New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
-#1: fix else.
+bpo-1: fix else.
 https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
 """,
             content)
@@ -367,11 +355,11 @@ https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77a
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
         self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
-closing issue 1: fix tests.
+closing bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 
 New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
-#1: fix else.
+bpo-1: fix else.
 https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
 """,
             content)
@@ -393,7 +381,7 @@ https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77a
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
         self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
-closes issue 1: fix tests.
+closes bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 """,
             content)
@@ -409,7 +397,7 @@ https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
         self.assertIn("""New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
-bug 2: fix else.
+bpo-2: fix else.
 https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
 """,
             content)

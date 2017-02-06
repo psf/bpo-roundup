@@ -16,10 +16,8 @@ else:
         return a == b
 
 URL_RE = re.compile(r'https://github.com/python/cpython/pull/(?P<number>\d+)')
-ISSUE_GH_RE = re.compile(r'bpo\s*(\d+)', re.I)
 VERBS = r'(?:\b(?P<verb>close[sd]?|closing|)\s+)?'
-ISSUE_BPO_RE = re.compile(r'%s(?:#|\bissue|\bbug)\s*(?P<issue_id>\d+)'
-                           % VERBS, re.I|re.U)
+ISSUE_RE = re.compile(r'%sbpo-(?P<issue_id>\d+)' % VERBS, re.I|re.U)
 
 COMMENT_TEMPLATE = u"""\
 New changeset {changeset_id} by {author} in branch '{branch}':
@@ -142,15 +140,16 @@ class Event(object):
         Main method responsible for responding to incoming GitHub event.
         """
         self.set_roundup_user()
-        action = self.data.get('action', '').encode('utf-8')
+        action = self.data.get('action', '')
         issue_ids = self.get_issue_ids()
         if not issue_ids:
             # no issue id found
             create_issue = os.environ.get('CREATE_ISSUE', False)
             if create_issue:
                 # TODO we should fill in the issue with more details
-                title = self.data.get('pull_request').get('title', '').encode('utf-8')
-                issue_ids = list(self.db.issue.create(title=title))
+                title = self.data.get('pull_request', {}).get('title', '')
+                issue_ids = list(self.db.issue.create(
+                    title=title.encode('utf-8')))
         prid, title, status = self.get_pr_details()
         self.handle_action(action, prid, title, status, issue_ids)
 
@@ -163,8 +162,9 @@ class Event(object):
         if not issue_exists:
             return
         for issue_id in issue_ids:
+            id = issue_id.encode('utf-8')
             # verify if this PR is already linked
-            prs = self.db.issue.get(issue_id, 'pull_requests')
+            prs = self.db.issue.get(id, 'pull_requests')
             if set(prs).intersection(self.db.pull_request.filter(None, {'number': prid})):
                 continue
             # create a new link
@@ -172,9 +172,10 @@ class Event(object):
                 title = ""
             if not status:
                 status = ""
-            newpr = self.db.pull_request.create(number=prid, title=title, status=status)
+            newpr = self.db.pull_request.create(number=prid,
+                title=title.encode('utf-8'), status=status.encode('utf-8'))
             prs.append(newpr)
-            self.db.issue.set(issue_id, pull_requests=prs)
+            self.db.issue.set(id, pull_requests=prs)
             self.db.commit()
 
     def handle_update(self, prid, title, status, issue_ids):
@@ -235,9 +236,11 @@ class PullRequest(Event):
         pull_request = self.data.get('pull_request')
         if pull_request is None:
             raise Reject()
-        title = pull_request.get('title', '').encode('utf-8')
-        body = pull_request.get('body', '').encode('utf-8')
-        return list(set(ISSUE_GH_RE.findall(title) + ISSUE_GH_RE.findall(body)))
+        title = pull_request.get('title', '')
+        body = pull_request.get('body', '')
+        title_ids = [x[1] for x in ISSUE_RE.findall(title)]
+        body_ids = [x[1] for x in ISSUE_RE.findall(body)]
+        return list(set(title_ids + body_ids))
 
     def get_pr_details(self):
         """
@@ -249,8 +252,8 @@ class PullRequest(Event):
         number = pull_request.get('number', None)
         if number is None:
             raise Reject()
-        title = pull_request.get('title', '').encode('utf-8')
-        status = pull_request.get('state', '').encode('utf-8')
+        title = pull_request.get('title', '')
+        status = pull_request.get('state', '')
         # GitHub has two states open and closed, information about pull request
         # being merged in kept in separate field
         if pull_request.get('merged', False):
@@ -264,7 +267,7 @@ class PullRequest(Event):
         pull_request = self.data.get('pull_request')
         if pull_request is None:
             raise Reject()
-        return pull_request.get('user', {}).get('login', '').encode('utf-8')
+        return pull_request.get('user', {}).get('login', '')
 
 
 class IssueComment(Event):
@@ -290,9 +293,11 @@ class IssueComment(Event):
         comment = self.data.get('comment')
         if comment is None:
             raise Reject()
-        title = issue.get('title', '').encode('utf-8')
-        body = comment.get('body', '').encode('utf-8')
-        return list(set(ISSUE_GH_RE.findall(title) + ISSUE_GH_RE.findall(body)))
+        title = issue.get('title', '')
+        body = comment.get('body', '')
+        title_ids = [x[1] for x in ISSUE_RE.findall(title)]
+        body_ids = [x[1] for x in ISSUE_RE.findall(body)]
+        return list(set(title_ids + body_ids))
 
     def get_pr_details(self):
         """
@@ -314,7 +319,7 @@ class IssueComment(Event):
         issue = self.data.get('issue')
         if issue is None:
             raise Reject()
-        return issue.get('user', {}).get('login', '').encode('utf-8')
+        return issue.get('user', {}).get('login', '')
 
 
 class Push(Event):
@@ -326,7 +331,7 @@ class Push(Event):
         """
         Extract GitHub username from a push event.
         """
-        return self.data.get('pusher', []).get('name', '').encode('utf-8')
+        return self.data.get('pusher', []).get('name', '')
 
     def dispatch(self):
         """
@@ -377,7 +382,7 @@ class Push(Event):
         """
         branch = ref.split('/')[-1]
         description = commit.get('message', '')
-        matches = ISSUE_BPO_RE.finditer(description)
+        matches = ISSUE_RE.finditer(description)
         messages = {}
         for match in matches:
             data = match.groupdict()
