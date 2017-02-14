@@ -360,7 +360,12 @@ class Push(Event):
         for issue_id, (msg, close) in messages.iteritems():
             # add comments to appropriate issues...
             id = issue_id.encode('utf-8')
-            issue_msgs = self.db.issue.get(id, 'messages')
+            try:
+                issue_msgs = self.db.issue.get(id, 'messages')
+            except IndexError:
+                # See meta issue #613: the commit message might also include
+                # PR ids that shouldn't be included.
+                continue
             newmsg = self.db.msg.create(content=msg.encode('utf-8'),
                 author=self.db.getuid(), date=Date('.'))
             issue_msgs.append(newmsg)
