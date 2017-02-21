@@ -292,7 +292,7 @@ class TestCase(unittest.TestCase):
         msgs = self.db.issue.get('1', 'messages')
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
-        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'master':
 bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 """,
@@ -312,7 +312,7 @@ https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc
         msgs = self.db.issue.get('1', 'messages')
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
-        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'master':
 closes bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 """,
@@ -332,11 +332,11 @@ https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc
         msgs = self.db.issue.get('1', 'messages')
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
-        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch '2.7':
 bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 
-New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
+New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch '2.7':
 bpo-1: fix else.
 https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
 """,
@@ -354,11 +354,11 @@ https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77a
         msgs = self.db.issue.get('1', 'messages')
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
-        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch '3.5':
 closing bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 
-New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
+New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch '3.5':
 bpo-1: fix else.
 https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
 """,
@@ -380,7 +380,7 @@ https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77a
         msgs = self.db.issue.get('1', 'messages')
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
-        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch 'test1':
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch '3.6':
 closes bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 """,
@@ -396,7 +396,7 @@ https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc
         msgs = self.db.issue.get('2', 'messages')
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
-        self.assertIn("""New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch 'test1':
+        self.assertIn("""New changeset 4488ebcdf2d16393d1a78c4105e4a18e4d0d77af by Maciej Szulik in branch '3.6':
 bpo-2: fix else.
 https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77af
 """,
@@ -406,6 +406,15 @@ https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77a
         self.assertNotEqual(self.db.status.get(status, 'name'), 'closed')
         self.assertIsNone(self.db.issue.get('2', 'resolution'))
         self.assertIsNone(self.db.issue.get('2', 'stage'))
+
+    def testPushEventNotForMainBranches(self):
+        # message should be added only if commit is pushed into master/2.x/3.x branches
+        dummy_client = self._make_client('pushevent5.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        # issue should not have any messages
+        msgs = self.db.issue.get('1', 'messages')
+        self.assertEqual(len(msgs), 0)
 
 def test_suite():
     suite = unittest.TestSuite()

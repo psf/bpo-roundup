@@ -18,6 +18,7 @@ else:
 URL_RE = re.compile(r'https://github.com/python/cpython/pull/(?P<number>\d+)')
 VERBS = r'(?:\b(?P<verb>close[sd]?|closing|)\s+)?'
 ISSUE_RE = re.compile(r'%sbpo-(?P<issue_id>\d+)' % VERBS, re.I|re.U)
+BRANCH_RE = re.compile(r'(2\.\d|3\.\d|master)', re.I)
 
 COMMENT_TEMPLATE = u"""\
 New changeset {changeset_id} by {author} in branch '{branch}':
@@ -386,6 +387,8 @@ class Push(Event):
         https://hg.python.org/hooks/file/tip/hgroundup.py
         """
         branch = ref.split('/')[-1]
+        if not BRANCH_RE.match(branch):
+            return dict()
         description = commit.get('message', '')
         matches = ISSUE_RE.finditer(description)
         messages = {}
