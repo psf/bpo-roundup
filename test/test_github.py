@@ -354,7 +354,7 @@ https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77a
         msgs = self.db.issue.get('1', 'messages')
         self.assertEqual(len(msgs), 1)
         content = self.db.msg.get(msgs[0], 'content')
-        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik in branch '3.5':
+        self.assertIn("""New changeset 65c3a074262662a2c55109ff9a2456ee7647fcc9 by Maciej Szulik (Anish Shah) in branch '3.5':
 closing bpo-1: fix tests.
 https://github.com/python/cpython/commit/65c3a074262662a2c55109ff9a2456ee7647fcc9
 

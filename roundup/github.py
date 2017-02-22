@@ -398,8 +398,13 @@ class Push(Event):
             if data['issue_id'] in messages:
                 continue
             close = bool(data.get('verb'))
+            author=commit.get('author', {}).get('name', '')
+            committer=commit.get('committer', {}).get('name', '')
+            author_line = committer
+            if author != committer:
+                author_line = u"{} ({})".format(committer, author)
             messages[data['issue_id']] = (COMMENT_TEMPLATE.format(
-                author=commit.get('committer', {}).get('name', ''),
+                author=author_line,
                 branch=branch,
                 changeset_id=commit.get('id', ''),
                 changeset_url=commit.get('url', ''),
