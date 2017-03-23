@@ -418,9 +418,14 @@ class Push(Event):
             if data['issue_id'] in messages:
                 continue
             close = bool(data.get('verb'))
-            author=commit.get('author', {}).get('name', '')
-            committer=commit.get('committer', {}).get('name', '')
+            author = commit.get('author', {}).get('name', '')
+            committer = commit.get('committer', {}).get('name', '')
+            # committer should not be GitHub bot, fallback to original author
+            # in these cases, this happens when using GitHub UI
+            if committer == "GitHub":
+                committer = author
             author_line = committer
+            # check if the author and committer are different persons
             if author != committer:
                 author_line = u"{} ({})".format(committer, author)
             messages[data['issue_id']] = (COMMENT_TEMPLATE.format(
