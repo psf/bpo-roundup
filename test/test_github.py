@@ -416,6 +416,19 @@ https://github.com/python/cpython/commit/4488ebcdf2d16393d1a78c4105e4a18e4d0d77a
         msgs = self.db.issue.get('1', 'messages')
         self.assertEqual(len(msgs), 0)
 
+    def testPushEvent613(self):
+        dummy_client = self._make_client('pushevent6.txt')
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        msgs = self.db.issue.get('1', 'messages')
+        self.assertEqual(len(msgs), 1)
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertIn("""New changeset 9d07aceedabcdc9826489f8b9baffff056283bb3 by GitHub (Brett Cannon) in branch '3.6':
+bpo-1: Mention coverage.py in trace module documentation (GH-435)
+https://github.com/python/cpython/commit/9d07aceedabcdc9826489f8b9baffff056283bb3
+""",
+            content)
+
 def test_suite():
     suite = unittest.TestSuite()
     for l in list_backends():

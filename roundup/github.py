@@ -46,8 +46,11 @@ class GitHubHandler:
             self.extract()
         except (Unauthorised, MethodNotAllowed,
                 UnsupportedMediaType, Reject) as err:
+            logging.error('X-GitHub-Delivery: %s', self.get_delivery())
+            logging.error(err, exc_info=True)
             raise
         except Exception as err:
+            logging.error('X-GitHub-Delivery: %s', self.get_delivery())
             logging.error(err, exc_info=True)
             raise Reject()
 
@@ -70,8 +73,11 @@ class GitHubHandler:
             handler.dispatch()
         elif event == 'push':
             data = json.loads(self.form.value)
-            handler = Push(self.db, data)
+            handler = Push(self.db, data, self.get_delivery())
             handler.dispatch()
+        else:
+            logging.error('X-GitHub-Delivery: %s', self.get_delivery())
+            logging.error('Unknown event %s', event)
 
     def validate_webhook_secret(self):
         """
@@ -100,8 +106,10 @@ class GitHubHandler:
             raise MethodNotAllowed()
         content_type = self.env.get('CONTENT_TYPE', None)
         if content_type != 'application/json':
-            raise UnsupportedMediaType()
+            raise UnsupportedMediaType(content_type)
         if self.get_event() is None:
+            logging.error('X-GitHub-Delivery: %s', self.get_delivery())
+            logging.error('no X-GitHub-Event header found in the request headers')
             raise Reject()
 
     def get_event(self):
@@ -109,6 +117,12 @@ class GitHubHandler:
         Extracts GitHub event from header field.
         """
         return self.request.headers.get('X-GitHub-Event', None)
+
+    def get_delivery(self):
+        """
+        Extracts GitHub delivery id.
+        """
+        return self.request.headers.get('X-GitHub-Delivery', None)
 
 
 class Event(object):
@@ -328,6 +342,11 @@ class Push(Event):
     Class responsible for handling push events.
     """
 
+    def __init__(self, db, data, delivery):
+        self.db = db
+        self.data = data
+        self.delivery = delivery
+
     def get_github_username(self):
         """
         Extract GitHub username from a push event.
@@ -342,7 +361,7 @@ class Push(Event):
         commits = self.data.get('commits', [])
         ref = self.data.get('ref', 'refs/heads/master')
         # messages dictionary maps issue number to a tuple containing
-        # the message to be posted as a comment an boolean flag informing
+        # the message to be posted as a comment and a boolean flag informing
         # if the issue should be 'closed'
         messages = {}
         # extract commit messages
@@ -357,6 +376,7 @@ class Push(Event):
                 # close the issue
                 messages[issue_id] = (curr_msg + u'\n' + msg, curr_close or close)
         if not messages:
+            logging.error('zero messages created for %s', self.delivery)
             return
         for issue_id, (msg, close) in messages.iteritems():
             # add comments to appropriate issues...
