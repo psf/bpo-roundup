@@ -427,7 +427,7 @@ class Push(Event):
             author_line = committer
             # check if the author and committer are different persons
             if author != committer:
-                author_line = u"{} ({})".format(committer, author)
+                author_line = u"{0} ({1})".format(committer, author)
             messages[data['issue_id']] = (COMMENT_TEMPLATE.format(
                 author=author_line,
                 branch=branch,
