@@ -252,7 +252,7 @@ class PullRequest(Event):
         if pull_request is None:
             raise Reject()
         title = pull_request.get('title', '')
-        body = pull_request.get('body', '')
+        body = pull_request.get('body', '') or ''  # body can be None
         title_ids = [x[1] for x in ISSUE_RE.findall(title)]
         body_ids = [x[1] for x in ISSUE_RE.findall(body)]
         return list(set(title_ids + body_ids))

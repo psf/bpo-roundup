@@ -228,6 +228,23 @@ class TestCase(unittest.TestCase):
         user_id = self.db.issue.get('2', 'creator')
         self.assertEqual(self.db.user.get(user_id, 'username'), 'anonymous')
 
+    def testPullRequestEventWithoutBody(self):
+        # When the body of the PR is null and environment variable is set
+        dummy_client = self._make_client("pullrequestevent6.txt")
+        self.db.issue.create(title="Issue 2")
+        self.db.issue.create(title="Issue 3")
+        self.assertEqual(self.db.issue.count(), 3)
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        self.assertEqual(self.db.issue.count(), 3)
+        for i in range(1, 4):
+            prs = self.db.issue.get(str(i), 'pull_requests')
+            self.assertEqual(len(prs), 1)
+            number = self.db.pull_request.get(prs[0], 'number')
+            self.assertEqual(number, '11')
+            title = self.db.pull_request.get(prs[0], 'title')
+            self.assertEqual(title, 'bpo-1 bpo-2 bpo-3')
+
     def testPullRequestFromGitHubUserWithoutIssueReference(self):
         # When no issue is referenced in PR and environment variable is set
         # and Github field of b.p.o user is set
