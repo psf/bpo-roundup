@@ -172,7 +172,6 @@ class Event(object):
         """
         Helper method for linking GitHub pull request with an issue.
         """
-        # search for an existing issue first
         for issue_id in issue_ids:
             # verify if this issue exists, if not ignore it
             id = issue_id.encode('utf-8')
@@ -200,13 +199,12 @@ class Event(object):
         # update handles only title changes, for now
         if not title:
             return
-        # search for an existing issue first
-        issue_exists = len(self.db.issue.filter(None, {'id': issue_ids})) == len(issue_ids)
-        if not issue_exists:
-            return
         for issue_id in issue_ids:
+            id = issue_id.encode('utf-8')
+            if not self.db.issue.hasnode(id):
+                continue
             # verify if this PR is already linked
-            prs = self.db.issue.get(issue_id, 'pull_requests')
+            prs = self.db.issue.get(id, 'pull_requests')
             if set(prs).intersection(self.db.pull_request.filter(None, {'number': prid})):
                 for pr in prs:
                     probj = self.db.pull_request.getnode(pr)

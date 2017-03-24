@@ -260,6 +260,25 @@ class TestCase(unittest.TestCase):
             title = self.db.pull_request.get(prs[0], 'title')
             self.assertEqual(title, 'bpo-1 bpo-2 bpo-3')
 
+    def testEditPullRequestWithOneNonExistentIssue(self):
+        # When one of the issues does not exists, the existing ones should
+        # still be updated, and that non-existent should be ignored
+        dummy_client = self._make_client("pullrequestevent8.txt")
+        pr = self.db.pull_request.create(number='1', title='Some title')
+        self.db.issue.set('1', pull_requests=[pr])
+        self.db.issue.create(title="Issue 2")
+        pr = self.db.pull_request.create(number='1', title='Some title')
+        self.db.issue.set('2', pull_requests=[pr])
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        for i in range(1, 3):
+            prs = self.db.issue.get(str(i), 'pull_requests')
+            self.assertEqual(len(prs), 1)
+            number = self.db.pull_request.get(prs[0], 'number')
+            self.assertEqual(number, '1')
+            title = self.db.pull_request.get(prs[0], 'title')
+            self.assertEqual(title, 'Title after edit: bpo-1, bpo-2, bpo-3')
+
     def testPullRequestFromGitHubUserWithoutIssueReference(self):
         # When no issue is referenced in PR and environment variable is set
         # and Github field of b.p.o user is set
