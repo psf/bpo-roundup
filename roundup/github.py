@@ -210,7 +210,8 @@ class Event(object):
                     probj = self.db.pull_request.getnode(pr)
                     # check if the number match and title did change, and only then update
                     if probj.number == prid:
-                        self.db.pull_request.set(probj.id, title=title, status=status)
+                        self.db.pull_request.set(probj.id, title=title.encode('utf-8'),
+                                                 status=status)
                         self.db.commit()
             else:
                 self.handle_create(prid, title, status, [issue_id])

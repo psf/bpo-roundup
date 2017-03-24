@@ -336,6 +336,19 @@ class TestCase(unittest.TestCase):
         status = self.db.pull_request.get(prs[0], 'status')
         self.assertEqual(status, 'closed')
 
+    def testClosedPullRequestNonASCII(self):
+        # When pull request is closed and the title is non-ASCII
+        dummy_client = self._make_client('pullrequestclosed2.txt')
+        pr = self.db.pull_request.create(number='11', title='Some title')
+        self.db.issue.set('1', pull_requests=[pr])
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        status = self.db.pull_request.get(pr, 'status')
+        self.assertEqual(status, 'closed')
+        title = self.db.pull_request.get(pr, 'title')
+        self.assertEqual(title,
+                         '\xf0\x9f\x90\x8d\xf0\x9f\x90\x8d\xf0\x9f\x90\x8d')
+
     def testPushEventAddsComment(self):
         dummy_client = self._make_client('pushevent.txt')
         handler = GitHubHandler(dummy_client)
