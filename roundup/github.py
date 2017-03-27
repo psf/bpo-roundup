@@ -141,13 +141,17 @@ class Event(object):
         """
         github_username = self.get_github_username()
         user_ids = self.db.user.filter(None, {'github': github_username})
-        if not user_ids:
-            # set bpobot as userid when none is found
-            user_ids = self.db.user.filter(None, {'username': 'python-dev'})
-            if not user_ids:
+        for user_id in user_ids:
+            if self.db.user.get(user_id, 'github') == github_username:
+                break  # found the right user id
+        else:
+            # set python-dev as user id when none is found
+            try:
+                user_id = self.db.user.lookup('python-dev')
+            except KeyError:
                 # python-dev does not exists, anonymous will be used instead
                 return
-        username = self.db.user.get(user_ids[0], 'username')
+        username = self.db.user.get(user_id, 'username')
         self.db.setCurrentUser(username)
 
     def dispatch(self):

@@ -173,6 +173,43 @@ class TestCase(unittest.TestCase):
         status = self.db.pull_request.get(prs[0], 'status')
         self.assertEqual(status, "open")
 
+    def testPullRequestEventForUsername(self):
+        # Make sure that only a exact github username match
+        dummy_client = self._make_client("pullrequestevent.txt")
+        self.db.user.create(username="foo", github="_python")
+        self.db.user.create(username="bar", github="a_python")
+        self.db.user.create(username="baz", github="python2")
+        self.db.user.create(username="expected", github="python")
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        prs = self.db.issue.get('1', 'pull_requests')
+        user_id = self.db.pull_request.get(prs[0], 'creator')
+        self.assertEqual(self.db.user.get(user_id, 'username'), 'expected')
+
+    def testPullRequestEventForUsernameWithNoMatchUsesPythonDev(self):
+        # Make sure that python-dev is picked if there are no matches
+        dummy_client = self._make_client("pullrequestevent.txt")
+        self.db.user.create(username="foo", github="_python")
+        self.db.user.create(username="bar", github="a_python")
+        self.db.user.create(username="python-dev", github="python2")
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        prs = self.db.issue.get('1', 'pull_requests')
+        user_id = self.db.pull_request.get(prs[0], 'creator')
+        self.assertEqual(self.db.user.get(user_id, 'username'), 'python-dev')
+
+    def testPullRequestEventForUsernameWithNoMatchUsesAnonymous(self):
+        # Make sure that anonymous is picked with no match and no python-dev
+        dummy_client = self._make_client("pullrequestevent.txt")
+        self.db.user.create(username="foo", github="_python")
+        self.db.user.create(username="bar", github="a_python")
+        self.db.user.create(username="baz", github="python2")
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        prs = self.db.issue.get('1', 'pull_requests')
+        user_id = self.db.pull_request.get(prs[0], 'creator')
+        self.assertEqual(self.db.user.get(user_id, 'username'), 'anonymous')
+
     def testPullRequestEventForMultipleIssueReferenceInTitle(self):
         dummy_client = self._make_client("pullrequestevent3.txt")
         self.db.issue.create(title="Issue 2")
