@@ -244,7 +244,7 @@ class PullRequest(Event):
     def handle_action(self, action, prid, title, status, issue_ids):
         if action in ('opened', 'created'):
             self.handle_create(prid, title, status, issue_ids)
-        elif action in ('edited', 'closed'):
+        elif action in ('edited', 'closed', 'reopened'):
             self.handle_update(prid, title, status, issue_ids)
 
     def get_issue_ids(self):
