@@ -20,6 +20,9 @@ VERBS = r'(?:\b(?P<verb>close[sd]?|closing|)\s+)?'
 ISSUE_RE = re.compile(r'%sbpo-(?P<issue_id>\d+)' % VERBS, re.I|re.U)
 BRANCH_RE = re.compile(r'(2\.\d|3\.\d|master)', re.I)
 
+# Maximum number of bpo issues linked to a PR
+ISSUE_LIMIT = 10
+
 COMMENT_TEMPLATE = u"""\
 New changeset {changeset_id} by {author} in branch '{branch}':
 {commit_msg}
@@ -170,6 +173,10 @@ class Event(object):
                 issue_ids = list(self.db.issue.create(
                     title=title.encode('utf-8')))
         prid, title, status = self.get_pr_details()
+        # limit to max 10 issues
+        if len(issue_ids) > ISSUE_LIMIT:
+            logging.info("Limiting links for %s: %s", prid, issue_ids)
+            issue_ids = issue_ids[:ISSUE_LIMIT]
         self.handle_action(action, prid, title, status, issue_ids)
 
     def handle_create(self, prid, title, status, issue_ids):
@@ -220,6 +227,16 @@ class Event(object):
             else:
                 self.handle_create(prid, title, status, [issue_id])
 
+    def unique_ordered(self, issue_ids):
+        """
+        Helper method returning unique and ordered (how they appear) issue_ids.
+        """
+        ids = []
+        for id in issue_ids:
+            if id not in ids:
+                ids.append(id)
+        return ids
+
     def handle_action(self, action, prid, title, status, issue_ids):
         raise NotImplementedError
 
@@ -258,7 +275,7 @@ class PullRequest(Event):
         body = pull_request.get('body', '') or ''  # body can be None
         title_ids = [x[1] for x in ISSUE_RE.findall(title)]
         body_ids = [x[1] for x in ISSUE_RE.findall(body)]
-        return list(set(title_ids + body_ids))
+        return self.unique_ordered(title_ids + body_ids)
 
     def get_pr_details(self):
         """
@@ -315,7 +332,7 @@ class IssueComment(Event):
         body = comment.get('body', '')
         title_ids = [x[1] for x in ISSUE_RE.findall(title)]
         body_ids = [x[1] for x in ISSUE_RE.findall(body)]
-        return list(set(title_ids + body_ids))
+        return self.unique_ordered(title_ids + body_ids)
 
     def get_pr_details(self):
         """

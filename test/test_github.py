@@ -112,6 +112,22 @@ class TestCase(unittest.TestCase):
         user_id = self.db.pull_request.get(prs[0], 'creator')
         self.assertEqual(self.db.user.get(user_id, 'github'), 'AnishShah')
 
+    def testIssueCommentEventWithLotsOfReferencedIssues(self):
+        # Check that the number of references gets limited
+        dummy_client = self._make_client("issuecommentevent1.txt")
+        for n in range(2, 21):
+            self.db.issue.create(title="Issue %d" % n)
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        for i in range(1, 11):
+            prs = self.db.issue.get(str(i), 'pull_requests')
+            self.assertEqual(len(prs), 1, str(i))
+            number = self.db.pull_request.get(prs[0], 'number')
+            self.assertEqual(number, '1')
+        for i in range(11, 21):
+            prs = self.db.issue.get(str(i), 'pull_requests')
+            self.assertEqual(len(prs), 0, str(i))
+
     def testPullRequestCommentEvent(self):
         dummy_client = self._make_client("pullrequestcommentevent.txt")
         handler = GitHubHandler(dummy_client)
@@ -254,6 +270,22 @@ class TestCase(unittest.TestCase):
             self.assertEqual(number, '11')
             title = self.db.pull_request.get(prs[0], 'title')
             self.assertEqual(title, 'bpo-1 bpo-2 bpo-3')
+
+    def testPullRequestEventWithLotsOfReferencedIssues(self):
+        # Check that the number of references gets limited
+        dummy_client = self._make_client("pullrequestevent9.txt")
+        for n in range(2, 21):
+            self.db.issue.create(title="Issue %d" % n)
+        handler = GitHubHandler(dummy_client)
+        handler.dispatch()
+        for i in range(1, 11):
+            prs = self.db.issue.get(str(i), 'pull_requests')
+            self.assertEqual(len(prs), 1, str(i))
+            number = self.db.pull_request.get(prs[0], 'number')
+            self.assertEqual(number, '11')
+        for i in range(11, 21):
+            prs = self.db.issue.get(str(i), 'pull_requests')
+            self.assertEqual(len(prs), 0, str(i))
 
     def testPullRequestEventWithoutIssueReference(self):
         # When no issue is referenced in PR and environment variable is set
