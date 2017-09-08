@@ -7,7 +7,7 @@ from StringIO import StringIO
 from roundup.cgi import client
 from roundup.backends import list_backends
 from roundup.date import Date
-from roundup.github import GitHubHandler
+from roundup.github import GitHubHandler, ISSUE_RE
 from roundup.exceptions import *
 
 NEEDS_INSTANCE = 1
@@ -52,6 +52,18 @@ class TestCase(unittest.TestCase):
         self.db = dummy_client.db
         self.db.issue.create(title="Issue 1")
         return dummy_client
+
+
+    def testVERBS(self):
+        """Check that all these messages contain a "closing verb"."""
+        messages = [
+            'close bpo-1', 'closes bpo-1', 'closed bpo-1', 'closing bpo-1',
+            'fix bpo-1', 'fixes bpo-1', 'fixed bpo-1',
+        ]
+        for message in messages:
+            for match in ISSUE_RE.finditer(message):
+                data = match.groupdict()
+                self.assertTrue(data.get('verb'))
 
     def testMissingSecretKey(self):
         os.environ.pop('SECRET_KEY')

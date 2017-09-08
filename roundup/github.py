@@ -16,7 +16,7 @@ else:
         return a == b
 
 URL_RE = re.compile(r'https://github.com/python/cpython/pull/(?P<number>\d+)')
-VERBS = r'(?:\b(?P<verb>close[sd]?|closing|)\s+)?'
+VERBS = r'(?:\b(?P<verb>close[sd]?|closing|fix(?:e[sd])?|)\s+)?'
 ISSUE_RE = re.compile(r'%sbpo-(?P<issue_id>\d+)' % VERBS, re.I|re.U)
 BRANCH_RE = re.compile(r'(2\.\d|3\.\d|master)', re.I)
 
