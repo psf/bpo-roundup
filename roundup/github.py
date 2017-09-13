@@ -200,13 +200,7 @@ class Event(object):
             newpr = self.db.pull_request.create(number=prid,
                 title=title.encode('utf-8'), status=status.encode('utf-8'))
             prs.append(newpr)
-            patch_keyword = self.db.keyword.lookup('patch')
-            keywords = self.db.issue.get(id, 'keywords')
-            if patch_keyword not in keywords:
-                keywords.append(patch_keyword)
-            self.db.issue.set(id, pull_requests=prs,
-                              stage=self.db.stage.lookup('patch review'),
-                              keywords=keywords)
+            self.db.issue.set(id, pull_requests=prs)
             self.db.commit()
 
     def handle_update(self, prid, title, status, issue_ids):
