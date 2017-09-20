@@ -25,7 +25,8 @@ class HTTPRequest(BaseHTTPRequestHandler):
         self.parse_request()
 
 
-class TestCase(unittest.TestCase):
+class GitHubTest:
+    # Abstract base class. Should be subclassed with different backends.
 
     backend = None
 
@@ -598,14 +599,10 @@ https://github.com/python/cpython/commit/9d07aceedabcdc9826489f8b9baffff056283bb
 """,
             content)
 
-def test_suite():
-    suite = unittest.TestSuite()
-    for l in list_backends():
-        dct = dict(backend=l)
-        subcls = type(TestCase)('TestCase_%s' % l, (TestCase,), dct)
-        suite.addTest(unittest.makeSuite(subcls))
-    return suite
 
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
+# Create a different subclass for each available backend
+for l in list_backends():
+    name = 'TestCase_%s' % l
+    bases = (GitHubTest, unittest.TestCase)
+    dct = dict(backend=l)
+    globals()[name] = type(name, bases, dct)
