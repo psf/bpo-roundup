@@ -256,14 +256,14 @@ class Mailer:
                 self.logger.debug("MessageSendError: %s", str(e))
                 pass
 
-    def exception_message(self, data=''):
+    def exception_message(self):
         '''Send a message to the admins with information about the latest
         traceback.
         '''
         subject = '%s: %s'%(self.config.TRACKER_NAME, sys.exc_info()[1])
         to = [self.config.ADMIN_EMAIL]
         content = '\n'.join(traceback.format_exception(*sys.exc_info()))
-        self.standard_message(to, subject, data+content)
+        self.standard_message(to, subject, content)
 
     def smtp_send(self, to, message, sender=None):
         """Send a message over SMTP, using roundup's config.

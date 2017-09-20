@@ -716,18 +716,6 @@ class Client:
             else:
                 self.write_html(html)
 
-    def exception_data(self):
-        result = ''
-        try:
-            for k,v in self.env.items():
-                result += "%s=%s\n" % (k,v)
-            for k,v in self.request.headers.items():
-                result += "%s=%s\n" % (k,v)
-            result += "user:" + repr(self.user) + "\n"
-        except:
-            pass
-        return result
-
     def clean_sessions(self):
         """Deprecated
            XXX remove
