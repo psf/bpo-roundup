@@ -1441,7 +1441,7 @@ Reply-To: Roundup issue tracker
 Content-Transfer-Encoding: quoted-printable
 
 
-Changes by Bork, Chef <chef@bork.bork.bork>:
+Change by Bork, Chef <chef@bork.bork.bork>:
 
 
 ----------
