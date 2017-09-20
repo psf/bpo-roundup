@@ -1366,10 +1366,6 @@ class Client:
                 klass = self.db.getclass(self.classname)
             except KeyError:
                 raise NotFound('%s/%s'%(self.classname, self.nodeid))
-            if long(self.nodeid) > 2**31:
-                # Postgres will complain with a ProgrammingError
-                # if we try to pass in numbers that are too large
-                raise NotFound('%s/%s'%(self.classname, self.nodeid))
             if not klass.hasnode(self.nodeid):
                 raise NotFound('%s/%s'%(self.classname, self.nodeid))
             # with a designator, we default to item view
