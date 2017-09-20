@@ -15,10 +15,11 @@ from roundup.hyperdb import String
 from roundup.cgi import TranslationService
 
 import db_test_base
+from .test_mysql import skip_mysql
+from .test_postgresql import skip_postgresql
 
-NEEDS_INSTANCE = 1
 
-class TestCase(unittest.TestCase):
+class XmlrpcTest(object):
 
     backend = None
 
@@ -29,6 +30,8 @@ class TestCase(unittest.TestCase):
 
         # open the database
         self.db = self.instance.open('admin')
+
+        print "props_only default", self.db.security.get_props_only_default()
 
         # Get user id (user4 maybe). Used later to get data from db.
         self.joeid = 'user' + self.db.user.create(username='joe',
@@ -57,7 +60,7 @@ class TestCase(unittest.TestCase):
         self.db.close()
         try:
             shutil.rmtree(self.dirname)
-        except OSError, error:
+        except OSError as error:
             if error.errno not in (errno.ENOENT, errno.ESRCH): raise
 
     def testAccess(self):
@@ -92,6 +95,58 @@ class TestCase(unittest.TestCase):
         results = self.server.display(fileid, 'content')
         self.assertEqual(results['content'], 'hello\r\nthere')
 
+    def testSchema(self):
+        schema={'status': [('order', '<roundup.hyperdb.Number>'),
+                           ('name', '<roundup.hyperdb.String>')],
+                'keyword': [('name', '<roundup.hyperdb.String>')],
+                'priority': [('order', '<roundup.hyperdb.Number>'),
+                             ('name', '<roundup.hyperdb.String>')],
+                'user': [('username', '<roundup.hyperdb.String>'),
+                         ('alternate_addresses', '<roundup.hyperdb.String>'),
+                         ('realname', '<roundup.hyperdb.String>'),
+                         ('roles', '<roundup.hyperdb.String>'),
+                         ('organisation', '<roundup.hyperdb.String>'),
+                         ('queries', '<roundup.hyperdb.Multilink to "query">'),
+                         ('phone', '<roundup.hyperdb.String>'),
+                         ('address', '<roundup.hyperdb.String>'),
+                         ('timezone', '<roundup.hyperdb.String>'),
+                         ('password', '<roundup.hyperdb.Password>')],
+                'file': [('content', '<roundup.hyperdb.String>'),
+                         ('type', '<roundup.hyperdb.String>'),
+                         ('name', '<roundup.hyperdb.String>')],
+                'msg': [('files', '<roundup.hyperdb.Multilink to "file">'),
+                        ('inreplyto', '<roundup.hyperdb.String>'),
+                        ('tx_Source', '<roundup.hyperdb.String>'),
+                        ('recipients', '<roundup.hyperdb.Multilink to "user">'),
+                        ('author', '<roundup.hyperdb.Link to "user">'),
+                        ('summary', '<roundup.hyperdb.String>'),
+                        ('content', '<roundup.hyperdb.String>'),
+                        ('messageid', '<roundup.hyperdb.String>'),
+                        ('date', '<roundup.hyperdb.Date>'),
+                        ('type', '<roundup.hyperdb.String>')],
+                'query': [('url', '<roundup.hyperdb.String>'),
+                          ('private_for', '<roundup.hyperdb.Link to "user">'),
+                          ('name', '<roundup.hyperdb.String>'),
+                          ('klass', '<roundup.hyperdb.String>')],
+                'issue': [('status', '<roundup.hyperdb.Link to "status">'),
+                          ('files', '<roundup.hyperdb.Multilink to "file">'),
+                          ('tx_Source', '<roundup.hyperdb.String>'),
+                          ('keyword', '<roundup.hyperdb.Multilink to "keyword">'),
+                          ('title', '<roundup.hyperdb.String>'),
+                          ('nosy', '<roundup.hyperdb.Multilink to "user">'),
+                          ('messages', '<roundup.hyperdb.Multilink to "msg">'), 
+                          ('priority', '<roundup.hyperdb.Link to "priority">'),
+                          ('assignedto', '<roundup.hyperdb.Link to "user">'),
+                          ('superseder', '<roundup.hyperdb.Multilink to "issue">')]}
+
+        results = self.server.schema()
+        self.assertEqual(results, schema)
+
+    def testLookup(self):
+        self.assertRaises(KeyError, self.server.lookup, 'user', '1')
+        results = self.server.lookup('user', 'admin')
+        self.assertEqual(results, '1')
+
     def testAction(self):
         # As this action requires special previledges, we temporarily switch
         # to 'admin'
@@ -104,6 +159,13 @@ class TestCase(unittest.TestCase):
             self.db.setCurrentUser('joe')
         users_after = self.server.list('user')
         self.assertEqual(users_before, users_after)
+
+        # test a bogus action
+        with self.assertRaises(Exception) as cm:
+            self.server.action('bogus')
+        print cm.exception
+        self.assertEqual(cm.exception.message,
+                         'action "bogus" is not supported ')
 
     def testAuthDeniedEdit(self):
         # Wrong permissions (caught by roundup security module).
@@ -119,7 +181,7 @@ class TestCase(unittest.TestCase):
         try:
             try:
                 self.server.set('user2', 'realname=someone')
-            except Unauthorised, err:
+            except Unauthorised as err:
                 self.fail('raised %s'%err)
         finally:
             self.db.setCurrentUser('joe')
@@ -129,7 +191,7 @@ class TestCase(unittest.TestCase):
         try:
             try:
                 self.server.create('user', 'username=blah')
-            except Unauthorised, err:
+            except Unauthorised as err:
                 self.fail('raised %s'%err)
         finally:
             self.db.setCurrentUser('joe')
@@ -137,18 +199,21 @@ class TestCase(unittest.TestCase):
     def testAuthFilter(self):
         # this checks if we properly check for search permissions
         self.db.security.permissions = {}
+        # self.db.security.set_props_only_default(props_only=False)
         self.db.security.addRole(name='User')
         self.db.security.addRole(name='Project')
         self.db.security.addPermissionToRole('User', 'Web Access')
         self.db.security.addPermissionToRole('Project', 'Web Access')
         # Allow viewing keyword
         p = self.db.security.addPermission(name='View', klass='keyword')
+        print "View keyword class: %r"%p
         self.db.security.addPermissionToRole('User', p)
         # Allow viewing interesting things (but not keyword) on issue
         # But users might only view issues where they are on nosy
         # (so in the real world the check method would be better)
         p = self.db.security.addPermission(name='View', klass='issue',
             properties=("title", "status"), check=lambda x,y,z: True)
+        print "View keyword class w/ props: %r"%p
         self.db.security.addPermissionToRole('User', p)
         # Allow role "Project" access to whole issue
         p = self.db.security.addPermission(name='View', klass='issue')
@@ -177,10 +242,12 @@ class TestCase(unittest.TestCase):
         # this might check for keyword owner in the real world)
         p = self.db.security.addPermission(name='View', klass='issue',
             check=lambda x,y,z: False)
+        print "View issue class: %r"%p
         self.db.security.addPermissionToRole('User', p)
         # Allow user to search for issue.status
         p = self.db.security.addPermission(name='Search', klass='issue',
             properties=("status",))
+        print "View Search class w/ props: %r"%p
         self.db.security.addPermissionToRole('User', p)
 
         keyw = {'keyword':self.db.keyword.lookup('d1')}
@@ -247,14 +314,20 @@ class TestCase(unittest.TestCase):
         for n, r in enumerate(result):
             self.assertEqual(r, results[n])
 
-def test_suite():
-    suite = unittest.TestSuite()
-    for l in list_backends():
-        dct = dict(backend = l)
-        subcls = type(TestCase)('TestCase_%s'%l, (TestCase,), dct)
-        suite.addTest(unittest.makeSuite(subcls))
-    return suite
 
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
+class anydbmXmlrpcTest(XmlrpcTest, unittest.TestCase):
+    backend = 'anydbm'
+
+
+@skip_mysql
+class mysqlXmlrpcTest(XmlrpcTest, unittest.TestCase):
+    backend = 'mysql'
+
+
+class sqliteXmlrpcTest(XmlrpcTest, unittest.TestCase):
+    backend = 'sqlite'
+
+
+@skip_postgresql
+class postgresqlXmlrpcTest(XmlrpcTest, unittest.TestCase):
+    backend = 'postgresql'

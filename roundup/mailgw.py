@@ -31,14 +31,6 @@ Incoming messages are examined for multiple parts:
    special handling of the first text part) if unpack_rfc822 is set in
    the mailgw config section.
 
-Summary
--------
-The "summary" property on message nodes is taken from the first non-quoting
-section in the message body. The message body is divided into sections by
-blank lines. Sections where the second and all subsequent lines begin with
-a ">" or "|" character are considered "quoting sections". The first line of
-the first non-quoting section becomes the summary of the message.
-
 Addresses
 ---------
 All of the addresses in the To: and Cc: headers of the incoming message are
@@ -54,10 +46,26 @@ nodes with no passwords.
 
 Actions
 -------
-The subject line of the incoming message is examined to determine whether
-the message is an attempt to create a new item or to discuss an existing
-item. A designator enclosed in square brackets is sought as the first thing
-on the subject line (after skipping any "Fwd:" or "Re:" prefixes).
+The subject line of the incoming message is examined to determine
+whether the message is an attempt to create a new item, discuss an
+existing item, or execute some other command.
+
+If the subject consists of one of the following (case insensitive),
+the corresponding action is taken:
+
+help
+  Respond with an explanation of this interface.
+
+If the subject contains the following, the corresponding action is
+taken:
+
+-- key <OneTimeKey>
+  Complete an in-progress user registration.
+
+If the email is not a command, it is either a new item or a message
+associated with an existing item.  A designator enclosed in square
+brackets is sought as the first thing on the subject line (after
+skipping any "Fwd:" or "Re:" prefixes).
 
 If an item designator (class name and id number) is found there, the newly
 created "msg" node is added to the "messages" property for that item, and
@@ -67,6 +75,14 @@ If just an item class name is found there, we attempt to create a new item
 of that class with its "messages" property initialized to contain the new
 "msg" node and its "files" property initialized to contain any new "file"
 nodes.
+
+Summary
+-------
+The "summary" property on message nodes is taken from the first non-quoting
+section in the message body. The message body is divided into sections by
+blank lines. Sections where the second and all subsequent lines begin with
+a ">" or "|" character are considered "quoting sections". The first line of
+the first non-quoting section becomes the summary of the message.
 
 Triggers
 --------
@@ -103,15 +119,15 @@ class MailGWError(ValueError):
 class MailUsageError(ValueError):
     pass
 
-class MailUsageHelp(Exception):
+class MailUsageHelp(BaseException):
     """ We need to send the help message to the user. """
     pass
 
-class Unauthorized(Exception):
+class Unauthorized(BaseException):
     """ Access denied """
     pass
 
-class IgnoreMessage(Exception):
+class IgnoreMessage(BaseException):
     """ A general class of message that we should ignore. """
     pass
 class IgnoreBulk(IgnoreMessage):
@@ -176,17 +192,17 @@ def check_pgp_sigs(sigs, gpgctx, author, may_be_unsigned=False):
                 # try to narrow down the actual problem to give a more useful
                 # message in our bounce
                 if sig.summary & pyme.constants.sigsum.KEY_MISSING:
-                    raise MailUsageError, \
-                        _("Message signed with unknown key: %s") % sig.fpr
+                    raise MailUsageError( \
+                        _("Message signed with unknown key: %s") % sig.fpr)
                 elif sig.summary & pyme.constants.sigsum.KEY_EXPIRED:
-                    raise MailUsageError, \
-                        _("Message signed with an expired key: %s") % sig.fpr
+                    raise MailUsageError( \
+                        _("Message signed with an expired key: %s") % sig.fpr)
                 elif sig.summary & pyme.constants.sigsum.KEY_REVOKED:
-                    raise MailUsageError, \
-                        _("Message signed with a revoked key: %s") % sig.fpr
+                    raise MailUsageError( \
+                        _("Message signed with a revoked key: %s") % sig.fpr)
                 else:
-                    raise MailUsageError, \
-                        _("Invalid PGP signature detected.")
+                    raise MailUsageError( \
+                        _("Invalid PGP signature detected."))
 
     # we couldn't find a key belonging to the author of the email
     if sigs:
@@ -540,8 +556,12 @@ class parsedMessage:
         self.has_prefix = False
         self.matches = dict.fromkeys(['refwd', 'quote', 'classname',
                                  'nodeid', 'title', 'args', 'argswhole'])
-        self.from_list = message.getaddrlist('resent-from') \
-                         or message.getaddrlist('from')
+        self.keep_real_from = self.config['EMAIL_KEEP_REAL_FROM']
+        if self.keep_real_from:
+            self.from_list = message.getaddrlist('from')
+        else:
+            self.from_list = message.getaddrlist('resent-from') \
+                          or message.getaddrlist('from')
         self.pfxmode = self.config['MAILGW_SUBJECT_PREFIX_PARSING']
         self.sfxmode = self.config['MAILGW_SUBJECT_SUFFIX_PARSING']
         # these are filled in by subsequent parsing steps
@@ -632,33 +652,33 @@ Emails to Roundup trackers must include a Subject: line!
 
             tmpsubject = tmpsubject[m.end():]
 
-        # Match the title of the subject
-        # if we've not found a valid classname prefix then force the
-        # scanning to handle there being a leading delimiter
-        title_re = r'(?P<title>%s[^%s]*)'%(
-            not self.matches['classname'] and '.' or '', delim_open)
-        m = re.match(title_re, tmpsubject.strip(), re.IGNORECASE)
-        if m:
-            self.matches.update(m.groupdict())
-            tmpsubject = tmpsubject[len(self.matches['title']):] # Consume title
-
-        if self.matches['title']:
-            self.matches['title'] = self.matches['title'].strip()
-        else:
-            self.matches['title'] = ''
-
-        # strip off the quotes that dumb emailers put around the subject, like
-        #      Re: "[issue1] bla blah"
-        if self.matches['quote'] and self.matches['title'].endswith('"'):
-            self.matches['title'] = self.matches['title'][:-1]
-        
-        # Match any arguments specified
-        args_re = r'(?P<argswhole>%s(?P<args>.+?)%s)?'%(delim_open,
-            delim_close)
+        # Match any arguments specified *from the end*
+        # Optionally match and strip quote at the end that dumb mailers
+        # may put there, e.g.
+        #      Re: "[issue1] bla blah [<args>]"
+        q = ''
+        if self.matches['quote']:
+            q = '"?'
+        args_re = r'(?P<argswhole>%s(?P<args>[^%s]*)%s)%s$'%(delim_open,
+            delim_close, delim_close, q)
         m = re.search(args_re, tmpsubject.strip(), re.IGNORECASE|re.VERBOSE)
         if m:
             self.matches.update(m.groupdict())
+            tmpsubject = tmpsubject [:m.start()]
+        else:
+            self.matches['argswhole'] = self.matches['args'] = None
 
+        # The title of the subject is the remaining tmpsubject.
+        self.matches ['title'] = tmpsubject.strip ()
+
+        # strip off the quotes that dumb emailers put around the subject, like
+        #      Re: "[issue1] bla blah"
+        # but only if we didn't match arguments at the end (which would
+        # already have consumed the quote after the subject)
+        if self.matches['quote'] and not self.matches['argswhole'] \
+           and self.matches['title'].endswith('"'):
+            self.matches['title'] = self.matches['title'][:-1]
+        
     def rego_confirm(self):
         ''' Check for registration OTK and confirm the registration if found
         '''
@@ -1118,9 +1138,8 @@ encrypted.""")
 Roundup requires the submission to be plain text. The message parser could
 not find a text/plain part to use.
 """)
-
         # parse the body of the message, stripping out bits as appropriate
-        summary, content = parseContent(self.content, config=self.config)
+        summary, content = parseContent(self.content, config=self.config, is_new_issue = not bool(self.nodeid))
         content = content.strip()
 
         if content:
@@ -1133,11 +1152,11 @@ not find a text/plain part to use.
                     recipients=self.recipients, date=date.Date('.'),
                     summary=summary, content=content,
                     messageid=messageid, inreplyto=inreplyto, **self.msg_props)
-            except exceptions.Reject, error:
-                raise MailUsageError, _("""
+            except exceptions.Reject as error:
+                raise MailUsageError(_("""
 Mail message was rejected by a detector.
 %(error)s
-""") % locals()
+""") % locals())
             # allowed to attach the message to the existing node?
             if self.nodeid and not self.db.security.hasPermission('Edit',
                     self.author, self.classname, 'messages'):
@@ -1177,7 +1196,8 @@ Mail message was rejected by a detector.
                             'property %(prop)s of class %(classname)s.'
                             ) % locals()
                 self.nodeid = self.cl.create(**self.props)
-        except (TypeError, IndexError, ValueError, exceptions.Reject), message:
+        except (TypeError, IndexError, ValueError, exceptions.Reject) as message:
+            self.mailgw.logger.exception("Rejecting email due to node creation error:")
             raise MailUsageError, _("""
 There was a problem with the message you sent:
    %(message)s
@@ -1353,7 +1373,7 @@ class MailGW:
                 server.login_cram_md5(user, password)
             else:
                 server.login(user, password)
-        except imaplib.IMAP4.error, e:
+        except imaplib.IMAP4.error as e:
             self.logger.exception('IMAP login failure')
             return 1
 
@@ -1368,7 +1388,7 @@ class MailGW:
                 return 1
             try:
                 numMessages = int(data[0])
-            except ValueError, value:
+            except ValueError as value:
                 self.logger.error('Invalid message count from mailbox %r'%
                     data[0])
                 return 1
@@ -1469,7 +1489,7 @@ class MailGW:
         self.parsed_message = None
         crypt = False
         sendto = message.getaddrlist('resent-from')
-        if not sendto:
+        if not sendto or self.instance.config['EMAIL_KEEP_REAL_FROM']:
             sendto = message.getaddrlist('from')
         if not sendto:
             # very bad-looking message - we don't even know who sent it
@@ -1499,14 +1519,16 @@ class MailGW:
             return self.handle_message(message)
         except MailUsageHelp:
             # bounce the message back to the sender with the usage message
+            self.logger.debug("MailUsageHelp raised, bouncing.")
             fulldoc = '\n'.join(string.split(__doc__, '\n')[2:])
             m = ['']
             m.append('\n\nMail Gateway Help\n=================')
             m.append(fulldoc)
             self.mailer.bounce_message(message, [sendto[0][1]], m,
                 subject="Mail Gateway Help")
-        except MailUsageError, value:
+        except MailUsageError as value:
             # bounce the message back to the sender with the usage message
+            self.logger.debug("MailUsageError raised, bouncing.")
             fulldoc = '\n'.join(string.split(__doc__, '\n')[2:])
             m = ['']
             m.append(str(value))
@@ -1516,8 +1538,9 @@ class MailGW:
                 message = self.parsed_message.message
                 crypt = self.parsed_message.crypt
             self.mailer.bounce_message(message, [sendto[0][1]], m, crypt=crypt)
-        except Unauthorized, value:
+        except Unauthorized as value:
             # just inform the user that he is not authorized
+            self.logger.debug("Unauthorized raised, bouncing.")
             m = ['']
             m.append(str(value))
             if self.parsed_message:
@@ -1665,7 +1688,7 @@ def setPropArrayFromString(self, cl, propString, nodeid=None):
         # extract the property name and value
         try:
             propname, value = prop.split('=')
-        except ValueError, message:
+        except ValueError as message:
             errors.append(_('not of form [arg=value,value,...;'
                 'arg=value,value,...]'))
             return (errors, props)
@@ -1674,7 +1697,7 @@ def setPropArrayFromString(self, cl, propString, nodeid=None):
         try:
             props[propname] = hyperdb.rawToHyperdb(self.db, cl, nodeid,
                 propname, value)
-        except hyperdb.HyperdbValueError, message:
+        except hyperdb.HyperdbValueError as message:
             errors.append(str(message))
     return errors, props
 
@@ -1761,7 +1784,7 @@ def uidFromAddress(db, address, create=1, **user_props):
     else:
         return 0
 
-def parseContent(content, keep_citations=None, keep_body=None, config=None):
+def parseContent(content, keep_citations=None, keep_body=None, config=None, is_new_issue=False):
     """Parse mail message; return message summary and stripped content
 
     The message body is divided into sections by blank lines.
@@ -1785,8 +1808,30 @@ def parseContent(content, keep_citations=None, keep_body=None, config=None):
         config = configuration.CoreConfig()
     if keep_citations is None:
         keep_citations = config["MAILGW_KEEP_QUOTED_TEXT"]
+        if keep_citations == "new":
+            # don't strip citations if we are a new issue
+            if is_new_issue:
+                keep_citations = True
+            else:
+                keep_citations = False
+        elif keep_citations == "yes":
+            keep_citations = True
+        else:
+            keep_citations = False
+
     if keep_body is None:
         keep_body = config["MAILGW_LEAVE_BODY_UNCHANGED"]
+        if keep_body == "new":
+            # don't strip citations if we are a new issue
+            if is_new_issue:
+                keep_body = True
+            else:
+                keep_body = False
+        elif keep_body == "yes":
+            keep_body = True
+        else:
+            keep_body = False
+
     eol = config["MAILGW_EOL_RE"]
     signature = config["MAILGW_SIGN_RE"]
     original_msg = config["MAILGW_ORIGMSG_RE"]

@@ -87,6 +87,8 @@ section "ConfigParser -- Configuration file parser":
 
 __ http://docs.python.org/lib/module-ConfigParser.html
 
+Example configuration settings are below.
+ 
 Section **main**
  database -- ``db``
   Database directory path. The path may be either absolute or relative
@@ -94,15 +96,16 @@ Section **main**
 
  templates -- ``html``
   Path to the HTML templates directory. The path may be either absolute
-  or relative to the directory containig this config file.
+  or relative to the directory containing this config file.
 
  static_files -- default *blank*
-  Path to directory holding additional static files available via Web
-  UI.  This directory may contain sitewide images, CSS stylesheets etc.
-  and is searched for these files prior to the TEMPLATES directory
-  specified above.  If this option is not set, all static files are
-  taken from the TEMPLATES directory The path may be either absolute or
-  relative to the directory containig this config file.
+  A list of space separated directory paths (or a single directory).
+  These directories hold additional static files available via Web UI.
+  These directories may contain sitewide images, CSS stylesheets etc. If
+  a '-' is included, the list processing ends and the TEMPLATES
+  directory is not searched after the specified directories.  If this
+  option is not set, all static files are taken from the TEMPLATES
+  directory.
 
  admin_email -- ``roundup-admin``
   Email address that roundup will complain to if it runs into trouble. If
@@ -161,6 +164,14 @@ Section **main**
 
  umask -- ``02``
   Defines the file creation mode mask.
+
+ csv_field_size -- ``131072``
+  Maximum size of a csv-field during import. Roundups export
+  format is a csv (comma separated values) variant. The csv
+  reader has a limit on the size of individual fields
+  starting with python 2.5. Set this to a higher value if you
+  get the error 'Error: field larger than field limit' during
+  import.
 
 Section **tracker**
  name -- ``Roundup issue tracker``
@@ -451,7 +462,8 @@ Section **nosy**
 
 
 You may generate a new default config file using the ``roundup-admin
-genconfig`` command.
+genconfig`` command. You can generate a new config file merging in
+existing settings using the ``roundup-admin updateconfig`` command.
 
 Configuration variables may be referred to in lower or upper case. In code,
 variables not in the "main" section are referred to using their section and
@@ -647,13 +659,122 @@ A Class is comprised of one or more properties of the following types:
   class.
 * Date properties store date-and-time stamps. Their values are Timestamp
   objects.
-* Number properties store numeric values.
+* Integer properties store integer values. (Number can store real/float values.)
+* Number properties store numeric values. There is an option to use
+  double-precision floating point numbers.
 * Boolean properties store on/off, yes/no, true/false values.
 * A Link property refers to a single other item selected from a
   specified class. The class is part of the property; the value is an
   integer, the id of the chosen item.
 * A Multilink property refers to possibly many items in a specified
   class. The value is a list of integers.
+
+Properties can have additional attributes to change the default
+behaviour:
+
+* All properties support the following attributes:
+
+   - ``required``: see `design documentation`_. Adds the property to
+     the list returned by calling get_required_props for the class.
+   - ``default_value``: see `design documentation`_ Sets the default
+     value is the property is not set.
+   - ``quiet``: see `design documentation`_. Suppresses user visible
+     to changes to this property. The property change is not reported:
+
+      - in the change feedback/confirmation message in the web
+        interface
+      - the property change section of the nosy email
+      - the web history at the bottom of an item's page
+
+    This can be used to store state of the user interface (e.g. the
+    names of elements that are collapsed or hidden from the
+    user). Making properties that are updated as an indirect result of
+    a user's change (e.g. updating a blockers property, counting
+    number of times an issue was reopened or reassigned etc.) should
+    not be displayed to the user as they can be confusing.
+
+* String properties can have an ``indexme`` attribute that defines if the
+  property should be part of the full text index. The default is 'no' but this
+  can be set to 'yes' to allow a property's contents to be in the full
+  text index.
+* Number properties can have a ``use_double`` attribute that, when set
+  to ``True``, will use double precision floating point in the database.
+* Link and Multilink properties can have several attributes:
+  
+  - ``do_journal``: By default, every change of a link property is
+    recorded in the item being linked to (or being unlinked). A typical
+    use-case for setting ``do_journal='no'`` would be to turn off
+    journalling of nosy list, message author and message recipient link
+    and unlink events to prevent the journal from clogged with these
+    events.
+  - ``try_id_parsing`` is turned on by default. If entering a number
+    into a Link or Multilink field, roundup interprets this number as an
+    ID of the item to link to. Sometimes items can have numeric names
+    (like, e.g., product codes). For these roundup needs to match the
+    numeric name and should never match an ID. In this case you can set
+    ``try_id_parsing='no'``.
+  - The ``msg_header_property`` is used by the mail gateway when sending
+    out messages. When a link or multilink property of an issue changes,
+    roundup creates email headers of the form::
+
+        X-Roundup-issue-prop: value
+
+    where ``value`` is the ``name`` property for the linked item(s).
+    For example, if you have a multilink for attached_files in your
+    issue, you will see a header::
+
+        X-Roundup-issue-attached_files: MySpecialFile.doc, HisResume.txt
+
+    when the class for attached files is defined as::
+
+       file = FileClass(db, "file",
+                name=String())
+
+    ``MySpecialFile.doc`` is the name for the file object.
+
+    If you have an ``assigned_to`` property in your issue class that
+    links to the user class and you want to add a header::
+
+        X-Roundup-issue-assigned_to: ...
+
+    so that the mail recipients can filter emails where
+    ``X-Roundup-issue-assigned_to: name`` that contains their
+    username. The user class is defined as::
+
+       user = Class(db, "user",
+                username=String(),
+                password=Password(),
+                address=String(),
+                realname=String(),
+                phone=String(),
+                organisation=String(),
+                alternate_addresses=String(),
+                queries=Multilink('query'),
+                roles=String(),     # comma-separated string of Role names
+                timezone=String())
+
+    Because there is no ``name`` parameter for the user class, there
+    will be no header. However setting::
+
+       assigned_to=Link("user", msg_header_property="username")
+
+    will make the mail gateway generate an ``X-Roundup-issue-assigned_to``
+    using the username property of the linked user.
+
+    Assume assigned_to for an issue is linked to the user with
+    username=joe_user, setting::
+
+        msg_header_property="username"
+
+    for the assigned_to property will generated message headers of the
+    form::
+
+        X-Roundup-issue-assigned_to: joe_user
+
+    for emails sent on issues where joe_user has been assigned to the issue.
+
+    If this property is set to the empty string "", it will prevent
+    the header from being generated on outgoing mail.
 
 All Classes automatically have a number of properties by default:
 
@@ -765,8 +886,9 @@ A note about ordering
 When we sort items in the hyperdb, we use one of a number of methods,
 depending on the properties being sorted on:
 
-1. If it's a String, Number, Date or Interval property, we just sort the
-   scalar value of the property. Strings are sorted case-sensitively.
+1. If it's a String, Integer, Number, Date or Interval property, we
+   just sort the scalar value of the property. Strings are sorted
+   case-sensitively.
 2. If it's a Link property, we sort by either the linked item's "order"
    property (if it has one) or the linked item's "id".
 3. Mulitlinks sort similar to #2, but we start with the first Multilink
@@ -928,7 +1050,13 @@ To use, simply add at the top of your auditor::
 
 And then when your rejection criteria have been detected, simply::
 
-   raise Reject
+   raise Reject('Description of error')
+
+Error messages raised with ``Reject`` automatically have any HTML content
+escaped before being displayed to the user. To display an error message to the
+user without performing any HTML escaping the ``RejectRaw`` should be used. All
+security implications should be carefully considering before using
+``RejectRaw``.
 
 
 Generating email from Roundup
@@ -1080,7 +1208,7 @@ Put together, these settings appear in the tracker's ``schema.py`` file::
     # Users should be able to edit their own details -- this permission
     # is limited to only the situation where the Viewed or Edited item
     # is their own.
-    def own_record(db, userid, itemid):
+    def own_record(db, userid, itemid, **ctx):
         '''Determine whether the userid matches the item being accessed.'''
         return userid == itemid
     p = db.security.addPermission(name='View', klass='user', check=own_record,
@@ -1177,7 +1305,7 @@ When adding a new Permission, you will need to:
 1. add it to your tracker's ``schema.py`` so it is created, using
    ``security.addPermission``, for example::
 
-    self.security.addPermission(name="View", klass='frozzle',
+    db.security.addPermission(name="View", klass='frozzle',
         description="User is allowed to access frozzles")
 
    will set up a new "View" permission on the Class "frozzle".
@@ -1187,18 +1315,68 @@ When adding a new Permission, you will need to:
 4. add it to the appropriate xxxPermission methods on in your tracker
    interfaces module
 
-The ``addPermission`` method takes a couple of optional parameters:
+The ``addPermission`` method takes a few optional parameters:
 
 **properties**
   A sequence of property names that are the only properties to apply the
   new Permission to (eg. ``... klass='user', properties=('name',
   'email') ...``)
+**props_only**
+  A boolean value (set to false by default) that is a new feature
+  in roundup 1.6.
+  A permission defined using:
+
+     ``properties=('list', 'of', 'property', 'names')``
+
+  is used to determine access for things other than just those
+  properties. For example a check for View permission on the issue
+  class or an issue item can use any View permission for the issue
+  class even if that permission has a property list.  This can be
+  confusing and surprising as you would think that a permission
+  including properties would be used only for determining the
+  access permission for those properties.
+
+  Setting ``props_only=True`` will make the permission valid only for
+  those properties.
+
+  If you use a lot of permissions with property checks, it can be
+  difficult to change all of them. Calling the function:
+
+    db.security.set_props_only_default(True)
+
+  at the top of ``schema.py`` will make every permission creation
+  behave as though props_only was set to True. It is expected that the
+  default of True will become the default in a future Roundup release.
 **check**
-  A function to be execute which returns boolean determining whether the
-  Permission is allowed. The function has the signature ``check(db, userid,
-  itemid)`` where ``db`` is a handle on the open database, ``userid`` is
+  A function to be executed which returns boolean determining whether
+  the Permission is allowed. If it returns True, the permission is
+  allowed, if it returns False the permission is denied.  The function
+  can have one of two signatures::
+
+     check(db, userid, itemid)
+
+  or::
+
+     check(db, userid, itemid, **ctx)
+
+  where ``db`` is a handle on the open database, ``userid`` is
   the user attempting access and ``itemid`` is the specific item being
-  accessed.
+  accessed. If the second form is used the ``ctx`` dictionary is
+  defined with the following values::
+
+     ctx['property'] the name of the property being checked or None if
+            it's a class check.
+
+     ctx['classname'] the name of the class that is being checked
+            (issue, query ....).
+
+     ctx['permission'] the name of the permission (e.g. View, Edit...).
+
+The second form is preferred as it makes it easier to implement more
+complex permission schemes. An example of the use of ``ctx`` can be
+found in the ``upgrading.txt`` or `upgrading.html`_ document.
+
+.. _`upgrading.html`: upgrading.html
 
 Example Scenarios
 ~~~~~~~~~~~~~~~~~
@@ -1384,7 +1562,7 @@ Neither b. or e. use templates and stop before the template is
 determined. For other contexts the template used is specified by the
 ``@template`` variable, which defaults to:
 
-- only classname suplied:        "index"
+- only classname supplied:       "index"
 - full item designator supplied: "item"
 
 
@@ -1439,7 +1617,10 @@ of:
 
 **new**
  Add a new item to the database. You may use the same `special form
- variables`_ as in the "edit" action.
+ variables`_ as in the "edit" action. Also you can set the
+ ``__redirect_to`` form variable to the URL that should be displayed after
+ the new item is created. This is useful if you want to create another
+ item rather than edit the newly created item.
 
 **retire**
  Retire the item in the database.
@@ -1490,6 +1671,54 @@ for each action are:
 **search**
  Determine whether the user has permission to view this class.
 
+Protecting users from web application attacks
+---------------------------------------------
+
+There is a class of attacks known as Cross Site Request Forgeries
+(CSRF). Malicious code running in the browser can making a
+request to roundup while you are logged into roundup.  The
+malicious code piggy backs on your existing roundup session to
+make changes without your knowledge. Roundup 1.6 has support for
+defending against this by analyzing the
+
+* Referer,
+* Origin, and
+* Host or 
+* X-Forwarded-Host
+
+HTTP headers. It compares the headers to the value of the web setting
+in the [tracker] section of the tracker's ``config.ini``.
+
+Also a per form token (also called a nonce) can be enabled for
+the tracker using the ``csrf_enforce_token`` option in
+config.ini.  When enabled, roundup will validate a hidden form
+field called ``@csrf``. If the validation fails (or the token
+is used more than one) the request is rejected.  The ``@csrf``
+input field is added automatically by calling the ``submit``
+function/path. It can also be added manually by calling
+anti_csrf_nonce() directly. For example:
+
+   <input name="@csrf" type="hidden"
+      tal:attributes="value python:utils.anti_csrf_nonce(lifetime=10)">
+
+By default a nonce lifetime is 2 weeks. However the lifetime (in
+minutes) can be set by passing a lifetime argument as shown
+above. The example above makes the nonce lifetime 10 minutes.
+ 
+Search for @csrf in this document for more examples. There are
+more examples and information in ``upgrading.txt``.
+
+The token protects you because malicious code supplied by another
+site is unable to obtain the token. Thus many attempts they make
+to submit a request are rejected.
+
+The protection on the xmlrpc interface is untested, but is based
+on a valid header check against the roundup url and the presence
+of the ``X-REQUESTED-WITH`` header. Work to improve this is a
+future project after the 1.6 release.
+
+The enforcement levels an be modified in ``config.ini``. Refer to
+that file for details.
 
 Special form variables
 ----------------------
@@ -1505,6 +1734,9 @@ variables and their values. You can:
 - Remove items from a multilink property of the current item.
 - Specify that some properties are required for the edit
   operation to be successful.
+- Redirect to a different page after creating a new item (new action
+  only, not edit action). Usually you end up on the page for the
+  created item.
 - Set up user interface locale.
 
 These operations will only take place if the form action (the
@@ -1605,12 +1837,20 @@ None of the above (ie. just a simple form value)
     they are valid for the class).  Otherwise, the property
     is set to the form value.
 
-    For Date(), Interval(), Boolean(), and Number()
+    For Date(), Interval(), Boolean(), Integer() and Number()
     properties, the form value is converted to the
     appropriate
 
 Any of the form variables may be prefixed with a classname or
 designator.
+
+Setting the form variable: ``__redirect_to=`` to a url when
+@action=new redirects the user to the specified url after successfully
+creating the new item. This is useful if you want the user to create
+another item rather than edit the newly created item.  Note that the
+url assigned to ``__redirect_to`` must be url encoded/quoted and be
+under the tracker's base url. If the base_url uses http, you can set
+the url to https.
 
 Two special form values are supported for backwards compatibility:
 
@@ -1697,6 +1937,57 @@ access the test template using the "@template" URL argument::
    http://your.tracker.example/tracker/issue?@template=test
 
 and it won't affect your users using the "issue.item" template.
+
+You can also put templates into a subdirectory of the template
+directory. So if you specify::
+
+   http://your.tracker.example/tracker/issue?@template=test/item
+
+you will use the template at: ``test/issue.item.html``. If that
+template doesn't exit it will try to use
+``test/_generic.item.html``. If that template doesn't exist
+it will return an error.
+
+Implementing Modal Editing Using @template
+------------------------------------------
+
+Many item templates allow you to edit the item. They contain
+code that renders edit boxes if the user has edit permissions.
+Otherwise the template will just display the item information.
+
+In some cases you want to do a modal edit. The user has to take some
+action (click a button or follow a link) to shift from display mode to
+edit mode. When the changes are submitted, ending the edit mode,
+the user is returned to display mode.
+
+Modal workflows usually slow things down and are not implemented by
+default templates. However for some workflows a modal edit is useful.
+For example a batch edit mode that allows the user to edit a number of
+issues all from one form could be implemented as a modal workflow of:
+
+* search for issues to modify
+* switch to edit mode and change values
+* exit back to the results of the search
+
+To implement the modal edit, assume you have an issue.edit.html
+template that implements an edit form.  On the display page (a version
+of issue.item.html modified to only display information) add a link
+that calls the display url, but adds ``@template=edit`` to the link.
+
+This will now display the edit page. On the edit page you want to add
+a hidden text field to your form named ``@template`` with the value:
+``item|edit``.  When the form is submitted it is validated. If the
+form is correct the user will see the item rendered using the item
+template. If there is an error (validation failed) the item will be
+rendered using the edit template. The edit template that is rendered
+will display all the changes that the user made to the form before it
+was submitted. The user can correct the error and resubmit the changes
+until the form validates.
+
+If the form failed to validate but the ``@template`` field had the
+value ``item`` the user would still see the error, but all of the data
+the user entered would be discarded. The user would have to redo all
+the edits again.
 
 
 How the templates work
@@ -2088,12 +2379,13 @@ There are several methods available on these wrapper objects:
 Method      Description
 =========== =============================================================
 properties  return a `hyperdb property wrapper`_ for all of this class's
-            properties.
+            properties that are searchable by the user. You can use
+            the argument cansearch=False to get all properties.
 list        lists all of the active (not retired) items in the class.
 csv         return the items of this class as a chunk of CSV text.
 propnames   lists the names of the properties of this class.
 filter      lists of items from this class, filtered and sorted. Two
-            options are avaible for sorting:
+            options are available for sorting:
 
             1. by the current *request* filterspec/filter/sort/group args
             2. by the "filterspec", "sort" and "group" keyword args.
@@ -2150,7 +2442,7 @@ classhelp   display a link to a javascript popup containing this class'
             javascript help_window function - it's the name of the form
             the "property" belongs to.
 
-submit      generate a submit button (and action hidden element)
+submit      generate a submit button (and action and @csrf hidden elements)
 renderWith  render this class with the given template.
 history     returns 'New node - no history' :)
 is_edit_ok  is the user allowed to Edit the current class?
@@ -2183,10 +2475,15 @@ There are several methods available on these wrapper objects:
 =============== ========================================================
 Method          Description
 =============== ========================================================
-submit          generate a submit button (and action hidden element)
+submit          generate a submit button (and action and @csrf hidden elements)
 journal         return the journal of the current item (**not
                 implemented**)
-history         render the journal of the current item as HTML
+history         render the journal of the current item as
+                HTML. By default properties marked as "quiet" (see 
+		`design documentation`_) are not shown unless the
+		function is called with the showall=True parameter.
+		Properties that are not Viewable to the user are not
+		shown.
 renderQueryForm specific to the "query" class - render the search form
                 for the query
 hasPermission   specific to the "user" class - determine whether the
@@ -2313,6 +2610,9 @@ multiline   only on String properties - render a multiline form edit
             field for the property
 email       only on String properties - render the value of the property
             as an obscured email address
+url_quote   only on String properties. It quotes any characters in the
+            string so it is safe to use in a url. E.G. a space is
+            replaced with %20.
 confirm     only on Password properties - render a second form edit field
             for the property, used for confirmation that the user typed
             the password correctly. Generates a field with name
@@ -2936,6 +3236,13 @@ journal. This is generally generated with the template::
 
  <tal:block tal:replace="structure context/history" />
 
+or::
+
+   <tal:block
+       tal:replace="structure python:context.history(showall=True)" />
+
+if you want to show history entries for quiet properties.
+
 *To be done:*
 
 *The actual history entries of the item may be accessed for manual
@@ -3390,6 +3697,12 @@ Then a submit button so that the user can submit the new category::
       submit button will go here
      </td>
     </tr>
+
+The ``context/submit`` bit generates the submit button but also
+generates the @action and @csrf hidden fields. The @action field is
+used to tell roundup how to process the form. The @csrf field provides
+a unique single use token to defend against CSRF attacks. (More about
+anti-csrf measures can be found in ``upgrading.txt``.)
 
 Finally we finish off the tags we used at the start to do the METAL
 stuff::
@@ -4160,8 +4473,8 @@ vacation". Not very useful, and relatively easy to stop.
 
                     # send the message
                     cl.send_message(nodeid, msgid, note, sendto)
-            except roundupdb.MessageSendError, message:
-                raise roundupdb.DetectorError, message
+            except roundupdb.MessageSendError as message:
+                raise roundupdb.DetectorError(message)
 
    Note that this is the standard nosy reaction code, with the small
    addition of::
@@ -4612,9 +4925,9 @@ directory of your tracker::
 	   return
 
        # otherwise raise an error
-       raise Unauthorized, \
+       raise Unauthorized( \
 	   'Changes to nosy property not allowed via %s for this issue.'%\
-           tx_Source
+           tx_Source)
 	
    def init(db):
       ''' Install restrict_nosy_changes to run after other auditors. 
@@ -4878,16 +5191,21 @@ To edit the status of all items in the item index view, edit the
 
     <tr>
      <td tal:attributes="colspan python:len(request.columns)">
+      <input name="@csrf" type="hidden"		
+           tal:attributes="value python:utils.anti_csrf_nonce()">
       <input type="submit" value=" Save Changes ">
       <input type="hidden" name="@action" value="edit">
       <tal:block replace="structure request/indexargs_form" />
      </td>
     </tr>
 
-   which gives us a submit button, indicates that we are performing an edit
-   on any changed statuses. The final ``tal:block`` will make sure that the
-   current index view parameters (filtering, columns, etc) will be used in 
-   rendering the next page (the results of the editing).
+   which gives us a submit button, indicates that we are performing an
+   edit on any changed statuses, and provides a defense against cross
+   site request forgery attacks.
+
+   The final ``tal:block`` will make sure that the current index view
+   parameters (filtering, columns, etc) will be used in rendering the
+   next page (the results of the editing).
 
 
 Displaying only message summaries in the issue display
@@ -4970,6 +5288,8 @@ Setting up a "wizard" (or "druid") for controlled adding of issues
 
     <form method="POST" onSubmit="return submit_once()"
           enctype="multipart/form-data">
+       <input name="@csrf" type="hidden"
+          tal:attributes="value python:utils.anti_csrf_nonce()">
       <input type="hidden" name="@template" value="add_page1">
       <input type="hidden" name="@action" value="page1_submit">
 
@@ -4986,6 +5306,8 @@ Setting up a "wizard" (or "druid") for controlled adding of issues
           tal:condition="context/is_edit_ok"
           tal:define="cat request/form/category/value">
 
+      <input name="@csrf" type="hidden"
+          tal:attributes="value python:utils.anti_csrf_nonce()">
       <input type="hidden" name="@template" value="add_page2">
       <input type="hidden" name="@required" value="title">
       <input type="hidden" name="category" tal:attributes="value cat">

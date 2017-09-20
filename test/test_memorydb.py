@@ -33,37 +33,27 @@ class memorydbOpener:
         self.db = self.module.Database(config, 'admin')
         setupSchema(self.db, 0, self.module)
 
-class memorydbDBTest(memorydbOpener, DBTest):
+
+class memorydbDBTest(memorydbOpener, DBTest, unittest.TestCase):
     pass
 
-class memorydbROTest(memorydbOpener, ROTest):
+
+class memorydbROTest(memorydbOpener, ROTest, unittest.TestCase):
     def setUp(self):
         self.db = self.module.Database(config)
         setupSchema(self.db, 0, self.module)
 
-class memorydbSchemaTest(memorydbOpener, SchemaTest):
+
+class memorydbSchemaTest(memorydbOpener, SchemaTest, unittest.TestCase):
     pass
 
+
 from session_common import DBMTest
-class memorydbSessionTest(memorydbOpener, DBMTest):
+class memorydbSessionTest(memorydbOpener, DBMTest, unittest.TestCase):
     def setUp(self):
         self.db = self.module.Database(config, 'admin')
         setupSchema(self.db, 1, self.module)
         self.sessions = self.db.sessions
-
-def test_suite():
-    suite = unittest.TestSuite()
-    print 'Including memorydb tests'
-    suite.addTest(unittest.makeSuite(memorydbDBTest))
-    suite.addTest(unittest.makeSuite(memorydbROTest))
-    suite.addTest(unittest.makeSuite(memorydbSchemaTest))
-    suite.addTest(unittest.makeSuite(memorydbSessionTest))
-    return suite
-
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
-
 
 # vim: set filetype=python ts=4 sw=4 et si
 

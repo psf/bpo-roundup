@@ -28,7 +28,6 @@ import sys
 _modules = {
     'mysql': ('MySQLdb',),
     'postgresql': ('psycopg',),
-    'tsearch2': ('psycopg',),
     'sqlite': ('pysqlite', 'pysqlite2', 'sqlite3', '_sqlite3', 'sqlite'),
 }
 
@@ -46,13 +45,10 @@ def get_backend(name):
 
 def have_backend(name):
     '''Is backend "name" available?'''
-    if name == 'tsearch2':
-        # currently not working
-        return 0
     try:
         get_backend(name)
         return 1
-    except ImportError, e:
+    except ImportError as e:
         for name in _modules.get(name, (name,)):
             if str(e).startswith('No module named %s'%name):
                 return 0

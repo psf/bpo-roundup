@@ -11,21 +11,32 @@
 import unittest, os, shutil, errno, sys, difflib, cgi, re, StringIO
 
 from roundup.cgi import client, actions, exceptions
-from roundup.cgi.exceptions import FormError
-from roundup.cgi.templating import HTMLItem, HTMLRequest
+from roundup.cgi.exceptions import FormError, NotFound
+from roundup.exceptions import UsageError
+from roundup.cgi.templating import HTMLItem, HTMLRequest, NoTemplate, anti_csrf_nonce
+from roundup.cgi.templating import HTMLProperty, _HTMLItem
 from roundup.cgi.form_parser import FormParser
 from roundup import init, instance, password, hyperdb, date
+
+# For testing very simple rendering
+from roundup.cgi.engine_zopetal import RoundupPageTemplate
 
 from mocknull import MockNull
 
 import db_test_base
 
-NEEDS_INSTANCE = 1
-
 class FileUpload:
     def __init__(self, content, filename):
         self.content = content
         self.filename = filename
+
+class FileList:
+    def __init__(self, name, *files):
+        self.name  = name
+        self.files = files
+    def items (self):
+        for f in self.files:
+            yield (self.name, f)
 
 def makeForm(args):
     form = cgi.FieldStorage()
@@ -101,29 +112,40 @@ class FormTestCase(unittest.TestCase):
 
         test = self.instance.backend.Class(self.db, "test",
             string=hyperdb.String(), number=hyperdb.Number(),
-            boolean=hyperdb.Boolean(), link=hyperdb.Link('test'),
-            multilink=hyperdb.Multilink('test'), date=hyperdb.Date(),
-            messages=hyperdb.Multilink('msg'), interval=hyperdb.Interval())
+            intval=hyperdb.Integer(), boolean=hyperdb.Boolean(),
+            link=hyperdb.Link('test'), multilink=hyperdb.Multilink('test'),
+            date=hyperdb.Date(), messages=hyperdb.Multilink('msg'),
+            interval=hyperdb.Interval())
 
         # compile the labels re
         classes = '|'.join(self.db.classes.keys())
         self.FV_SPECIAL = re.compile(FormParser.FV_LABELS%classes,
             re.VERBOSE)
 
-    def parseForm(self, form, classname='test', nodeid=None):
+    def setupClient(self, form, classname, nodeid=None, template='item', env_addon=None):
         cl = client.Client(self.instance, None, {'PATH_INFO':'/',
             'REQUEST_METHOD':'POST'}, makeForm(form))
         cl.classname = classname
+        cl.base = 'http://whoami.com/path/'
         cl.nodeid = nodeid
         cl.language = ('en',)
+        cl.userid = '1'
         cl.db = self.db
+        cl.user = 'admin'
+        cl.template = template
+        if env_addon is not None:
+            cl.env.update(env_addon)
+        return cl
+
+    def parseForm(self, form, classname='test', nodeid=None):
+        cl = self.setupClient(form, classname, nodeid)
         return cl.parsePropsFromForm(create=1)
 
     def tearDown(self):
         self.db.close()
         try:
             shutil.rmtree(self.dirname)
-        except OSError, error:
+        except OSError as error:
             if error.errno not in (errno.ENOENT, errno.ESRCH): raise
 
     #
@@ -264,6 +286,33 @@ class FormTestCase(unittest.TestCase):
         self.assertEqual(self.parseForm({'content': file}, 'file'),
             ({('file', None): {'content': 'foo', 'name': 'foo.txt',
             'type': 'text/plain'}}, []))
+
+    def testSingleFileUpload(self):
+        file = FileUpload('foo', 'foo.txt')
+        self.assertEqual(self.parseForm({'@file': file}, 'issue'),
+            ({('file', '-1'): {'content': 'foo', 'name': 'foo.txt',
+            'type': 'text/plain'},
+              ('issue', None): {}},
+             [('issue', None, 'files', [('file', '-1')])]))
+
+    def testMultipleFileUpload(self):
+        f1 = FileUpload('foo', 'foo.txt')
+        f2 = FileUpload('bar', 'bar.txt')
+        f3 = FileUpload('baz', 'baz.txt')
+        files = FileList('@file', f1, f2, f3)
+
+        self.assertEqual(self.parseForm(files, 'issue'),
+            ({('file', '-1'): {'content': 'foo', 'name': 'foo.txt',
+               'type': 'text/plain'},
+              ('file', '-2'): {'content': 'bar', 'name': 'bar.txt',
+               'type': 'text/plain'},
+              ('file', '-3'): {'content': 'baz', 'name': 'baz.txt',
+               'type': 'text/plain'},
+              ('issue', None): {}},
+             [ ('issue', None, 'files', [('file', '-1')])
+             , ('issue', None, 'files', [('file', '-2')])
+             , ('issue', None, 'files', [('file', '-3')])
+             ]))
 
     def testEditFileClassAttributes(self):
         self.assertEqual(self.parseForm({'name': 'foo.txt',
@@ -590,6 +639,62 @@ class FormTestCase(unittest.TestCase):
             self.fail('number "no" raised "required missing"')
 
     #
+    # Integer
+    #
+    def testEmptyInteger(self):
+        self.assertEqual(self.parseForm({'intval': ''}),
+            ({('test', None): {}}, []))
+        self.assertEqual(self.parseForm({'intval': ' '}),
+            ({('test', None): {}}, []))
+        self.assertRaises(FormError, self.parseForm, {'intval': ['', '']})
+
+    def testInvalidInteger(self):
+        self.assertRaises(FormError, self.parseForm, {'intval': 'hi, mum!'})
+
+    def testSetInteger(self):
+        self.assertEqual(self.parseForm({'intval': '1'}),
+            ({('test', None): {'intval': 1}}, []))
+        self.assertEqual(self.parseForm({'intval': '0'}),
+            ({('test', None): {'intval': 0}}, []))
+        self.assertEqual(self.parseForm({'intval': '\n0\n'}),
+            ({('test', None): {'intval': 0}}, []))
+
+    def testSetIntegerReplaceOne(self):
+        nodeid = self.db.test.create(intval=1)
+        self.assertEqual(self.parseForm({'intval': '1'}, 'test', nodeid),
+            ({('test', nodeid): {}}, []))
+        self.assertEqual(self.parseForm({'intval': '0'}, 'test', nodeid),
+            ({('test', nodeid): {'intval': 0}}, []))
+
+    def testSetIntegerReplaceZero(self):
+        nodeid = self.db.test.create(intval=0)
+        self.assertEqual(self.parseForm({'intval': '0'}, 'test', nodeid),
+            ({('test', nodeid): {}}, []))
+
+    def testSetIntegerReplaceNone(self):
+        nodeid = self.db.test.create()
+        self.assertEqual(self.parseForm({'intval': '0'}, 'test', nodeid),
+            ({('test', nodeid): {'intval': 0}}, []))
+        self.assertEqual(self.parseForm({'intval': '1'}, 'test', nodeid),
+            ({('test', nodeid): {'intval': 1}}, []))
+
+    def testEmptyIntegerSet(self):
+        nodeid = self.db.test.create(intval=0)
+        self.assertEqual(self.parseForm({'intval': ''}, 'test', nodeid),
+            ({('test', nodeid): {'intval': None}}, []))
+        nodeid = self.db.test.create(intval=1)
+        self.assertEqual(self.parseForm({'intval': ' '}, 'test', nodeid),
+            ({('test', nodeid): {'intval': None}}, []))
+
+    def testRequiredInteger(self):
+        self.assertRaises(FormError, self.parseForm, {'intval': '',
+            ':required': 'intval'})
+        try:
+            self.parseForm({'intval': '0', ':required': 'intval'})
+        except FormError:
+            self.fail('intval "no" raised "required missing"')
+
+    #
     # Date
     #
     def testEmptyDate(self):
@@ -682,6 +787,349 @@ class FormTestCase(unittest.TestCase):
             'name': 'foo.txt', 'type': 'text/plain'}},
             [('issue', None, 'files', [('file', '-1')])]))
 
+    def testFormValuePreserveOnError(self):
+        page_template = """
+        <html>
+         <body>
+          <p tal:condition="options/error_message|nothing"
+             tal:repeat="m options/error_message"
+             tal:content="structure m"/>
+          <p tal:content="context/title/plain"/>
+          <p tal:content="context/priority/plain"/>
+          <p tal:content="context/status/plain"/>
+          <p tal:content="context/nosy/plain"/>
+          <p tal:content="context/keyword/plain"/>
+          <p tal:content="structure context/superseder/field"/>
+         </body>
+        </html>
+        """.strip ()
+        self.db.keyword.create (name = 'key1')
+        self.db.keyword.create (name = 'key2')
+        nodeid = self.db.issue.create (title = 'Title', priority = '1',
+            status = '1', nosy = ['1'], keyword = ['1'])
+        self.db.commit ()
+        form = {':note': 'msg-content', 'title': 'New title',
+            'priority': '2', 'status': '2', 'nosy': '1,2', 'keyword': '',
+            'superseder': '5000', ':action': 'edit'}
+        cl = self.setupClient(form, 'issue', '1',
+                env_addon = {'HTTP_REFERER': 'http://whoami.com/path/'})
+        pt = RoundupPageTemplate()
+        pt.pt_edit(page_template, 'text/html')
+        out = []
+        def wh(s):
+            out.append(s)
+        cl.write_html = wh
+        # Enable the following if we get a templating error:
+        #def send_error (*args, **kw):
+        #    import pdb; pdb.set_trace()
+        #cl.send_error_to_admin = send_error
+        # Need to rollback the database on error -- this usually happens
+        # in web-interface (and for other databases) anyway, need it for
+        # testing that the form values are really used, not the database!
+        # We do this together with the setup of the easy template above
+        def load_template(x):
+            cl.db.rollback()
+            return pt
+        cl.instance.templates.load = load_template
+        cl.selectTemplate = MockNull()
+        cl.determine_context = MockNull ()
+        def hasPermission(s, p, classname=None, d=None, e=None, **kw):
+            return True
+        actions.Action.hasPermission = hasPermission
+        e1 = _HTMLItem.is_edit_ok
+        _HTMLItem.is_edit_ok = lambda x : True
+        e2 = HTMLProperty.is_edit_ok
+        HTMLProperty.is_edit_ok = lambda x : True
+        cl.inner_main()
+        _HTMLItem.is_edit_ok = e1
+        HTMLProperty.is_edit_ok = e2
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out [0].strip (), """
+        <html>
+         <body>
+          <p>Edit Error: issue has no node 5000</p>
+          <p>New title</p>
+          <p>urgent</p>
+          <p>deferred</p>
+          <p>admin, anonymous</p>
+          <p></p>
+          <p><input type="text" name="superseder" value="5000" size="30"></p>
+         </body>
+        </html>
+        """.strip ())
+
+    def testCsrfProtection(self):
+        # need to set SENDMAILDEBUG to prevent
+        # downstream issue when email is sent on successful
+        # issue creation. Also delete the file afterwards
+        # just tomake sure that someother test looking for
+        # SENDMAILDEBUG won't trip over ours.
+        if not os.environ.has_key('SENDMAILDEBUG'):
+            os.environ['SENDMAILDEBUG'] = 'mail-test1.log'
+        SENDMAILDEBUG = os.environ['SENDMAILDEBUG']
+
+        page_template = """
+        <html>
+         <body>
+          <p tal:condition="options/error_message|nothing"
+             tal:repeat="m options/error_message"
+             tal:content="structure m"/>
+          <p tal:content="context/title/plain"/>
+          <p tal:content="context/priority/plain"/>
+          <p tal:content="context/status/plain"/>
+          <p tal:content="context/nosy/plain"/>
+          <p tal:content="context/keyword/plain"/>
+          <p tal:content="structure context/superseder/field"/>
+         </body>
+        </html>
+        """.strip ()
+        self.db.keyword.create (name = 'key1')
+        self.db.keyword.create (name = 'key2')
+        nodeid = self.db.issue.create (title = 'Title', priority = '1',
+            status = '1', nosy = ['1'], keyword = ['1'])
+        self.db.commit ()
+        form = {':note': 'msg-content', 'title': 'New title',
+            'priority': '2', 'status': '2', 'nosy': '1,2', 'keyword': '',
+            ':action': 'edit'}
+        cl = self.setupClient(form, 'issue', '1')
+        pt = RoundupPageTemplate()
+        pt.pt_edit(page_template, 'text/html')
+        out = []
+        def wh(s):
+            out.append(s)
+        cl.write_html = wh
+        # Enable the following if we get a templating error:
+        #def send_error (*args, **kw):
+        #    import pdb; pdb.set_trace()
+        #cl.send_error_to_admin = send_error
+        # Need to rollback the database on error -- this usually happens
+        # in web-interface (and for other databases) anyway, need it for
+        # testing that the form values are really used, not the database!
+        # We do this together with the setup of the easy template above
+        def load_template(x):
+            cl.db.rollback()
+            return pt
+        cl.instance.templates.load = load_template
+        cl.selectTemplate = MockNull()
+        cl.determine_context = MockNull ()
+        def hasPermission(s, p, classname=None, d=None, e=None, **kw):
+            return True
+        actions.Action.hasPermission = hasPermission
+        e1 = _HTMLItem.is_edit_ok
+        _HTMLItem.is_edit_ok = lambda x : True
+        e2 = HTMLProperty.is_edit_ok
+        HTMLProperty.is_edit_ok = lambda x : True
+
+        # test with no headers and config by default requires 1 
+        cl.inner_main()
+        match_at=out[0].find('Unable to verify sufficient headers')
+        print "result of subtest 1:", out[0]
+        self.assertNotEqual(match_at, -1)
+        del(out[0])
+
+        # all the rest of these allow at least one header to pass
+        # and the edit happens with a redirect back to issue 1
+        cl.env['HTTP_REFERER'] = 'http://whoami.com/path/'
+        cl.inner_main()
+        match_at=out[0].find('Redirecting to <a href="http://whoami.com/path/issue1?@ok_message')
+        print "result of subtest 2:", out[0]
+        self.assertEqual(match_at, 0)
+        del(cl.env['HTTP_REFERER'])
+        del(out[0])
+
+        cl.env['HTTP_ORIGIN'] = 'http://whoami.com'
+        cl.inner_main()
+        match_at=out[0].find('Redirecting to <a href="http://whoami.com/path/issue1?@ok_message')
+        print "result of subtest 3:", out[0]
+        self.assertEqual(match_at, 0)
+        del(cl.env['HTTP_ORIGIN'])
+        del(out[0])
+
+        cl.env['HTTP_X-FORWARDED-HOST'] = 'whoami.com'
+        # if there is an X-FORWARDED-HOST header it is used and
+        # HOST header is ignored. X-FORWARDED-HOST should only be
+        # passed/set by a proxy. In this case the HOST header is
+        # the proxy's name for the web server and not the name
+        # thatis exposed to the world.
+        cl.env['HTTP_HOST'] = 'frontend1.whoami.net'
+        cl.inner_main()
+        match_at=out[0].find('Redirecting to <a href="http://whoami.com/path/issue1?@ok_message')
+        print "result of subtest 4:", out[0]
+        self.assertNotEqual(match_at, -1)
+        del(cl.env['HTTP_X-FORWARDED-HOST'])
+        del(cl.env['HTTP_HOST'])
+        del(out[0])
+
+        cl.env['HTTP_HOST'] = 'whoami.com'
+        cl.inner_main()
+        match_at=out[0].find('Redirecting to <a href="http://whoami.com/path/issue1?@ok_message')
+        print "result of subtest 5:", out[0]
+        self.assertEqual(match_at, 0)
+        del(cl.env['HTTP_HOST'])
+        del(out[0])
+
+        # try failing headers
+        cl.env['HTTP_X-FORWARDED-HOST'] = 'whoami.net'
+        # this raises an error as the header check passes and 
+        # it did the edit and tries to send mail.
+        cl.inner_main()
+        match_at=out[0].find('Invalid X-FORWARDED-HOST whoami.net')
+        print "result of subtest 6:", out[0]
+        self.assertNotEqual(match_at, -1)
+        del(cl.env['HTTP_X-FORWARDED-HOST'])
+        del(out[0])
+
+        # header checks succeed
+        # check nonce handling.
+        cl.env['HTTP_REFERER'] = 'http://whoami.com/path/'
+
+        # roundup will report a missing token.
+        cl.db.config['WEB_CSRF_ENFORCE_TOKEN'] = 'required'
+        cl.inner_main()
+        match_at=out[0].find('<p>Csrf token is missing.</p>')
+        print "result of subtest 6a:", out[0], match_at
+        self.assertEqual(match_at, 33)
+        del(out[0])
+        cl.db.config['WEB_CSRF_ENFORCE_TOKEN'] = 'yes'
+
+        import copy
+        form2 = copy.copy(form)
+        form2.update({'@csrf': 'booogus'})
+        # add a bogus csrf field to the form and rerun the inner_main
+        cl.form = makeForm(form2)
+
+        cl.inner_main()
+        match_at=out[0].find('Invalid csrf token found: booogus')
+        print "result of subtest 7:", out[0]
+        self.assertEqual(match_at, 36)
+        del(out[0])
+
+        form2 = copy.copy(form)
+        nonce = anti_csrf_nonce(cl, cl)
+        # verify that we can see the nonce
+        otks = cl.db.getOTKManager()
+        isitthere = otks.exists(nonce)
+        print "result of subtest 8:", isitthere
+        print "otks: user, session", otks.get(nonce, 'uid', default=None), \
+            otks.get(nonce, 'session', default=None)
+        self.assertEqual(isitthere, True)
+
+        form2.update({'@csrf': nonce})
+        # add a real csrf field to the form and rerun the inner_main
+        cl.form = makeForm(form2)
+        cl.inner_main()
+        # csrf passes and redirects to the new issue.
+        match_at=out[0].find('Redirecting to <a href="http://whoami.com/path/issue1?@ok_message')
+        print "result of subtest 9:", out[0]
+        self.assertEqual(match_at, 0)
+        del(out[0])
+
+        # try a replay attack
+        cl.inner_main()
+        # This should fail as token was wiped by last run.
+        match_at=out[0].find('Invalid csrf token found: %s'%nonce)
+        print "replay of csrf after post use", out[0]
+        print "result of subtest 10:", out[0]
+        self.assertEqual(match_at, 36)
+        del(out[0])
+
+        # make sure that a get deletes the csrf.
+        cl.env['REQUEST_METHOD'] = 'GET' 
+        cl.env['HTTP_REFERER'] = 'http://whoami.com/path/'
+        form2 = copy.copy(form)
+        nonce = anti_csrf_nonce(cl, cl)
+        form2.update({'@csrf': nonce})
+        # add a real csrf field to the form and rerun the inner_main
+        cl.form = makeForm(form2)
+        cl.inner_main()
+        # csrf passes but fail creating new issue because not a post
+        match_at=out[0].find('<p>Invalid request</p>')
+        print "result of subtest 11:", out[0]
+        self.assertEqual(match_at, 33)
+        del(out[0])
+        
+        # the token should be gone
+        isitthere = otks.exists(nonce)
+        print "result of subtest 12:", isitthere
+        self.assertEqual(isitthere, False)
+
+        # change to post and should fail w/ invalid csrf
+        # since get deleted the token.
+        cl.env.update({'REQUEST_METHOD': 'POST'})
+        print cl.env
+        cl.inner_main()
+        match_at=out[0].find('Invalid csrf token found: %s'%nonce)
+        print "post failure after get", out[0]
+        print "result of subtest 13:", out[0]
+        self.assertEqual(match_at, 36)
+        del(out[0])
+
+        del(cl.env['HTTP_REFERER'])
+        
+        # clean up from email log
+        if os.path.exists(SENDMAILDEBUG):
+            os.remove(SENDMAILDEBUG)
+        #raise ValueError
+
+    def testXmlrpcCsrfProtection(self):
+        # set the password for admin so we can log in.
+        passwd=password.Password('admin')
+        self.db.user.set('1', password=passwd)
+
+        out = []
+        def wh(s):
+            out.append(s)
+
+        # xmlrpc has no form content
+        form = {}
+        cl = client.Client(self.instance, None,
+                           {'REQUEST_METHOD':'POST',
+                            'PATH_INFO':'xmlrpc',
+                            'CONTENT_TYPE': 'text/plain',
+                            'HTTP_AUTHORIZATION': 'Basic YWRtaW46YWRtaW4=',
+                            'HTTP_REFERER': 'http://whoami.com/path/',
+                            'HTTP_X-REQUESTED-WITH': "XMLHttpRequest"
+                        }, form)
+        cl.db = self.db
+        cl.base = 'http://whoami.com/path/'
+        cl._socket_op = lambda *x : True
+        cl._error_message = []
+        cl.request = MockNull()
+        cl.write = wh # capture output
+
+        # Should return explanation because content type is text/plain
+        # and not text/xml
+        cl.handle_xmlrpc()
+        self.assertEqual(out[0], "This is the endpoint of Roundup <a href='http://www.roundup-tracker.org/docs/xmlrpc.html'>XML-RPC interface</a>.")
+        del(out[0])
+
+        # Should return admin user indicating auth works and
+        # header checks succeed (REFERER and X-REQUESTED-WITH)
+        cl.env['CONTENT_TYPE'] = "text/xml"
+        # ship the form with the value holding the xml value.
+        # I have no clue why this works but ....
+        cl.form = MockNull(file = True, value = "<?xml version='1.0'?>\n<methodCall>\n<methodName>display</methodName>\n<params>\n<param>\n<value><string>user1</string></value>\n</param>\n<param>\n<value><string>username</string></value>\n</param>\n</params>\n</methodCall>\n" )
+        answer ="<?xml version='1.0'?>\n<methodResponse>\n<params>\n<param>\n<value><struct>\n<member>\n<name>username</name>\n<value><string>admin</string></value>\n</member>\n</struct></value>\n</param>\n</params>\n</methodResponse>\n"
+        cl.handle_xmlrpc()
+        print out
+        self.assertEqual(out[0], answer)
+        del(out[0])
+
+        # remove the X-REQUESTED-WITH header and get an xmlrpc fault returned
+        del(cl.env['HTTP_X-REQUESTED-WITH'])
+        cl.handle_xmlrpc()
+        output="<?xml version='1.0'?>\n<methodResponse>\n<fault>\n<value><struct>\n<member>\n<name>faultCode</name>\n<value><int>1</int></value>\n</member>\n<member>\n<name>faultString</name>\n<value><string>&lt;class 'roundup.exceptions.UsageError'&gt;:Required Header Missing</string></value>\n</member>\n</struct></value>\n</fault>\n</methodResponse>\n"
+        print out[0]
+        self.assertEqual(output,out[0])
+        del(out[0])
+
+        # change config to not require X-REQUESTED-WITH header
+        cl.db.config['WEB_CSRF_ENFORCE_HEADER_X-REQUESTED-WITH'] = 'logfailure'
+        cl.handle_xmlrpc()
+        print out
+        self.assertEqual(out[0], answer)
+        del(out[0])
+
     #
     # SECURITY
     #
@@ -697,6 +1145,7 @@ class FormTestCase(unittest.TestCase):
         cl.userid = userid
         cl.language = ('en',)
         cl._error_message = []
+        cl._ok_message = []
         cl.template = template
         return cl
 
@@ -896,6 +1345,21 @@ class FormTestCase(unittest.TestCase):
             userid=chef, template='index')
         h = HTMLRequest(cl)
         self.assertEqual([x.id for x in h.batch()],['2', '3', '1'])
+        self.assertEqual(cl._error_message, []) # test for empty _error_message when sort is valid
+        self.assertEqual(cl._ok_message, []) # test for empty _ok_message when sort is valid
+
+        # Test for correct _error_message for invalid sort/group properties
+        baddepsort = {'@action':'search','columns':'id','@sort':'dep'}
+        baddepgrp = {'@action':'search','columns':'id','@group':'dep'}
+        cl = self._make_client(baddepsort, classname='iss', nodeid=None,
+            userid=chef, template='index')
+        h = HTMLRequest(cl)
+        self.assertEqual(cl._error_message, ['Unknown sort property dep'])
+        cl = self._make_client(baddepgrp, classname='iss', nodeid=None,
+            userid=chef, template='index')
+        h = HTMLRequest(cl)
+        self.assertEqual(cl._error_message, ['Unknown group property dep'])
+
         cl = self._make_client(depgrp, classname='iss', nodeid=None,
             userid=chef, template='index')
         h = HTMLRequest(cl)
@@ -925,6 +1389,105 @@ class FormTestCase(unittest.TestCase):
         self.assertEqual(cl._ok_message, ['Items edited OK'])
         k = self.db.keyword.getnode('1')
         self.assertEqual(k.name, u'\xe4\xf6\xfc'.encode('utf-8'))
+
+    def testserve_static_files(self):
+        # make a client instance
+        cl = self._make_client({})
+
+        # hijack _serve_file so I can see what is found
+        output = []
+        def my_serve_file(a, b, c, d):
+            output.append((a,b,c,d))
+        cl._serve_file = my_serve_file
+
+        # check case where file is not found.
+        self.assertRaises(NotFound,
+                          cl.serve_static_file,"missing.css")
+
+        # TEMPLATES dir is searched by default. So this file exists.
+        # Check the returned values.
+        cl.serve_static_file("issue.index.html")
+        self.assertEquals(output[0][1], "text/html")
+        self.assertEquals(output[0][3], "_test_cgi_form/html/issue.index.html")
+        del output[0] # reset output buffer
+
+        # stop searching TEMPLATES for the files.
+        cl.instance.config['STATIC_FILES'] = '-'
+        # previously found file should not be found
+        self.assertRaises(NotFound,
+                          cl.serve_static_file,"issue.index.html")
+
+        # explicitly allow html directory
+        cl.instance.config['STATIC_FILES'] = 'html -'
+        cl.serve_static_file("issue.index.html")
+        self.assertEquals(output[0][1], "text/html")
+        self.assertEquals(output[0][3], "_test_cgi_form/html/issue.index.html")
+        del output[0] # reset output buffer
+
+        # set the list of files and do not look at the templates directory
+        cl.instance.config['STATIC_FILES'] = 'detectors   extensions -	'
+
+        # find file in first directory
+        cl.serve_static_file("messagesummary.py")
+        self.assertEquals(output[0][1], "text/x-python")
+        self.assertEquals(output[0][3], "_test_cgi_form/detectors/messagesummary.py")
+        del output[0] # reset output buffer
+
+        # find file in second directory
+        cl.serve_static_file("README.txt")
+        self.assertEquals(output[0][1], "text/plain")
+        self.assertEquals(output[0][3], "_test_cgi_form/extensions/README.txt")
+        del output[0] # reset output buffer
+
+        # make sure an embedded - ends the searching.
+        cl.instance.config['STATIC_FILES'] = ' detectors - extensions '
+        self.assertRaises(NotFound, cl.serve_static_file, "README.txt")
+
+        cl.instance.config['STATIC_FILES'] = ' detectors - extensions   '
+        self.assertRaises(NotFound, cl.serve_static_file, "issue.index.html")
+
+        # create an empty README.txt in the first directory
+        f = open('_test_cgi_form/detectors/README.txt', 'a').close()
+        # find file now in first directory
+        cl.serve_static_file("README.txt")
+        self.assertEquals(output[0][1], "text/plain")
+        self.assertEquals(output[0][3], "_test_cgi_form/detectors/README.txt")
+        del output[0] # reset output buffer
+
+        cl.instance.config['STATIC_FILES'] = ' detectors extensions '
+        # make sure lack of trailing - allows searching TEMPLATES
+        cl.serve_static_file("issue.index.html")
+        self.assertEquals(output[0][1], "text/html")
+        self.assertEquals(output[0][3], "_test_cgi_form/html/issue.index.html")
+        del output[0] # reset output buffer
+
+        # Make STATIC_FILES a single element.
+        cl.instance.config['STATIC_FILES'] = 'detectors'
+        # find file now in first directory
+        cl.serve_static_file("messagesummary.py")
+        self.assertEquals(output[0][1], "text/x-python")
+        self.assertEquals(output[0][3], "_test_cgi_form/detectors/messagesummary.py")
+        del output[0] # reset output buffer
+
+        # make sure files found in subdirectory
+        os.mkdir('_test_cgi_form/detectors/css')
+        f = open('_test_cgi_form/detectors/css/README.css', 'a').close()
+        # use subdir in filename
+        cl.serve_static_file("css/README.css")
+        self.assertEquals(output[0][1], "text/css")
+        self.assertEquals(output[0][3], "_test_cgi_form/detectors/css/README.css")
+        del output[0] # reset output buffer
+
+
+        # use subdir in static files path
+        cl.instance.config['STATIC_FILES'] = 'detectors html/css'
+        os.mkdir('_test_cgi_form/html/css')
+        f = open('_test_cgi_form/html/css/README1.css', 'a').close()
+        cl.serve_static_file("README1.css")
+        self.assertEquals(output[0][1], "text/css")
+        self.assertEquals(output[0][3], "_test_cgi_form/html/css/README1.css")
+        del output[0] # reset output buffer
+
 
     def testRoles(self):
         cl = self._make_client({})
@@ -964,10 +1527,10 @@ class FormTestCase(unittest.TestCase):
         output = StringIO.StringIO()
         cl.request = MockNull()
         cl.request.wfile = output
-        self.assertRaises(exceptions.SeriousError,
+        self.assertRaises(exceptions.NotFound,
             actions.ExportCSVAction(cl).handle)
 
-    def testCSVExportFailPermission(self):
+    def testCSVExportFailPermissionBadColumn(self):
         cl = self._make_client({'@columns': 'id,email,password'}, nodeid=None,
             userid='2')
         cl.classname = 'user'
@@ -976,21 +1539,329 @@ class FormTestCase(unittest.TestCase):
         cl.request.wfile = output
         # used to be self.assertRaises(exceptions.Unauthorised,
         # but not acting like the column name is not found
-        self.assertRaises(exceptions.SeriousError,
+        # see issue2550755 - should this return Unauthorised?
+        # The unauthorised user should never get to the point where
+        # they can determine if the column name is valid or not.
+        self.assertRaises(exceptions.NotFound,
             actions.ExportCSVAction(cl).handle)
 
+    def testCSVExportFailPermissionValidColumn(self):
+        cl = self._make_client({'@columns': 'id,address,password'}, nodeid=None,
+            userid='2')
+        cl.classname = 'user'
+        output = StringIO.StringIO()
+        cl.request = MockNull()
+        cl.request.wfile = output
+        # used to be self.assertRaises(exceptions.Unauthorised,
+        # but not acting like the column name is not found
+        self.assertRaises(exceptions.Unauthorised,
+            actions.ExportCSVAction(cl).handle)
 
-def test_suite():
-    suite = unittest.TestSuite()
+class TemplateHtmlRendering(unittest.TestCase):
+    ''' try to test the rendering code for tal '''
+    def setUp(self):
+        self.dirname = '_test_template'
+        # set up and open a tracker
+        self.instance = db_test_base.setupTracker(self.dirname)
 
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(FormTestCase))
-    suite.addTest(unittest.makeSuite(MessageTestCase))
-    return suite
+        # open the database
+        self.db = self.instance.open('admin')
+        self.db.tx_Source = "web"
+        self.db.user.create(username='Chef', address='chef@bork.bork.bork',
+            realname='Bork, Chef', roles='User')
+        self.db.user.create(username='mary', address='mary@test.test',
+            roles='User', realname='Contrary, Mary')
+        self.db.post_init()
 
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
+        # create a client instance and hijack write_html
+        self.client = client.Client(self.instance, "user",
+                {'PATH_INFO':'/user', 'REQUEST_METHOD':'POST'},
+                form=makeForm({"@template": "item"}))
+
+        self.client._error_message = []
+        self.client._ok_message = []
+        self.client.db = self.db
+        self.client.userid = '1'
+        self.client.language = ('en',)
+        self.client.session_api = MockNull(_sid="1234567890")
+
+        self.output = []
+        # ugly hack to get html_write to return data here.
+        def html_write(s):
+            self.output.append(s)
+
+        # hijack html_write
+        self.client.write_html = html_write
+
+        self.db.issue.create(title='foo')
+
+    def tearDown(self):
+        self.db.close()
+        try:
+            shutil.rmtree(self.dirname)
+        except OSError as error:
+            if error.errno not in (errno.ENOENT, errno.ESRCH): raise
+
+    def testrenderFrontPage(self):
+        self.client.renderFrontPage("hello world RaNdOmJunk")
+        # make sure we can find the "hello world RaNdOmJunk"
+        # message in the output.
+        self.assertNotEqual(-1,
+           self.output[0].index('<p class="error-message">hello world RaNdOmJunk <br/ > </p>'))
+        # make sure we can find issue 1 title foo in the output
+        self.assertNotEqual(-1,
+           self.output[0].index('<a href="issue1">foo</a>'))
+
+        # make sure we can find the last SHA1 sum line at the end of the
+        # page
+        self.assertNotEqual(-1,
+           self.output[0].index('<!-- SHA: c87a4e18d59a527331f1d367c0c6cc67ee123e63 -->'))
+
+    def testrenderContext(self):
+        # set up the client;
+        # run determine_context to set the required client attributes
+        # run renderContext(); check result for proper page
+
+        # this will generate the default home page like
+        # testrenderFrontPage
+        self.client.form=makeForm({})
+        self.client.path = ''
+        self.client.determine_context()
+        self.assertEqual((self.client.classname, self.client.template, self.client.nodeid), (None, '', None))
+        self.assertEqual(self.client._ok_message, [])
+
+        result = self.client.renderContext()
+        self.assertNotEqual(-1,
+           result.index('<!-- SHA: c87a4e18d59a527331f1d367c0c6cc67ee123e63 -->'))
+
+        # now look at the user index page
+        self.client.form=makeForm({ "@ok_message": "ok message", "@template": "index"})
+        self.client.path = 'user'
+        self.client.determine_context()
+        self.assertEqual((self.client.classname, self.client.template, self.client.nodeid), ('user', 'index', None))
+        self.assertEqual(self.client._ok_message, ['ok message'])
+
+        result = self.client.renderContext()
+        self.assertNotEqual(-1, result.index('<title>User listing - Roundup issue tracker</title>'))
+        self.assertNotEqual(-1, result.index('ok message'))
+        # print result
+
+    def testRenderAltTemplates(self):
+        # check that right page is returned when rendering
+        #  @template=oktempl|errortmpl
+
+        # set up the client;
+        # run determine_context to set the required client attributes
+        # run renderContext(); check result for proper page
+
+        # Test ok state template that uses user.forgotten.html
+        self.client.form=makeForm({"@template": "forgotten|item"})
+        self.client.path = 'user'
+        self.client.determine_context()
+        self.client.session_api = MockNull(_sid="1234567890")
+        self.assertEqual((self.client.classname, self.client.template, self.client.nodeid), ('user', 'forgotten|item', None))
+        self.assertEqual(self.client._ok_message, [])
+        
+        result = self.client.renderContext()
+        print result
+        # sha1sum of classic tracker user.forgotten.template must be found
+        self.assertNotEqual(-1,
+                            result.index('<!-- SHA: eb5dd0bec7a57d58cb7edbeb939fb0390ed1bf74 -->'))
+
+        # now set an error in the form to get error template user.item.html
+        self.client.form=makeForm({"@template": "forgotten|item",
+                                   "@error_message": "this is an error"})
+        self.client.path = 'user'
+        self.client.determine_context()
+        self.assertEqual((self.client.classname, self.client.template, self.client.nodeid), ('user', 'forgotten|item', None))
+        self.assertEqual(self.client._ok_message, [])
+        self.assertEqual(self.client._error_message, ["this is an error"])
+        
+        result = self.client.renderContext()
+        print result
+        # sha1sum of classic tracker user.item.template must be found
+        self.assertNotEqual(-1,
+                            result.index('<!-- SHA: 3b7ce7cbf24f77733c9b9f64a569d6429390cc3f -->'))
+
+
+    def testexamine_url(self):
+        ''' test the examine_url function '''
+
+        def te(url, exception, raises=ValueError):
+            with self.assertRaises(raises) as cm:
+                examine_url(url)
+            self.assertEqual(cm.exception.message, exception)
+
+
+        action = actions.Action(self.client)
+        examine_url = action.examine_url
+
+        # Christmas tree url: test of every component that passes
+        self.assertEqual(
+            examine_url("http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue"),
+            'http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue')
+
+        # allow replacing http with https if base is http
+        self.assertEqual(
+            examine_url("https://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue"),
+            'https://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue')
+
+
+        # change base to use https and make sure we don't redirect to http
+        saved_base = action.base
+        action.base = "https://tracker.example/cgi-bin/roundup.cgi/bugs/"
+        te("http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue",
+           'Base url https://tracker.example/cgi-bin/roundup.cgi/bugs/ requires https. Redirect url http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue uses http.')
+        action.base = saved_base
+
+        # url doesn't have to be valid to roundup, just has to be contained
+        # inside of roundup. No zoik class is defined
+        self.assertEqual(examine_url("http://tracker.example/cgi-bin/roundup.cgi/bugs/zoik7;parm=bar?@template=foo&parm=(zot)#issue"), "http://tracker.example/cgi-bin/roundup.cgi/bugs/zoik7;parm=bar?@template=foo&parm=(zot)#issue")
+
+        # test with wonky schemes
+        te("email://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue",
+        'Unrecognized scheme in email://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue')
+
+        te("http%3a//tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue", 'Unrecognized scheme in http%3a//tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue')
+
+        # test different netloc/path prefix
+        # assert port
+        te("http://tracker.example:1025/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue",'Net location in http://tracker.example:1025/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue does not match base: tracker.example')
+
+        #assert user
+        te("http://user@tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue", 'Net location in http://user@tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue does not match base: tracker.example')
+
+        #assert user:password
+        te("http://user:pass@tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue", 'Net location in http://user:pass@tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue does not match base: tracker.example')
+
+        # try localhost http scheme
+        te("http://localhost/cgi-bin/roundup.cgi/bugs/user3", 'Net location in http://localhost/cgi-bin/roundup.cgi/bugs/user3 does not match base: tracker.example')
+
+        # try localhost https scheme
+        te("https://localhost/cgi-bin/roundup.cgi/bugs/user3", 'Net location in https://localhost/cgi-bin/roundup.cgi/bugs/user3 does not match base: tracker.example')
+
+        # try different host
+        te("http://bad.guys.are.us/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue", 'Net location in http://bad.guys.are.us/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#issue does not match base: tracker.example')
+
+        # change the base path to .../bug from .../bugs
+        te("http://tracker.example/cgi-bin/roundup.cgi/bug/user3;parm=bar?@template=foo&parm=(zot)#issue", 'Base path /cgi-bin/roundup.cgi/bugs/ is not a prefix for url http://tracker.example/cgi-bin/roundup.cgi/bug/user3;parm=bar?@template=foo&parm=(zot)#issue')
+
+        # change the base path eliminate - in cgi-bin
+        te("http://tracker.example/cgibin/roundup.cgi/bug/user3;parm=bar?@template=foo&parm=(zot)#issue",'Base path /cgi-bin/roundup.cgi/bugs/ is not a prefix for url http://tracker.example/cgibin/roundup.cgi/bug/user3;parm=bar?@template=foo&parm=(zot)#issue')
+
+
+        # scan for unencoded characters
+        # we skip schema and net location since unencoded character
+        # are allowed only by an explicit match to a reference.
+        #
+        # break components with unescaped character '<'
+        # path component
+        te("http://tracker.example/cgi-bin/roundup.cgi/bugs/<user3;parm=bar?@template=foo&parm=(zot)#issue", 'Path component (/cgi-bin/roundup.cgi/bugs/<user3) in http://tracker.example/cgi-bin/roundup.cgi/bugs/<user3;parm=bar?@template=foo&parm=(zot)#issue is not properly escaped')
+
+        # params component
+        te("http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=b<ar?@template=foo&parm=(zot)#issue", 'Params component (parm=b<ar) in http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=b<ar?@template=foo&parm=(zot)#issue is not properly escaped')
+
+        # query component
+        te("http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=<foo>&parm=(zot)#issue", 'Query component (@template=<foo>&parm=(zot)) in http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=<foo>&parm=(zot)#issue is not properly escaped')
+
+        # fragment component
+        te("http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#iss<ue", 'Fragment component (iss<ue) in http://tracker.example/cgi-bin/roundup.cgi/bugs/user3;parm=bar?@template=foo&parm=(zot)#iss<ue is not properly escaped')
+
+class TemplateTestCase(unittest.TestCase):
+    ''' Test the template resolving code, i.e. what can be given to @template
+    '''
+    def setUp(self):
+        self.dirname = '_test_template'
+        # set up and open a tracker
+        self.instance = db_test_base.setupTracker(self.dirname)
+
+        # open the database
+        self.db = self.instance.open('admin')
+        self.db.tx_Source = "web"
+        self.db.user.create(username='Chef', address='chef@bork.bork.bork',
+            realname='Bork, Chef', roles='User')
+        self.db.user.create(username='mary', address='mary@test.test',
+            roles='User', realname='Contrary, Mary')
+        self.db.post_init()
+
+    def tearDown(self):
+        self.db.close()
+        try:
+            shutil.rmtree(self.dirname)
+        except OSError as error:
+            if error.errno not in (errno.ENOENT, errno.ESRCH): raise
+
+    def testTemplateSubdirectory(self):
+        # test for templates in subdirectories
+
+        # make the directory
+        subdir = self.dirname + "/html/subdir"
+        os.mkdir(subdir)
+
+        # get the client instance The form is needed to initialize,
+        # but not used since I call selectTemplate directly.
+        t = client.Client(self.instance, "user",
+                {'PATH_INFO':'/user', 'REQUEST_METHOD':'POST'},
+         form=makeForm({"@template": "item"}))
+
+        # create new file in subdir and a dummy file outside of
+        # the tracker's html subdirectory
+        shutil.copyfile(self.dirname + "/html/issue.item.html",
+                        subdir + "/issue.item.html")
+        shutil.copyfile(self.dirname + "/html/user.item.html",
+                        self.dirname + "/user.item.html")
+
+        # create link outside the html subdir. This should fail due to
+        # path traversal check.
+        os.symlink("../../user.item.html", subdir + "/user.item.html")
+        # it will be removed and replaced by a later test
+
+        # make sure a simple non-subdir template works.
+        # user.item.html exists so this works.
+        # note that the extension is not included just the basename
+        self.assertEqual("user.item", t.selectTemplate("user", "item"))
+
+
+        # make sure home templates work
+        self.assertEqual("home", t.selectTemplate(None, ""))
+        self.assertEqual("home.classlist", t.selectTemplate(None, "classlist"))
+
+        # home.item doesn't exist should return _generic.item.
+        self.assertEqual("_generic.item", t.selectTemplate(None, "item"))
+
+        # test case where there is no view so generic template can't
+        # be determined.
+        with self.assertRaises(NoTemplate) as cm:
+            t.selectTemplate("user", "")
+        self.assertEqual(cm.exception.message,
+                         '''Template "user" doesn't exist''')
+
+        # there is no html/subdir/user.item.{,xml,html} so it will
+        # raise NoTemplate.
+        self.assertRaises(NoTemplate,
+                          t.selectTemplate, "user", "subdir/item")
+
+        # there is an html/subdir/issue.item.html so this succeeeds
+        r = t.selectTemplate("issue", "subdir/item")
+        self.assertEqual("subdir/issue.item", r)
+
+        # there is a self.directory + /html/subdir/user.item.html file,
+        # but it is a link to self.dir /user.item.html which is outside
+        # the html subdir so is rejected by the path traversal check.
+        # Prefer NoTemplate here, or should the code be changed to
+        # report a new PathTraversal exception? Could the PathTraversal
+        # exception leak useful info to an attacker??
+        self.assertRaises(NoTemplate,
+                          t.selectTemplate, "user", "subdir/item")
+
+        # clear out the link and create a new one to self.dirname +
+        # html/user.item.html which is inside the html subdir
+        # so the template check returns the symbolic link path.
+        os.remove(subdir + "/user.item.html")
+        os.symlink("../user.item.html", subdir + "/user.item.xml")
+
+        # template check works
+        r = t.selectTemplate("user", "subdir/item")
+        self.assertEquals("subdir/user.item", r)
 
 # vim: set filetype=python sts=4 sw=4 et si :

@@ -40,6 +40,14 @@ Some variants of Linux will need an additional "python dev" package
 installed for Roundup installation to work. Debian and derivatives, are
 known to require this.
 
+If you are using the Roundup Windows installer on a 64 bit system and
+you get the error message::
+
+  "No Python installation found in the registry"
+
+you need to install a 32 bit version of python. The 64 bit versions
+use a different registry key that the installer doesn't detect. See:
+http://issues.roundup-tracker.org/issue2550718 for details.
 
 Optional Components
 ===================
@@ -50,7 +58,8 @@ Timezone Definitions
   Full timezone support requires pytz_ module (version 2005i or later)
   which brings the `Olson tz database`_ into Python.  If pytz_ is not
   installed, timezones may be specified as numeric hour offsets only.
-
+  This is optional but strongly suggested.
+  
 An RDBMS
   Sqlite, MySQL and Postgresql are all supported by Roundup and will be
   used if available. One of these is recommended if you are anticipating a
@@ -67,6 +76,25 @@ Xapian full-text indexer
 
   Roundup requires Xapian 1.0.0 or newer.
 
+  Note that capitalization is not preserved by the Xapian search.
+  This is required to make the porter stemmer work so that searching
+  for silent also returns documents with the word silently. Note that
+  the current stemming implementation is designed for English.
+
+Whoosh full-text indexer
+  The Whoosh_ full-text indexer is also supported and will be used by
+  default if it is available (and Xapian is not installed). This is
+  recommended if you are anticipating a large number of issues (> 5000).
+
+  You may install Whoosh at any time, even after a tracker has been
+  installed and used. You will need to run the "roundup-admin reindex"
+  command if the tracker has existing data.
+
+  Roundup was tested with Whoosh 2.5.7, but earlier versions in the
+  2.0 series may work. Whoosh is a pure python indexer so it is slower
+  than Xapian, but should be useful for moderately sized trackers.
+  It uses the StandardAnalyzer which is suited for Western languages.
+
 pyopenssl
   If pyopenssl_ is installed the roundup-server can be configured
   to serve trackers over SSL. If you are going to serve roundup via
@@ -79,15 +107,23 @@ pyme
   configured, you can require email to be cryptographically signed
   before roundup will allow it to make modifications to issues.
 
+jinja2
+  To use the jinja2 template (may still be experimental, check out
+  its TEMPLATE-INFO.txt file) you need
+  to have the jinja2_ template engine installed.
+
 Windows Service
   You can run Roundup as a Windows service if pywin32_ is installed.
+  Otherwise it must be started manually.
 
 .. _Xapian: http://xapian.org/
+.. _Whoosh: https://bitbucket.org/mchaput/whoosh/wiki/Home
 .. _pytz: http://www.python.org/pypi/pytz
 .. _Olson tz database: http://www.twinsun.com/tz/tz-link.htm
 .. _pyopenssl: http://pyopenssl.sourceforge.net
 .. _pyme: http://pyme.sourceforge.net
 .. _pywin32: http://pypi.python.org/pypi/pywin32
+.. _jinja2: http://jinja.pocoo.org/
 
 
 Getting Roundup
@@ -135,11 +171,13 @@ installation:
 4. and optionally `configure an email interface`_
 5. `UNIX environment steps`_ to take if you're installing on a shared
    UNIX machine and want to restrict local access to roundup
-6. `additional language codecs`_
 
 For information about how Roundup installs, see the `administration
 guide`_.
 
+The following assumes that you are using the source distribution.  If
+you are using the Windows installer, run it with Administrator
+privileges so it can correctly update the registry.
 
 Basic Installation Steps
 ------------------------
@@ -251,7 +289,14 @@ Configuring your first tracker
 
    and you should see the tracker interface.
 
+   To run your tracker on some interface other than 127.0.0.1 and port
+   8080 (make sure you change the "tracker :: web" changes to match) use::
 
+     roundup-server -p 1080 -n 0.0.0.0 support=/opt/roundup/trackers/support
+
+   to run the server at port 1080 and bind to all ip addresses on your system.
+   Then direct your web browser to ``http://your_host_name:1080/support``.
+   
 Choosing Your Template
 ----------------------
 
@@ -827,14 +872,6 @@ you will need to ensure that the db directory has a context that
 permits the web server to modify and create files. If you're using the
 mysql or postgresql backend you may also need to update your policy to
 allow the web server to access the database socket.
-
-
-Additional Language Codecs
---------------------------
-
-If you intend to send messages to Roundup that use Chinese, Japanese or
-Korean encodings the you'll need to obtain CJKCodecs from
-http://cjkpython.berlios.de/
 
 
 Public Tracker Considerations

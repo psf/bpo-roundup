@@ -165,6 +165,9 @@ db.security.addPermissionToRole('User', p)
 p = db.security.addPermission(name='Retire', klass='query', check=edit_query,
     description="User is allowed to retire their queries")
 db.security.addPermissionToRole('User', p)
+p = db.security.addPermission(name='Restore', klass='query', check=edit_query,
+    description="User is allowed to restore their queries")
+db.security.addPermissionToRole('User', p)
 p = db.security.addPermission(name='Create', klass='query',
     description="User is allowed to create queries")
 db.security.addPermissionToRole('User', p)
@@ -194,6 +197,14 @@ db.security.addPermissionToRole('Anonymous', 'Register', 'user')
 # information)
 for cl in 'issue', 'file', 'msg', 'keyword', 'priority', 'status', 'pull_request':
     db.security.addPermissionToRole('Anonymous', 'View', cl)
+
+# Allow the anonymous user to use the "Show Unassigned" search.
+# It acts like "Show Open" if this permission is not available.
+# If you are running a tracker that does not allow read access for
+# anonymous, you should remove this entry as it can be used to perform
+# a username guessing attack against a roundup install.
+p = db.security.addPermission(name='Search', klass='user')
+db.security.addPermissionToRole ('Anonymous', p)
 
 # [OPTIONAL]
 # Allow anonymous users access to create or edit "issue" items (and the

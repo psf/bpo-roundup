@@ -37,11 +37,6 @@ from distutils.core import setup
 import sys, os
 from glob import glob
 
-# patch distutils if it can't cope with the "classifiers" keyword
-from distutils.dist import DistributionMetadata
-if not hasattr(DistributionMetadata, 'classifiers'):
-    DistributionMetadata.classifiers = None
-    DistributionMetadata.download_url = None
 
 def include(d, e):
     """Generate a pair of (directory, file-list) for installation.
@@ -52,15 +47,13 @@ def include(d, e):
 
     return (d, [f for f in glob('%s/%s'%(d, e)) if os.path.isfile(f)])
 
-
-def mapscript(path):
+def scriptname(path):
     """ Helper for building a list of script names from a list of
         module files.
     """
-    module = os.path.splitext(os.path.basename(path))[0]
-    script = module.replace('_', '-')
-    return '%s = roundup.scripts.%s:run' % (script, module)
-
+    script = os.path.splitext(os.path.basename(path))[0]
+    script = script.replace('_', '-')
+    return script
 
 def main():
     # template munching
@@ -76,7 +69,7 @@ def main():
     ]
 
     # build list of scripts from their implementation modules
-    scripts = [mapscript(f) for f in glob('roundup/scripts/[!_]*.py')]
+    scripts = [scriptname(f) for f in glob('roundup/scripts/[!_]*.py')]
 
     data_files = [
         ('share/roundup/cgi-bin', ['frontends/roundup.cgi']),
@@ -113,10 +106,11 @@ def main():
     # because the distutils installer will try to use the mbcs codec
     # which isn't available on non-windows platforms. See also
     # http://bugs.python.org/issue10945
-    long_description=open('doc/announcement.txt').read().decode('utf8')
+    long_description=open('doc/announcement.txt').read()
     try:
+        # attempt to interpret string as 'ascii'
         long_description = long_description.encode('ascii')
-    except UnicodeEncodeError, cause:
+    except UnicodeEncodeError as cause:
         print >> sys.stderr, "doc/announcement.txt contains non-ascii: %s" \
             % cause
         sys.exit(42)
@@ -144,6 +138,7 @@ def main():
                        'Operating System :: Microsoft :: Windows',
                        'Operating System :: POSIX',
                        'Programming Language :: Python',
+                       'Programming Language :: Python :: 2 :: Only',
                        'Topic :: Communications :: Email',
                        'Topic :: Office/Business',
                        'Topic :: Software Development :: Bug Tracking',
@@ -157,9 +152,7 @@ def main():
                      'install_lib': install_lib,
                      },
           packages=packages,
-          entry_points={
-              'console_scripts': scripts
-          },
+          scripts=scripts,
           data_files=data_files)
 
 if __name__ == '__main__':

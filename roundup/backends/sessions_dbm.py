@@ -11,7 +11,8 @@ import os, marshal, time
 from cgi import escape
 from roundup import hyperdb
 from roundup.i18n import _
-from roundup.anypy.dbm_ import anydbm, whichdb, key_in
+from roundup.anypy.dbm_ import anydbm, whichdb
+
 
 class BasicDatabase:
     ''' Provide a nice encapsulation of an anydbm store.
@@ -19,6 +20,7 @@ class BasicDatabase:
         Keys are id strings, values are automatically marshalled data.
     '''
     _db_type = None
+    name = None
 
     def __init__(self, db):
         self.config = db.config
@@ -28,7 +30,7 @@ class BasicDatabase:
     def exists(self, infoid):
         db = self.opendb('c')
         try:
-            return key_in(db, infoid)
+            return infoid in db
         finally:
             db.close()
 
@@ -57,10 +59,11 @@ class BasicDatabase:
         self.__class__._db_type = db_type
 
     _marker = []
+
     def get(self, infoid, value, default=_marker):
         db = self.opendb('c')
         try:
-            if key_in(db, infoid):
+            if infoid in db:
                 values = marshal.loads(db[infoid])
             else:
                 if default != self._marker:
@@ -85,7 +88,7 @@ class BasicDatabase:
     def set(self, infoid, **newvalues):
         db = self.opendb('c')
         try:
-            if key_in(db, infoid):
+            if infoid in db:
                 values = marshal.loads(db[infoid])
             else:
                 values = {'__timestamp': time.time()}
@@ -104,7 +107,7 @@ class BasicDatabase:
     def destroy(self, infoid):
         db = self.opendb('c')
         try:
-            if key_in(db, infoid):
+            if infoid in db:
                 del db[infoid]
         finally:
             db.close()

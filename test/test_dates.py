@@ -20,9 +20,19 @@ import time
 import datetime
 import calendar
 
+import pytest
 from roundup import date, i18n
 from roundup.date import Date, Interval, Range, fixTimeOverflow, \
     get_timezone
+
+try:
+    import pytz
+    skip_pytz = lambda func, *args, **kwargs: func
+except ImportError:
+    # FIX: workaround for a bug in pytest.mark.skip():
+    #   https://github.com/pytest-dev/pytest/issues/568
+    from .pytest_patcher import mark_class
+    skip_pytz = mark_class(pytest.mark.skip(reason="'pytz' not installed"))
 
 
 class DateTestCase(unittest.TestCase):
@@ -452,6 +462,8 @@ class DateTestCase(unittest.TestCase):
         ae (date.timestamp(), -61125753600.0)
         ae(str(date), '0033-01-01.00:00:00')
 
+
+@skip_pytz
 class TimezoneTestCase(unittest.TestCase):
 
     def testTZ(self):
@@ -496,22 +508,5 @@ class RangeTestCase(unittest.TestCase):
             ae(str(r.from_value), '2006-%02d-01.00:00:00'%i)
             ae(str(r.to_value), '2006-%02d-%02d.23:59:59'%(i,
                 calendar.mdays[i]))
-
-
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(DateTestCase))
-    suite.addTest(unittest.makeSuite(RangeTestCase))
-    try:
-        import pytz
-    except ImportError:
-        pass
-    else:
-        suite.addTest(unittest.makeSuite(TimezoneTestCase))
-    return suite
-
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
 
 # vim: set filetype=python sts=4 sw=4 et si :

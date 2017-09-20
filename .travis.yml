@@ -1,0 +1,45 @@
+language: python
+python:
+  - 2.7
+
+sudo: false
+
+addons:
+  apt:
+    packages:
+      # Required to build/install the xapian-binding
+      - libxapian-dev
+      # Required to install pyme
+      - libgpgme11-dev
+      - swig
+
+before_install:
+  - cd /tmp
+  - curl -s -O https://oligarchy.co.uk/xapian/1.2.16/xapian-bindings-1.2.16.tar.xz
+  - tar -Jxvf xapian-bindings-1.2.16.tar.xz
+  - cd xapian-bindings-1.2.16/
+  - ./configure --prefix=$VIRTUAL_ENV --with-python && make && make install
+
+  # change back to the checked out repository directory
+  - cd $TRAVIS_BUILD_DIR
+
+install:
+  - pip install MySQL-python psycopg2 pytz pyme whoosh
+  - pip install pytest-cov codecov
+
+before_script:
+  # set up mysql database
+  - mysql -u root -e 'GRANT ALL ON rounduptest.* TO rounduptest@localhost IDENTIFIED BY "rounduptest";'
+
+  # set up postgresql database
+  - psql -c "CREATE ROLE rounduptest WITH CREATEDB LOGIN PASSWORD 'rounduptest';" -U postgres
+
+  # HACK: workaround mysql bug: http://bugs.mysql.com/bug.php?id=74901
+  #   needed for test_mysql.mysqlDBTest.testFilteringSpecialChars
+  - sed -i 's/CREATE DATABASE \%s/CREATE DATABASE \%s COLLATE utf8_general_ci/' roundup/backends/back_mysql.py
+
+script:
+  - py.test -v test/ --cov=roundup
+
+after_success:
+  - codecov

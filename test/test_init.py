@@ -1,4 +1,4 @@
-#-*- encoding: utf8 -*-
+#-*- encoding: utf-8 -*-
 
 import unittest, os, pprint, difflib, textwrap
 
@@ -23,14 +23,5 @@ class TemplateInfoTestCase(unittest.TestCase):
               'path': path
             }
         )
-
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(TemplateInfoTestCase))
-    return suite
-
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
 
 # vim: set et sts=4 sw=4 :

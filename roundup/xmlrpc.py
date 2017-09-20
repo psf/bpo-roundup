@@ -5,11 +5,10 @@
 #
 
 from roundup import hyperdb
-from roundup.cgi.exceptions import *
-from roundup.exceptions import UsageError
+from roundup.exceptions import Unauthorised, UsageError
 from roundup.date import Date, Range, Interval
 from roundup import actions
-from SimpleXMLRPCServer import *
+from SimpleXMLRPCServer import SimpleXMLRPCDispatcher
 from xmlrpclib import Binary
 
 def translate(value):
@@ -50,7 +49,7 @@ def props_from_args(db, cl, args, itemid=None):
             try:
                 props[key] = hyperdb.rawToHyperdb(db, cl, itemid,
                                                   key, value)
-            except hyperdb.HyperdbValueError, message:
+            except hyperdb.HyperdbValueError as message:
                 raise UsageError, message
         else:
             props[key] = None
@@ -147,7 +146,7 @@ class RoundupInstance:
         try:
             result = cl.create(**props)
             self.db.commit()
-        except (TypeError, IndexError, ValueError), message:
+        except (TypeError, IndexError, ValueError) as message:
             raise UsageError, message
         return result
 
@@ -164,7 +163,7 @@ class RoundupInstance:
         try:
             result = cl.set(itemid, **props)
             self.db.commit()
-        except (TypeError, IndexError, ValueError), message:
+        except (TypeError, IndexError, ValueError) as message:
             raise UsageError, message
         return result
 
@@ -190,13 +189,7 @@ class RoundupDispatcher(SimpleXMLRPCDispatcher):
 
     def __init__(self, db, actions, translator,
                  allow_none=False, encoding=None):
-
-        try:
-            # python2.5 and beyond
-            SimpleXMLRPCDispatcher.__init__(self, allow_none, encoding)
-        except TypeError:
-            # python2.4
-            SimpleXMLRPCDispatcher.__init__(self)
+        SimpleXMLRPCDispatcher.__init__(self, allow_none, encoding)
         self.register_instance(RoundupInstance(db, actions, translator))
         self.register_multicall_functions()
                  

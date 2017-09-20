@@ -204,7 +204,7 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.inner_run_cgi()
         except client.NotFound:
             self.send_error(404, self.path)
-        except client.Unauthorised, message:
+        except client.Unauthorised as message:
             self.send_error(403, '%s (%s)'%(self.path, message))
         except:
             exc, val, tb = sys.exc_info()
@@ -389,9 +389,21 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             env['HTTP_HOST'] = self.headers ['host']
         except KeyError:
             env['HTTP_HOST'] = ''
+        xfh = self.headers.getheader('X-Forwarded-Host', None)
+        if xfh:
+            env['HTTP_X-FORWARDED-HOST'] = xfh
         if os.environ.has_key('CGI_SHOW_TIMING'):
             env['CGI_SHOW_TIMING'] = os.environ['CGI_SHOW_TIMING']
         env['HTTP_ACCEPT_LANGUAGE'] = self.headers.get('accept-language')
+        referer = self.headers.get('Referer')
+        if referer:
+            env['HTTP_REFERER'] = referer
+        origin = self.headers.get('Origin')
+        if origin:
+            env['HTTP_ORIGIN'] = origin
+        xrw = self.headers.get('x-requested-with')
+        if xrw:
+            env['HTTP_X-REQUESTED-WITH'] = xrw
         range = self.headers.getheader('range')
         if range:
             env['HTTP_RANGE'] = range
@@ -548,7 +560,7 @@ class ServerConfig(configuration.Config):
             "Option name identifies the tracker and will appear in the URL.\n"
             "Option value is tracker home directory path.\n"
             "The path may be either absolute or relative\n"
-            "to the directory containig this config file."),
+            "to the directory containing this config file."),
     )
 
     # options recognized by config
@@ -679,7 +691,7 @@ class ServerConfig(configuration.Config):
             if self["SSL"]:
                 kwargs['ssl_pem'] = self["PEM"]
             httpd = server_class(*args, **kwargs)
-        except socket.error, e:
+        except socket.error as e:
             if e[0] == errno.EADDRINUSE:
                 raise socket.error, \
                     _("Unable to bind to port %s, port already in use.") \
@@ -700,7 +712,7 @@ else:
     # allow the win32
     import win32service
 
-    class SvcShutdown(Exception):
+    class SvcShutdown(BaseException):
         pass
 
     class RoundupService(win32serviceutil.ServiceFramework):
@@ -882,7 +894,7 @@ def run(port=undefined, success_message=None):
     try:
         (optlist, args) = config.getopt(sys.argv[1:],
             short_options, ("help", "version", "save-config",))
-    except (getopt.GetoptError, configuration.ConfigurationError), e:
+    except (getopt.GetoptError, configuration.ConfigurationError) as e:
         usage(str(e))
         return
 

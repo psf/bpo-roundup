@@ -33,7 +33,7 @@ NOTE: we don't need an index on the id column if it's PRIMARY KEY
 '''
 __docformat__ = 'restructuredtext'
 
-from roundup.backends.rdbms_common import *
+from roundup import date, hyperdb, password
 from roundup.backends import rdbms_common
 import MySQLdb
 import os, shutil
@@ -109,8 +109,19 @@ def db_exists(config):
     return 1
 
 
-class Database(Database):
+class Database(rdbms_common.Database):
+    """ Mysql DB backend implementation
+
+    attributes:
+      dbtype:
+        holds the value for the type of db. It is used by indexer to
+        identify the database type so it can import the correct indexer
+        module when using native text search mode.
+    """
+
     arg = '%s'
+
+    dbtype = "mysql"
 
     # used by some code to switch styles of query
     implements_intersect = 0
@@ -129,6 +140,7 @@ class Database(Database):
         hyperdb.Password  : 'VARCHAR(255)',
         hyperdb.Boolean   : 'BOOL',
         hyperdb.Number    : 'REAL',
+        hyperdb.Integer   : 'INTEGER',
     }
 
     hyperdb_to_sql_value = {
@@ -140,6 +152,7 @@ class Database(Database):
         hyperdb.Password  : str,
         hyperdb.Boolean   : int,
         hyperdb.Number    : lambda x: x,
+        hyperdb.Integer   : int,
         hyperdb.Multilink : lambda x: x,    # used in journal marshalling
     }
 
@@ -148,8 +161,8 @@ class Database(Database):
         self.log_info('open database %r'%(kwargs['db'],))
         try:
             conn = MySQLdb.connect(**kwargs)
-        except MySQLdb.OperationalError, message:
-            raise DatabaseError, message
+        except MySQLdb.OperationalError as message:
+            raise hyperdb.DatabaseError(message)
         cursor = conn.cursor()
         cursor.execute("SET AUTOCOMMIT=0")
         lvl = isolation_levels [self.config.RDBMS_ISOLATION_LEVEL]
@@ -166,12 +179,12 @@ class Database(Database):
 
         try:
             self.load_dbschema()
-        except MySQLdb.OperationalError, message:
+        except MySQLdb.OperationalError as message:
             if message[0] != ER.NO_DB_ERROR:
                 raise
-        except MySQLdb.ProgrammingError, message:
+        except MySQLdb.ProgrammingError as message:
             if message[0] != ER.NO_SUCH_TABLE:
-                raise DatabaseError, message
+                raise hyperdb.DatabaseError, message
             self.init_dbschema()
             self.sql("CREATE TABLE `schema` (`schema` TEXT) ENGINE=%s"%
                 self.mysql_backend)
@@ -293,14 +306,16 @@ class Database(Database):
                     if first:
                         cols.append('_' + name)
                     prop = properties[name]
-                    if isinstance(prop, Date) and v is not None:
+                    if isinstance(prop, hyperdb.Date) and v is not None:
                         v = date.Date(v)
-                    elif isinstance(prop, Interval) and v is not None:
+                    elif isinstance(prop, hyperdb.Interval) and v is not None:
                         v = date.Interval(v)
-                    elif isinstance(prop, Password) and v is not None:
+                    elif isinstance(prop, hyperdb.Password) and v is not None:
                         v = password.Password(encrypted=v)
-                    elif (isinstance(prop, Boolean) or
-                            isinstance(prop, Number)) and v is not None:
+                    elif isinstance(prop, hyperdb.Integer) and v is not None:
+                        v = int(v)
+                    elif (isinstance(prop, hyperdb.Boolean) or
+                            isinstance(prop, hyperdb.Number)) and v is not None:
                         v = float(v)
 
                     # convert to new MySQL data type
@@ -312,7 +327,7 @@ class Database(Database):
                     l.append(e)
 
                     # Intervals store the seconds value too
-                    if isinstance(prop, Interval):
+                    if isinstance(prop, hyperdb.Interval):
                         if first:
                             cols.append('__' + name + '_int__')
                         if v is not None:
@@ -416,7 +431,7 @@ class Database(Database):
 
         # create index for key property
         if spec.key:
-            if isinstance(spec.properties[spec.key], String):
+            if isinstance(spec.properties[spec.key], hyperdb.String):
                 idx = spec.key + '(255)'
             else:
                 idx = spec.key
@@ -431,7 +446,7 @@ class Database(Database):
     def add_class_key_required_unique_constraint(self, cn, key):
         # mysql requires sizes on TEXT indexes
         prop = self.classes[cn].getprops()[key]
-        if isinstance(prop, String):
+        if isinstance(prop, hyperdb.String):
             sql = '''create unique index _%s_key_retired_idx
                 on _%s(__retired__, _%s(255))'''%(cn, cn, key)
         else:
@@ -442,7 +457,7 @@ class Database(Database):
     def create_class_table_key_index(self, cn, key):
         # mysql requires sizes on TEXT indexes
         prop = self.classes[cn].getprops()[key]
-        if isinstance(prop, String):
+        if isinstance(prop, hyperdb.String):
             sql = 'create index _%s_%s_idx on _%s(_%s(255))'%(cn, key, cn, key)
         else:
             sql = 'create index _%s_%s_idx on _%s(_%s)'%(cn, key, cn, key)
@@ -568,7 +583,7 @@ class Database(Database):
         self.log_info('close')
         try:
             self.conn.close()
-        except MySQLdb.ProgrammingError, message:
+        except MySQLdb.ProgrammingError as message:
             if str(message) != 'closing a closed connection':
                 raise
 
@@ -589,14 +604,14 @@ class MysqlClass:
     def create_inner(self, **propvalues):
         try:
             return rdbms_common.Class.create_inner(self, **propvalues)
-        except MySQLdb.IntegrityError, e:
+        except MySQLdb.IntegrityError as e:
             self._handle_integrity_error(e, propvalues)
 
     def set_inner(self, nodeid, **propvalues):
         try:
             return rdbms_common.Class.set_inner(self, nodeid,
                                                 **propvalues)
-        except MySQLdb.IntegrityError, e:
+        except MySQLdb.IntegrityError as e:
             self._handle_integrity_error(e, propvalues)
 
     def _handle_integrity_error(self, e, propvalues):

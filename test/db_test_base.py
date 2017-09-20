@@ -20,11 +20,12 @@ import logging
 import gpgmelib
 from email.parser import FeedParser
 
+import pytest
 from roundup.hyperdb import String, Password, Link, Multilink, Date, \
-    Interval, DatabaseError, Boolean, Number, Node
+    Interval, DatabaseError, Boolean, Number, Node, Integer
 from roundup.mailer import Mailer
 from roundup import date, password, init, instance, configuration, \
-    roundupdb, i18n
+    roundupdb, i18n, hyperdb
 from roundup.cgi.templating import HTMLItem
 
 from mocknull import MockNull
@@ -55,7 +56,7 @@ def setupTracker(dirname, backend="anydbm"):
     global config
     try:
         shutil.rmtree(dirname)
-    except OSError, error:
+    except OSError as error:
         if error.errno not in (errno.ENOENT, errno.ESRCH): raise
     # create the instance
     init.install(dirname, os.path.join(os.path.dirname(__file__),
@@ -64,12 +65,11 @@ def setupTracker(dirname, backend="anydbm"):
                                        'roundup',
                                        'templates',
                                        'classic'))
-    init.write_select_db(dirname, backend)
+    config.RDBMS_BACKEND = backend
     config.save(os.path.join(dirname, 'config.ini'))
     tracker = instance.open(dirname)
     if tracker.exists():
         tracker.nuke()
-        init.write_select_db(dirname, backend)
     tracker.init(password.Password('sekrit'))
     return tracker
 
@@ -80,26 +80,30 @@ def setupSchema(db, create, module):
     status.setkey("name")
     priority = module.Class(db, "priority", name=String(), order=String())
     priority.setkey("name")
-    user = module.Class(db, "user", username=String(), password=Password(),
-        assignable=Boolean(), age=Number(), roles=String(), address=String(),
-        supervisor=Link('user'),realname=String())
+    user = module.Class(db, "user", username=String(),
+        password=Password(quiet=True), assignable=Boolean(quiet=True),
+        age=Number(quiet=True), roles=String(), address=String(),
+        rating=Integer(quiet=True), supervisor=Link('user'),
+        realname=String(quiet=True), longnumber=Number(use_double=True))
     user.setkey("username")
     file = module.FileClass(db, "file", name=String(), type=String(),
         comment=String(indexme="yes"), fooz=Password())
     file_nidx = module.FileClass(db, "file_nidx", content=String(indexme='no'))
+
+    # initialize quiet mode a second way without using Multilink("user", quiet=True)
+    mynosy = Multilink("user")
+    mynosy.quiet = True
     issue = module.IssueClass(db, "issue", title=String(indexme="yes"),
-        status=Link("status"), nosy=Multilink("user"), deadline=Date(),
-        foo=Interval(), files=Multilink("file"), assignedto=Link('user'),
-        priority=Link('priority'), spam=Multilink('msg'),
-        feedback=Link('msg'))
+        status=Link("status"), nosy=mynosy, deadline=Date(quiet=True),
+        foo=Interval(quiet=True, default_value=date.Interval('-1w')),
+        files=Multilink("file"), assignedto=Link('user', quiet=True),
+        priority=Link('priority'), spam=Multilink('msg'), feedback=Link('msg'))
     stuff = module.Class(db, "stuff", stuff=String())
     session = module.Class(db, 'session', title=String())
     msg = module.FileClass(db, "msg", date=Date(),
-                           author=Link("user", do_journal='no'),
-                           files=Multilink('file'), inreplyto=String(),
-                           messageid=String(),
-                           recipients=Multilink("user", do_journal='no')
-                           )
+        author=Link("user", do_journal='no'), files=Multilink('file'),
+        inreplyto=String(), messageid=String(),
+        recipients=Multilink("user", do_journal='no'))
     session.disableJournalling()
     db.post_init()
     if create:
@@ -121,7 +125,15 @@ def setupSchema(db, create, module):
     # nosy tests require this
     db.security.addPermissionToRole('User', 'View', 'msg')
 
-class MyTestCase(unittest.TestCase):
+    # quiet journal tests require this
+    # QuietJournal - reference used later in tests
+    v1 = db.security.addPermission(name='View', klass='user',
+                properties=['username', 'supervisor', 'assignable'],
+                description="Prevent users from seeing roles")
+
+    db.security.addPermissionToRole("User", v1)
+
+class MyTestCase(object):
     def tearDown(self):
         if hasattr(self, 'db'):
             self.db.close()
@@ -533,6 +545,53 @@ class DBTest(commonDBTest):
         self.db.user.set(nid, age=None)
         self.assertEqual(self.db.user.get(nid, "age"), None)
 
+    # Long number
+    def testDoubleChange(self):
+        lnl = 100.12345678
+        ln  = 100.123456789
+        lng = 100.12345679
+        nid = self.db.user.create(username='foo', longnumber=ln)
+        self.assertEqual(self.db.user.get(nid, 'longnumber') < lng, True)
+        self.assertEqual(self.db.user.get(nid, 'longnumber') > lnl, True)
+        lnl = 1.0012345678e55
+        ln  = 1.00123456789e55
+        lng = 1.0012345679e55
+        self.db.user.set(nid, longnumber=ln)
+        self.assertEqual(self.db.user.get(nid, 'longnumber') < lng, True)
+        self.assertEqual(self.db.user.get(nid, 'longnumber') > lnl, True)
+        self.db.user.set(nid, longnumber=-1)
+        self.assertEqual(self.db.user.get(nid, 'longnumber'), -1)
+        self.db.user.set(nid, longnumber=0)
+        self.assertEqual(self.db.user.get(nid, 'longnumber'), 0)
+
+        nid = self.db.user.create(username='bar', longnumber=0)
+        self.assertEqual(self.db.user.get(nid, 'longnumber'), 0)
+
+    def testDoubleUnset(self):
+        nid = self.db.user.create(username='foo', longnumber=1.2345)
+        self.db.user.set(nid, longnumber=None)
+        self.assertEqual(self.db.user.get(nid, "longnumber"), None)
+
+
+    # Integer
+    def testIntegerChange(self):
+        nid = self.db.user.create(username='foo', rating=100)
+        self.assertEqual(100, self.db.user.get(nid, 'rating'))
+        self.db.user.set(nid, rating=300)
+        self.assertNotEqual(self.db.user.get(nid, 'rating'), 100)
+        self.db.user.set(nid, rating=-1)
+        self.assertEqual(self.db.user.get(nid, 'rating'), -1)
+        self.db.user.set(nid, rating=0)
+        self.assertEqual(self.db.user.get(nid, 'rating'), 0)
+
+        nid = self.db.user.create(username='bar', rating=0)
+        self.assertEqual(self.db.user.get(nid, 'rating'), 0)
+
+    def testIntegerUnset(self):
+        nid = self.db.user.create(username='foo', rating=1)
+        self.db.user.set(nid, rating=None)
+        self.assertEqual(self.db.user.get(nid, "rating"), None)
+
     # Password
     def testPasswordChange(self):
         x = password.Password('x')
@@ -857,6 +916,300 @@ class DBTest(commonDBTest):
         self.assertEqual(test.call_a, 0)
         self.assertEqual(test.call_b, 1)
         self.assertEqual(test.call_c, 2)
+
+    def testDefault_Value(self):
+        new_issue=self.db.issue.create(title="title", deadline=date.Date('2016-6-30.22:39'))
+
+        # John Rouillard claims this should return the default value of 1 week for foo,
+        # but the hyperdb doesn't assign the default value for missing properties in the
+        # db on creation.
+        result=self.db.issue.get(new_issue, 'foo')
+        # When the defaultis automatically set by the hyperdb, change this to
+        # match the Interval test below.
+        self.assertEqual(result, None)
+
+        # but verify that the default value is retreivable
+        result=self.db.issue.properties['foo'].get_default_value()
+        self.assertEqual(result, date.Interval('-7d'))
+
+    def testQuietProperty(self):
+        # make sure that the quiet properties: "assignable" and "age" are not
+        # returned as part of the proplist
+        new_user=self.db.user.create(username="pete", age=10, assignable=False)
+        new_issue=self.db.issue.create(title="title", deadline=date.Date('2016-6-30.22:39'))
+        # change all quiet params. Verify they aren't returned in object.
+        # between this and the issue class every type represented in hyperdb
+        # should be initalized with a quiet parameter.
+        result=self.db.user.set(new_user, username="new", age=20, supervisor='3', assignable=True,
+                                password=password.Password("3456"), rating=4, realname="newname")
+        self.assertEqual(result, {'supervisor': '3', 'username': "new"})
+        result=self.db.user.get(new_user, 'age')
+        self.assertEqual(result, 20)
+
+        # change all quiet params. Verify they aren't returned in object.
+        result=self.db.issue.set(new_issue, title="title2", deadline=date.Date('2016-7-13.22:39'),
+                                 assignedto="2", nosy=["3", "2"])
+        self.assertEqual(result, {'title': 'title2'})
+
+        # also test that we can make a property noisy
+        self.db.user.properties['age'].quiet=False
+        result=self.db.user.set(new_user, username="old", age=30, supervisor='2', assignable=False)
+        self.assertEqual(result, {'age': 30, 'supervisor': '2', 'username': "old"})
+        self.db.user.properties['age'].quiet=True
+
+    def testQuietChangenote(self):
+        # create user 3 for later use
+        self.db.user.create(username="pete", age=10, assignable=False)
+
+        new_issue=self.db.issue.create(title="title", deadline=date.Date('2016-6-30.22:39'))
+
+        # change all quiet params. Verify they aren't returned in CreateNote.
+        result=self.db.issue.set(new_issue, title="title2", deadline=date.Date('2016-6-30.22:39'),
+                                 assignedto="2", nosy=["3", "2"])
+        result=self.db.issue.generateCreateNote(new_issue)
+        self.assertEqual(result, '\n----------\ntitle: title2')
+
+        # also test that we can make a property noisy
+        self.db.issue.properties['nosy'].quiet=False
+        self.db.issue.properties['deadline'].quiet=False
+        result=self.db.issue.set(new_issue, title="title2", deadline=date.Date('2016-7-13.22:39'),
+                                 assignedto="2", nosy=["1", "2"])
+        result=self.db.issue.generateCreateNote(new_issue)
+        self.assertEqual(result, '\n----------\ndeadline: 2016-07-13.22:39:00\nnosy: admin, fred\ntitle: title2')
+        self.db.issue.properties['nosy'].quiet=True
+        self.db.issue.properties['deadline'].quiet=True
+
+    def testViewPremJournal(self):
+        pass
+
+    def testQuietJournal(self):
+        ## This is an example of how to enable logging module
+        ## and report the results. It uses testfixtures
+        ## that can be installed via pip.
+        ## Uncomment below 2 lines:
+        #import logging
+        #from testfixtures import LogCapture
+        ## then run every call to roundup functions with:
+        #with LogCapture('roundup.hyperdb', level=logging.DEBUG) as l:
+        #    result=self.db.user.history('2')
+        #print l
+        ## change 'roundup.hyperdb' to the logging name you want to capture.
+        ## print l just prints the output. Run using:
+        ## ./run_tests.py --capture=no -k testQuietJournal test/test_anydbm.py
+
+        # FIXME There should be a test via
+        # template.py::_HTMLItem::history() and verify the output.
+        # not sure how to get there from here. -- rouilj
+
+        # The Class::history() method now does filtering of quiet
+        # props. Make sure that the quiet properties: "assignable"
+        # and "age" are not returned as part of the journal
+        new_user=self.db.user.create(username="pete", age=10, assignable=False)
+        new_issue=self.db.issue.create(title="title", deadline=date.Date('2016-6-30.22:39'))
+
+        # change all quiet params. Verify they aren't returned in journal.
+        # between this and the issue class every type represented in hyperdb
+        # should be initalized with a quiet parameter.
+        result=self.db.user.set(new_user, username="new", age=20,
+                                supervisor='1', assignable=True,
+                                password=password.Password("3456"),
+                                rating=4, realname="newname")
+        result=self.db.user.history(new_user, skipquiet=False)
+        '''
+        [('3', <Date 2017-04-14.02:12:20.922>, '1', 'create', {}),
+         ('3', <Date 2017-04-14.02:12:20.922>, '1', 'set', 
+           {'username': 'pete', 'assignable': False, 
+            'supervisor': None, 'realname': None, 'rating': None,
+            'age': 10, 'password': None})]
+        '''
+        expected = {'username': 'pete', 'assignable': False, 
+            'supervisor': None, 'realname': None, 'rating': None,
+            'age': 10, 'password': None}
+
+        result.sort()
+        (id, tx_date, user, action, args) = result[-1]
+        # check piecewise ignoring date of transaction
+        self.assertEqual('3', id)
+        self.assertEqual('1', user)
+        self.assertEqual('set', action)
+        self.assertEqual(expected, args)
+
+        # change all quiet params on issue.
+        result=self.db.issue.set(new_issue, title="title2",
+                                 deadline=date.Date('2016-07-30.22:39'),
+                                 assignedto="2", nosy=["3", "2"])
+        result=self.db.issue.generateCreateNote(new_issue)
+        self.assertEqual(result, '\n----------\ntitle: title2')
+
+        # check history including quiet properties
+        result=self.db.issue.history(new_issue, skipquiet=False)
+        print result
+        ''' output should be like:
+             [ ... ('1', <Date 2017-04-14.01:41:08.466>, '1', 'set',
+                 {'assignedto': None, 'nosy': (('+', ['3', '2']),),
+                     'deadline': <Date 2016-06-30.22:39:00.000>,
+                     'title': 'title'})
+        '''
+        expected = {'assignedto': None,
+                    'nosy': (('+', ['3', '2']),),
+                    'deadline': date.Date('2016-06-30.22:39'),
+                    'title': 'title'}
+
+        result.sort()
+        print "history include quiet props", result[-1]
+        (id, tx_date, user, action, args) = result[-1]
+        # check piecewise ignoring date of transaction
+        self.assertEqual('1', id)
+        self.assertEqual('1', user)
+        self.assertEqual('set', action)
+        self.assertEqual(expected, args)
+
+        # check history removing quiet properties
+        result=self.db.issue.history(new_issue)
+        ''' output should be like:
+             [ ... ('1', <Date 2017-04-14.01:41:08.466>, '1', 'set',
+                 {'title': 'title'})
+        '''
+        expected = {'title': 'title'}
+
+        result.sort()
+        print "history remove quiet props", result[-1]
+        (id, tx_date, user, action, args) = result[-1]
+        # check piecewise
+        self.assertEqual('1', id)
+        self.assertEqual('1', user)
+        self.assertEqual('set', action)
+        self.assertEqual(expected, args)
+
+        # also test that we can make a property noisy
+        self.db.issue.properties['nosy'].quiet=False
+        self.db.issue.properties['deadline'].quiet=False
+
+        # FIXME: mysql use should be fixed or
+        # a different way of checking this should be done.
+        # this sleep is a hack.
+        # mysql transation timestamps are in whole
+        # seconds. To get the history to sort in proper
+        # order by using timestamps we have to sleep 2 seconds
+        # here tomake sure the timestamp between this transaction
+        # and the last transaction is at least 1 second apart.
+        import time; time.sleep(2)
+        result=self.db.issue.set(new_issue, title="title2",
+                                 deadline=date.Date('2016-7-13.22:39'),
+                                 assignedto="2", nosy=["1", "2"])
+        result=self.db.issue.generateCreateNote(new_issue)
+        self.assertEqual(result, '\n----------\ndeadline: 2016-07-13.22:39:00\nnosy: admin, fred\ntitle: title2')
+
+
+        # check history removing the current quiet properties
+        result=self.db.issue.history(new_issue)
+        expected = {'nosy': (('+', ['1']), ('-', ['3'])),
+                    'deadline': date.Date("2016-07-30.22:39:00.000")}
+
+        result.sort()
+        print "result unquiet", result
+        (id, tx_date, user, action, args) = result[-1]
+        # check piecewise
+        self.assertEqual('1', id)
+        self.assertEqual('1', user)
+        self.assertEqual('set', action)
+        self.assertEqual(expected, args)
+
+        result=self.db.user.history('2')
+        result.sort()
+
+        # result should look like:
+        #  [('2', <Date 2017-08-29.01:42:40.227>, '1', 'create', {}),
+        #   ('2', <Date 2017-08-29.01:42:44.283>, '1', 'link',
+        #      ('issue', '1', 'nosy')) ]
+
+        expected2 = ('issue', '1', 'nosy')
+
+        (id, tx_date, user, action, args) = result[-1]
+
+        self.assertEqual(len(result),2)
+
+        self.assertEqual('2', id)
+        self.assertEqual('1', user)
+        self.assertEqual('link', action)
+        self.assertEqual(expected2, args)
+
+        # reset quiet props
+        self.db.issue.properties['nosy'].quiet=True
+        self.db.issue.properties['deadline'].quiet=True
+
+        # Change the role for the new_user.
+        # If journal is retrieved by admin this adds the role
+        # change as the last element. If retreived by non-admin
+        # it should not be returned because the user has no
+        # View permissons on role.
+        # FIXME delay by two seconds due to mysql missing
+        # fractional seconds. See sleep above for details
+        time.sleep(2)
+        result=self.db.user.set(new_user, roles="foo, bar")
+
+        # Verify last journal entry as admin is a role change
+        # from None
+        result=self.db.user.history(new_user, skipquiet=False)
+        result.sort()
+        ''' result should end like:
+          [ ...
+          ('3', <Date 2017-04-15.02:06:11.482>, '1', 'set',
+                {'username': 'pete', 'assignable': False,
+                 'supervisor': None, 'realname': None,
+                  'rating': None, 'age': 10, 'password': None}),
+          ('3', <Date 2017-04-15.02:06:11.482>, '1', 'link', 
+                ('issue', '1', 'nosy')),
+          ('3', <Date 2017-04-15.02:06:11.482>, '1', 'unlink',
+                ('issue', '1', 'nosy')), 
+          ('3', <Date 2017-04-15.02:06:11.482>, '1', 'set',
+             {'roles': None})]
+        '''
+        (id, tx_date, user, action, args) = result[-1]
+        expected = {'roles': None }
+
+        self.assertEqual('3', id)
+        self.assertEqual('1', user)
+        self.assertEqual('set', action)
+        self.assertEqual(expected, args)
+
+        # set an existing user's role to User so it can
+        # view some props of the user class (search backwards
+        # for QuietJournal to see the properties, they should be:
+        # 'username', 'supervisor', 'assignable' i.e. age is not
+        # one of them.
+        id = self.db.user.lookup("fred")
+        # FIXME mysql timestamp issue see sleeps above
+        time.sleep(2)
+        result=self.db.user.set(id, roles="User")
+        # make the user fred current.
+        self.db.setCurrentUser('fred')
+        self.assertEqual(self.db.getuid(), id)
+
+        # check history as the user fred
+        #   include quiet properties
+        #   but require View perms
+        result=self.db.user.history(new_user, skipquiet=False)
+        result.sort()
+        ''' result should look like
+        [('3', <Date 2017-04-15.01:43:26.911>, '1', 'create', {}),
+        ('3', <Date 2017-04-15.01:43:26.911>, '1', 'set', 
+            {'username': 'pete', 'assignable': False, 
+              'supervisor': None, 'age': 10})]
+        '''
+        # analyze last item
+        (id, tx_date, user, action, args) = result[-1]
+        expected= {'username': 'pete', 'assignable': False, 
+                   'supervisor': None}
+
+        self.assertEqual('3', id)
+        self.assertEqual('1', user)
+        self.assertEqual('set', action)
+        self.assertEqual(expected, args)
+
+        # reset the user to admin
+        self.db.setCurrentUser('admin')
+        self.assertEqual(self.db.getuid(), '1') # admin is always 1
 
     def testJournals(self):
         muid = self.db.user.create(username="mary")
@@ -1939,6 +2292,150 @@ class DBTest(commonDBTest):
             roundup.admin.sys = sys
             shutil.rmtree('_test_export')
 
+    # test props from args parsing
+    def testAdminOtherCommands(self):
+        import roundup.admin
+        from roundup.exceptions import UsageError
+
+        # use the filtering setup to create a bunch of items
+        ae, dummy1, dummy2 = self.filteringSetup()
+        # create large field
+        self.db.priority.create(name = 'X' * 500)
+        self.db.config.CSV_FIELD_SIZE = 400
+        self.db.commit()
+
+        eoutput = [] # stderr output
+        soutput = [] # stdout output
+
+        def stderrwrite(s):
+            eoutput.append(s)
+        def stdoutwrite(s):
+            soutput.append(s)
+        roundup.admin.sys = MockNull ()
+        try:
+            roundup.admin.sys.stderr.write = stderrwrite
+            roundup.admin.sys.stdout.write = stdoutwrite
+
+            tool = roundup.admin.AdminTool()
+            home = '.'
+            tool.tracker_home = home
+            tool.db = self.db
+            tool.verbose = False
+            tool.separator = "\n"
+            tool.print_designator = True
+
+            # test props_from_args
+            self.assertRaises(UsageError, tool.props_from_args, "fullname") # invalid propname
+
+            self.assertEqual(tool.props_from_args("="), {'': None}) # not sure this desired, I'd expect UsageError
+            
+            props = tool.props_from_args(["fullname=robert", "friends=+rouilj,+other", "key="])
+            self.assertEqual(props, {'fullname': 'robert', 'friends': '+rouilj,+other', 'key': None})
+
+            # test get_class()
+            self.assertRaises(UsageError, tool.get_class, "bar") # invalid class
+
+            # This writes to stdout, need to figure out how to redirect to a variable.
+            # classhandle = tool.get_class("user") # valid class
+            # FIXME there should be some test here
+ 
+            issue_class_spec = tool.do_specification(["issue"])
+            self.assertEqual(soutput, ['files: <roundup.hyperdb.Multilink to "file">\n',
+                                       'status: <roundup.hyperdb.Link to "status">\n',
+                                       'feedback: <roundup.hyperdb.Link to "msg">\n',
+                                       'spam: <roundup.hyperdb.Multilink to "msg">\n',
+                                       'nosy: <roundup.hyperdb.Multilink to "user">\n',
+                                       'title: <roundup.hyperdb.String>\n',
+                                       'messages: <roundup.hyperdb.Multilink to "msg">\n',
+                                       'priority: <roundup.hyperdb.Link to "priority">\n',
+                                       'assignedto: <roundup.hyperdb.Link to "user">\n',
+                                       'deadline: <roundup.hyperdb.Date>\n',
+                                       'foo: <roundup.hyperdb.Interval>\n',
+                                       'superseder: <roundup.hyperdb.Multilink to "issue">\n'])
+
+            #userclassprop=tool.do_list(["mls"])
+            #tool.print_designator = False
+            #userclassprop=tool.do_get(["realname","user1"])
+
+            # test do_create
+            soutput[:] = [] # empty for next round of output
+            userclass=tool.do_create(["issue", "title='title1 title'", "nosy=1,3"]) # should be issue 5
+            userclass=tool.do_create(["issue", "title='title2 title'", "nosy=2,3"]) # should be issue 6
+            self.assertEqual(soutput, ['5\n', '6\n'])
+            # verify nosy setting
+            props=self.db.issue.get('5', "nosy")
+            self.assertEqual(props, ['1','3'])
+
+            # test do_set using newly created issues
+            # remove user 3 from issues
+            # verifies issue2550572
+            userclass=tool.do_set(["issue5,issue6", "nosy=-3"])
+            # verify proper result
+            props=self.db.issue.get('5', "nosy")
+            self.assertEqual(props, ['1'])
+            props=self.db.issue.get('6', "nosy")
+            self.assertEqual(props, ['2'])
+
+            # basic usage test. TODO add full output verification
+            soutput[:] = [] # empty for next round of output
+            tool.usage(message="Hello World")
+            self.failUnless(soutput[0].startswith('Problem: Hello World'), None)
+
+            # check security output
+            soutput[:] = [] # empty for next round of output
+            tool.do_security("Admin")
+            self.assertEqual(soutput, [ 'New Web users get the Role "User"\n',
+                                       'New Email users get the Role "User"\n',
+                                       'Role "admin":\n',
+                                       ' User may create everything (Create)\n',
+                                       ' User may edit everything (Edit)\n',
+                                       ' User may restore everything (Restore)\n',
+                                       ' User may retire everything (Retire)\n',
+                                       ' User may view everything (View)\n',
+                                       ' User may access the web interface (Web Access)\n',
+                                       ' User may manipulate user Roles through the web (Web Roles)\n',
+                                       ' User may use the email interface (Email Access)\n',
+                                       'Role "anonymous":\n', 'Role "user":\n',
+                                       ' User is allowed to access msg (View for "msg" only)\n',
+                                       ' Prevent users from seeing roles (View for "user": [\'username\', \'supervisor\', \'assignable\'] only)\n'])
+
+
+            self.nukeAndCreate()
+            tool = roundup.admin.AdminTool()
+            tool.tracker_home = home
+            tool.db = self.db
+            tool.verbose = False
+        finally:
+            roundup.admin.sys = sys
+
+
+    # test duplicate relative tracker home initialisation (issue2550757)
+    def testAdminDuplicateInitialisation(self):
+        import roundup.admin
+        output = []
+        def stderrwrite(s):
+            output.append(s)
+        roundup.admin.sys = MockNull ()
+        t = '_test_initialise'
+        try:
+            roundup.admin.sys.stderr.write = stderrwrite
+            tool = roundup.admin.AdminTool()
+            tool.force = True
+            args = (None, 'classic', 'anydbm',
+                    'MAIL_DOMAIN=%s' % config.MAIL_DOMAIN)
+            tool.do_install(t, args=args)
+            args = (None, 'mypasswd')
+            tool.do_initialise(t, args=args)
+            tool.do_initialise(t, args=args)
+            try:  # python >=2.7
+                self.assertNotIn(t, os.listdir(t))
+            except AttributeError:
+                self.assertFalse('db' in os.listdir(t))
+        finally:
+            roundup.admin.sys = sys
+            if os.path.exists(t):
+                shutil.rmtree(t)
+
     def testAddProperty(self):
         self.db.issue.create(title="spam", status='1')
         self.db.commit()
@@ -2018,14 +2515,12 @@ class DBTest(commonDBTest):
             roundupdb._ = old_translate_
             Mailer.smtp_send = backup
 
+    @pytest.mark.skipif(gpgmelib.pyme is None, reason='Skipping PGPNosy test')
     def testPGPNosyMail(self) :
         """Creates one issue with two attachments, one smaller and one larger
            than the set max_attachment_size. Recipients are one with and
            one without encryption enabled via a gpg group.
         """
-        if gpgmelib.pyme is None:
-            print "Skipping PGPNosy test"
-            return
         old_translate_ = roundupdb._
         roundupdb._ = i18n.get_translation(language='C').gettext
         db = self.db
@@ -2463,7 +2958,7 @@ class FilterCacheTest(commonDBTest):
         ae (result, ['4', '5', '6', '7', '8', '1', '2', '3'])
 
 
-class ClassicInitBase(unittest.TestCase):
+class ClassicInitBase(object):
     count = 0
     db = None
 
@@ -2472,7 +2967,7 @@ class ClassicInitBase(unittest.TestCase):
         self.dirname = '_test_init_%s'%self.count
         try:
             shutil.rmtree(self.dirname)
-        except OSError, error:
+        except OSError as error:
             if error.errno not in (errno.ENOENT, errno.ESRCH): raise
 
     def tearDown(self):
@@ -2480,7 +2975,7 @@ class ClassicInitBase(unittest.TestCase):
             self.db.close()
         try:
             shutil.rmtree(self.dirname)
-        except OSError, error:
+        except OSError as error:
             if error.errno not in (errno.ENOENT, errno.ESRCH): raise
 
 class ClassicInitTest(ClassicInitBase):

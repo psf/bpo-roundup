@@ -57,21 +57,14 @@ import sys, os, time, re, errno, weakref, copy, logging, datetime
 # roundup modules
 from roundup import hyperdb, date, password, roundupdb, security, support
 from roundup.hyperdb import String, Password, Date, Interval, Link, \
-    Multilink, DatabaseError, Boolean, Number, Node
+    Multilink, DatabaseError, Boolean, Number, Integer, Node
 from roundup.backends import locking
-from roundup.support import reversed
 from roundup.i18n import _
 
 
 # support
 from roundup.backends.blobfiles import FileStorage
-# mvl 20120421: disable xapian usage because of various problems
-#try:
-#    from roundup.backends.indexer_xapian import Indexer
-#except ImportError:
-#    from roundup.backends.indexer_rdbms import Indexer
-from roundup.backends.indexer_rdbms import Indexer
-
+from roundup.backends.indexer_common import get_indexer
 from roundup.backends.sessions_rdbms import Sessions, OneTimeKeys
 from roundup.date import Range
 
@@ -176,7 +169,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         self.config, self.journaltag = config, journaltag
         self.dir = config.DATABASE
         self.classes = {}
-        self.indexer = Indexer(self)
+        self.indexer = get_indexer(config, self)
         self.security = security.Security(self)
 
         # additional transaction support for external files and the like
@@ -188,6 +181,10 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         self.clearCache()
         self.stats = {'cache_hits': 0, 'cache_misses': 0, 'get_items': 0,
             'filtering': 0}
+
+        # make sure the database directory exists
+        if not os.path.isdir(self.config.DATABASE):
+            os.makedirs(self.config.DATABASE)
 
         # database lock
         self.lockfile = None
@@ -212,7 +209,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
 
             Must call self.load_dbschema()
         """
-        raise NotImplemented
+        raise NotImplementedError
 
     def sql(self, sql, args=None, cursor=None):
         """ Execute the sql with the optional args.
@@ -456,6 +453,10 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
                     klass.index(nodeid)
         self.indexer.save_index()
 
+    # Used here in the generic backend to determine if the database
+    # supports 'DOUBLE PRECISION' for floating point numbers.
+    implements_double_precision = True
+
     hyperdb_to_sql_datatypes = {
         hyperdb.String : 'TEXT',
         hyperdb.Date   : 'TIMESTAMP',
@@ -464,11 +465,15 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         hyperdb.Password  : 'VARCHAR(255)',
         hyperdb.Boolean   : 'BOOLEAN',
         hyperdb.Number    : 'REAL',
+        hyperdb.Integer   : 'INTEGER',
     }
 
-    def hyperdb_to_sql_datatype(self, propclass):
+    def hyperdb_to_sql_datatype(self, propclass, prop = None):
 
         datatype = self.hyperdb_to_sql_datatypes.get(propclass)
+        if self.implements_double_precision and prop and \
+          isinstance(prop, Number) and prop.use_double:
+            datatype = 'DOUBLE PRECISION'
         if datatype:
             return datatype
         
@@ -502,7 +507,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
                 #and prop.find('Multilink') != -1:
                 #mls.append(col)
 
-            datatype = self.hyperdb_to_sql_datatype(prop.__class__)
+            datatype = self.hyperdb_to_sql_datatype(prop.__class__, prop)
             cols.append(('_'+col, datatype))
 
             # Intervals stored as two columns
@@ -528,7 +533,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         if not self.config.RDBMS_ALLOW_ALTER:
             raise DatabaseError(_('ALTER operation disallowed: %r -> %r.'%(old_spec, new_spec)))
 
-        logger = logging.getLogger('roundup.hyperdb')
+        logger = logging.getLogger('roundup.hyperdb.backend')
         logger.info('update_class %s'%spec.classname)
 
         logger.debug('old_spec %r'%(old_spec,))
@@ -581,7 +586,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
                 self.create_multilink_table(spec, propname)
             else:
                 # add the column
-                coltype = self.hyperdb_to_sql_datatype(prop.__class__)
+                coltype = self.hyperdb_to_sql_datatype(prop.__class__, prop)
                 sql = 'alter table _%s add column _%s %s'%(
                     spec.classname, propname, coltype)
                 self.sql(sql)
@@ -853,7 +858,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         Note: I don't commit here, which is different behaviour to the
               "nuke from orbit" behaviour in the dbs.
         """
-        logging.getLogger('roundup.hyperdb').info('clear')
+        logging.getLogger('roundup.hyperdb.backend').info('clear')
         for cn in self.classes:
             sql = 'delete from _%s'%cn
             self.sql(sql)
@@ -871,6 +876,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         hyperdb.Password  : str,
         hyperdb.Boolean   : lambda x: x and 'TRUE' or 'FALSE',
         hyperdb.Number    : lambda x: x,
+        hyperdb.Integer   : lambda x: x,
         hyperdb.Multilink : lambda x: x,    # used in journal marshalling
     }
 
@@ -1084,6 +1090,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         hyperdb.Password  : lambda x: password.Password(encrypted=x),
         hyperdb.Boolean   : _bool_cvt,
         hyperdb.Number    : _num_cvt,
+        hyperdb.Integer   : int,
         hyperdb.Multilink : lambda x: x,    # used in journal marshalling
     }
 
@@ -1187,7 +1194,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         """Remove a node from the database. Called exclusively by the
            destroy() method on Class.
         """
-        logging.getLogger('roundup.hyperdb').info('destroynode %s%s'%(
+        logging.getLogger('roundup.hyperdb.backend').info('destroynode %s%s'%(
             classname, nodeid))
 
         # make sure the node exists
@@ -1225,9 +1232,15 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
     def hasnode(self, classname, nodeid):
         """ Determine if the database has a given node.
         """
+        # nodeid (aka link) is sql type INTEGER.  max positive value
+        # for INTEGER is 2^31-1 for Postgres and MySQL. The max
+        # positive value for SqLite is 2^63 -1, so arguably this check
+        # needs to adapt for the type of the RDBMS. For right now,
+        # choose lowest common denominator.
         if int(nodeid) >= 2**31:
-            # value out of range
+            # value out of range return false
             return 0
+
         # If this node is in the cache, then we do not need to go to
         # the database.  (We don't consider this an LRU hit, though.)
         if (classname, nodeid) in self.cache:
@@ -1250,9 +1263,14 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         """ Journal the Action
         'action' may be:
 
-            'create' or 'set' -- 'params' is a dictionary of property values
+            'set' -- 'params' is a dictionary of property values
+            'create' -- 'params' is an empty dictionary as of
+                      Wed Nov 06 11:38:43 2002 +0000
             'link' or 'unlink' -- 'params' is (classname, nodeid, propname)
-            'retire' -- 'params' is None
+            'retired' or 'restored' -- 'params' is None
+
+            'creator' -- the user performing the action, which defaults to
+            the current user.
         """
         # handle supply of the special journalling parameters (usually
         # supplied on importing an existing database)
@@ -1396,7 +1414,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
     def sql_commit(self, fail_ok=False):
         """ Actually commit to the database.
         """
-        logging.getLogger('roundup.hyperdb').info('commit')
+        logging.getLogger('roundup.hyperdb.backend').info('commit')
 
         self.conn.commit()
 
@@ -1442,7 +1460,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         Undo all the changes made since the database was opened or the last
         commit() or rollback() was performed.
         """
-        logging.getLogger('roundup.hyperdb').info('rollback')
+        logging.getLogger('roundup.hyperdb.backend').info('rollback')
 
         self.sql_rollback()
 
@@ -1457,7 +1475,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         self.clearCache()
 
     def sql_close(self):
-        logging.getLogger('roundup.hyperdb').info('close')
+        logging.getLogger('roundup.hyperdb.backend').info('close')
         self.conn.close()
 
     def close(self):
@@ -1635,6 +1653,12 @@ class Class(hyperdb.Class):
                 except ValueError:
                     raise TypeError('new property "%s" not numeric'%key)
 
+            elif value is not None and isinstance(prop, Integer):
+                try:
+                    int(value)
+                except ValueError:
+                    raise TypeError('new property "%s" not integer'%key)
+
             elif value is not None and isinstance(prop, Boolean):
                 try:
                     int(value)
@@ -1770,6 +1794,9 @@ class Class(hyperdb.Class):
         # remember the add/remove stuff for multilinks, making it easier
         # for the Database layer to do its stuff
         multilink_changes = {}
+
+        # omit quiet properties from history/changelog
+        quiet_props = []
 
         for propname, value in list(propvalues.items()):
             # check to make sure we're not duplicating an existing key
@@ -1934,11 +1961,21 @@ class Class(hyperdb.Class):
                 except ValueError:
                     raise TypeError('new property "%s" not numeric'%propname)
 
+            elif value is not None and isinstance(prop, Integer):
+                try:
+                    int(value)
+                except ValueError:
+                    raise TypeError('new property "%s" not integer'%propname)
+
             elif value is not None and isinstance(prop, Boolean):
                 try:
                     int(value)
                 except ValueError:
                     raise TypeError('new property "%s" not boolean'%propname)
+
+            # record quiet properties to omit from history/changelog
+            if prop.quiet:
+                quiet_props.append(propname)
 
         # nothing to do?
         if not propvalues:
@@ -1958,6 +1995,11 @@ class Class(hyperdb.Class):
         # journal the set
         if self.do_journal:
             self.db.addjournal(self.classname, nodeid, ''"set", journalvalues)
+
+        # remove quiet properties from output
+        for propname in quiet_props:
+            if propname in propvalues:
+                del propvalues[propname]
 
         return propvalues
 
@@ -2918,7 +2960,8 @@ class Class(hyperdb.Class):
         properties = self.getprops()
         r = []
         for nodeid in self.getnodeids():
-            for nodeid, date, user, action, params in self.history(nodeid):
+            for nodeid, date, user, action, params in self.history(nodeid,
+                            enforceperm=False, skipquiet=False):
                 date = date.get_tuple()
                 if action == 'set':
                     export_data = {}
@@ -3004,7 +3047,7 @@ class FileClass(hyperdb.FileClass, Class):
         if propname == 'content':
             try:
                 return self.db.getfile(self.classname, nodeid, None)
-            except IOError, strerror:
+            except IOError as strerror:
                 # BUG: by catching this we donot see an error in the log.
                 return 'ERROR reading file: %s%s\n%s\n%s'%(
                         self.classname, nodeid, poss_msg, strerror)

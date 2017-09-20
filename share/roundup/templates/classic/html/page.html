@@ -54,7 +54,7 @@ status_notresolved string:-1,1,2,3,4,5,6,7;
    <span i18n:translate=""
     ><b>Your Queries</b> (<a href="query?@template=edit">edit</a>)</span><br>
    <tal:block tal:repeat="qs request/user/queries">
-    <a href="#" tal:attributes="href string:${qs/klass}?${qs/url}&@dispname=${qs/name}"
+    <a href="#" tal:attributes="href string:${qs/klass}?${qs/url}&@dispname=${qs/name/url_quote}"
        tal:content="qs/name">link</a><br>
    </tal:block>
   </p>
@@ -94,6 +94,8 @@ status_notresolved string:-1,1,2,3,4,5,6,7;
      i18n:attributes="value"><input class="form-small" size="4"
      type="text" name="@number">
     <input type="hidden" name="@type" value="issue">
+    <input name="@csrf" type="hidden"
+	   tal:attributes="value python:utils.anti_csrf_nonce()">
     <input type="hidden" name="@action" value="show">
    </p>
   </form>
@@ -132,8 +134,15 @@ status_notresolved string:-1,1,2,3,4,5,6,7;
     <input type="hidden" name="@action" value="Login">
     <input type="checkbox" name="remember" id="remember">
     <label for="remember" i18n:translate="">Remember me?</label><br>
+    <input name="@csrf" type="hidden"
+	   tal:attributes="value python:utils.anti_csrf_nonce()">
     <input type="submit" value="Login" i18n:attributes="value"><br>
-    <input type="hidden" name="__came_from" tal:attributes="value string:${request/base}${request/env/PATH_INFO}">
+    <input type="hidden" name="__came_from"
+	   tal:condition="exists:request/env/QUERY_STRING"
+	   tal:attributes="value string:${request/base}${request/env/PATH_INFO}?${request/env/QUERY_STRING}">
+    <input type="hidden" name="__came_from"
+	   tal:condition="not:exists:request/env/QUERY_STRING"
+	   tal:attributes="value string:${request/base}${request/env/PATH_INFO}">
     <span tal:replace="structure request/indexargs_form" />
     <a href="user?@template=register"
        tal:condition="python:request.user.hasPermission('Register', 'user')"

@@ -1,6 +1,6 @@
 ''' This implements the full-text indexer using the Xapian indexer.
 '''
-import re, os
+import re, os, time
 
 import xapian
 
@@ -17,7 +17,18 @@ class Indexer(IndexerBase):
 
     def _get_database(self):
         index = os.path.join(self.db_path, 'text-index')
-        return xapian.WritableDatabase(index, xapian.DB_CREATE_OR_OPEN)
+        for n in range(10):
+            try:
+                # if successful return
+                return xapian.WritableDatabase(index, xapian.DB_CREATE_OR_OPEN)
+            except xapian.DatabaseLockError:
+                # adaptive sleep. Get longer as count increases.
+                time_to_sleep = 0.01 * (2 << min(5, n))
+                time.sleep(time_to_sleep)
+                # we are back to the for loop
+
+        # Get here only if we dropped out of the for loop.
+        raise xapian.DatabaseLockError("Unable to get lock after 10 retries on %s."%index)
 
     def save_index(self):
         '''Save the changes to the index.'''
@@ -82,7 +93,7 @@ class Indexer(IndexerBase):
             word = match.group(0)
             if self.is_stopword(word):
                 continue
-            term = stemmer(word)
+            term = stemmer(word.lower())
             doc.add_posting(term, match.start(0))
 
         database.replace_document(identifier, doc)
@@ -103,7 +114,7 @@ class Indexer(IndexerBase):
         for term in [word.upper() for word in wordlist
                           if self.minlength <= len(word) <= self.maxlength]:
             if not self.is_stopword(term):
-                terms.append(stemmer(term))
+                terms.append(stemmer(term.lower()))
         query = xapian.Query(xapian.Query.OP_AND, terms)
 
         enquire.set_query(query)

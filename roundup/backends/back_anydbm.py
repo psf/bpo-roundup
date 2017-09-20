@@ -24,20 +24,16 @@ __docformat__ = 'restructuredtext'
 
 import os, marshal, re, weakref, string, copy, time, shutil, logging
 
-from roundup.anypy.dbm_ import anydbm, whichdb, key_in
+from roundup.anypy.dbm_ import anydbm, whichdb
 
 from roundup import hyperdb, date, password, roundupdb, security, support
-from roundup.support import reversed
 from roundup.backends import locking
 from roundup.i18n import _
 
 from roundup.backends.blobfiles import FileStorage
 from roundup.backends.sessions_dbm import Sessions, OneTimeKeys
 
-try:
-    from roundup.backends.indexer_xapian import Indexer
-except ImportError:
-    from roundup.backends.indexer_dbm import Indexer
+from roundup.backends.indexer_common import get_indexer
 
 def db_exists(config):
     # check for the user db
@@ -141,7 +137,20 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
     - check the timestamp of the class file and nuke the cache if it's
       modified. Do some sort of conflict checking on the dirty stuff.
     - perhaps detect write collisions (related to above)?
+
+    attributes:
+      dbtype:
+        holds the value for the type of db. It is used by indexer to
+        identify the database type so it can import the correct indexer
+        module when using native text search mode.
     """
+
+    dbtype = "anydbm"
+
+    # used by migrate roundup_admin command. Is a no-op for anydbm.
+    # but needed to stop traceback in admin.
+    db_version_updated = False
+
     def __init__(self, config, journaltag=None):
         """Open a hyperdatabase given a specifier to some storage.
 
@@ -168,9 +177,13 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         self.newnodes = {}      # keep track of the new nodes by class
         self.destroyednodes = {}# keep track of the destroyed nodes by class
         self.transactions = []
-        self.indexer = Indexer(self)
+        self.indexer = get_indexer(config, self)
         self.security = security.Security(self)
         os.umask(config.UMASK)
+
+        # make sure the database directory exists
+        if not os.path.isdir(self.config.DATABASE):
+            os.makedirs(self.config.DATABASE)
 
         # lock it
         lockfilenm = os.path.join(self.dir, 'lock')
@@ -261,7 +274,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
     def clear(self):
         """Delete all database contents
         """
-        logging.getLogger('roundup.hyperdb').info('clear')
+        logging.getLogger('roundup.hyperdb.backend').info('clear')
         for cn in self.classes:
             for dummy in 'nodes', 'journals':
                 path = os.path.join(self.dir, 'journals.%s'%cn)
@@ -309,7 +322,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         # whichdb() function to do this
         if not db_type or hasattr(anydbm, 'whichdb'):
             if __debug__:
-                logging.getLogger('roundup.hyperdb').debug(
+                logging.getLogger('roundup.hyperdb.backend').debug(
                     "opendb anydbm.open(%r, 'c')"%path)
             return anydbm.open(path, 'c')
 
@@ -321,7 +334,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
             raise hyperdb.DatabaseError(_("Couldn't open database - the "
                 "required module '%s' is not available")%db_type)
         if __debug__:
-            logging.getLogger('roundup.hyperdb').debug(
+            logging.getLogger('roundup.hyperdb.backend').debug(
                 "opendb %r.open(%r, %r)"%(db_type, path, mode))
         return dbm.open(path, mode)
 
@@ -333,7 +346,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         """
         # open the ids DB - create if if doesn't exist
         db = self.opendb('_ids', 'c')
-        if key_in(db, classname):
+        if classname in db:
             newid = db[classname] = str(int(db[classname]) + 1)
         else:
             # the count() bit is transitional - older dbs won't start at 1
@@ -382,7 +395,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         """ perform the saving of data specified by the set/addnode
         """
         if __debug__:
-            logging.getLogger('roundup.hyperdb').debug(
+            logging.getLogger('roundup.hyperdb.backend').debug(
                 'save %s%s %r'%(classname, nodeid, node))
         self.transactions.append((self.doSaveNode, (classname, nodeid, node)))
 
@@ -396,7 +409,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         cache_dict = self.cache.setdefault(classname, {})
         if nodeid in cache_dict:
             if __debug__:
-                logging.getLogger('roundup.hyperdb').debug(
+                logging.getLogger('roundup.hyperdb.backend').debug(
                     'get %s%s cached'%(classname, nodeid))
                 self.stats['cache_hits'] += 1
             return cache_dict[nodeid]
@@ -404,13 +417,13 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         if __debug__:
             self.stats['cache_misses'] += 1
             start_t = time.time()
-            logging.getLogger('roundup.hyperdb').debug(
+            logging.getLogger('roundup.hyperdb.backend').debug(
                 'get %s%s'%(classname, nodeid))
 
         # get from the database and save in the cache
         if db is None:
             db = self.getclassdb(classname)
-        if not key_in(db, nodeid):
+        if nodeid not in db:
             raise IndexError("no such %s %s"%(classname, nodeid))
 
         # check the uncommitted, destroyed nodes
@@ -437,7 +450,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         """Remove a node from the database. Called exclusively by the
            destroy() method on Class.
         """
-        logging.getLogger('roundup.hyperdb').info(
+        logging.getLogger('roundup.hyperdb.backend').info(
             'destroy %s%s'%(classname, nodeid))
 
         # remove from cache and newnodes if it's there
@@ -522,7 +535,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         # not in the cache - check the database
         if db is None:
             db = self.getclassdb(classname)
-        return key_in(db, nodeid)
+        return nodeid in db
 
     def countnodes(self, classname, db=None):
         count = 0
@@ -551,15 +564,17 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         """ Journal the Action
         'action' may be:
 
-            'create' or 'set' -- 'params' is a dictionary of property values
+            'set' -- 'params' is a dictionary of property values
+            'create' -- 'params' is an empty dictionary as of
+                      Wed Nov 06 11:38:43 2002 +0000
             'link' or 'unlink' -- 'params' is (classname, nodeid, propname)
-            'retire' -- 'params' is None
+            'retired' or 'restored' -- 'params' is None
 
             'creator' -- the user performing the action, which defaults to
             the current user.
         """
         if __debug__:
-            logging.getLogger('roundup.hyperdb').debug(
+            logging.getLogger('roundup.hyperdb.backend').debug(
                 'addjournal %s%s %s %r %s %r'%(classname,
                 nodeid, action, params, creator, creation))
         if creator is None:
@@ -570,7 +585,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
     def setjournal(self, classname, nodeid, journal):
         """Set the journal to the "journal" list."""
         if __debug__:
-            logging.getLogger('roundup.hyperdb').debug(
+            logging.getLogger('roundup.hyperdb.backend').debug(
                 'setjournal %s%s %r'%(classname, nodeid, journal))
         self.transactions.append((self.doSetJournal, (classname, nodeid,
             journal)))
@@ -618,7 +633,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         # not exist
         try:
             db = self.opendb('journals.%s'%classname, 'r')
-        except anydbm.error, error:
+        except anydbm.error as error:
             if str(error) == "need 'c' or 'n' flag to open new db":
                 raise IndexError('no such %s %s'%(classname, nodeid))
             elif error.args[0] != 2:
@@ -672,7 +687,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
                         packed += 1
                 db[key] = marshal.dumps(l)
 
-                logging.getLogger('roundup.hyperdb').info(
+                logging.getLogger('roundup.hyperdb.backend').info(
                     'packed %d %s items'%(packed, classname))
 
             if db_type == 'gdbm':
@@ -695,7 +710,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
 
         The only backend this seems to affect is postgres.
         """
-        logging.getLogger('roundup.hyperdb').info('commit %s transactions'%(
+        logging.getLogger('roundup.hyperdb.backend').info('commit %s transactions'%(
             len(self.transactions)))
 
         # keep a handle to all the database files opened
@@ -784,7 +799,7 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
         db = self.getCachedJournalDB(classname)
 
         # now insert the journal entry
-        if key_in(db, nodeid):
+        if nodeid in db:
             # append to existing
             s = db[nodeid]
             l = marshal.loads(s)
@@ -809,18 +824,18 @@ class Database(FileStorage, hyperdb.Database, roundupdb.Database):
     def doDestroyNode(self, classname, nodeid):
         # delete from the class database
         db = self.getCachedClassDB(classname)
-        if key_in(db, nodeid):
+        if nodeid in db:
             del db[nodeid]
 
         # delete from the database
         db = self.getCachedJournalDB(classname)
-        if key_in(db, nodeid):
+        if nodeid in db:
             del db[nodeid]
 
     def rollback(self):
         """ Reverse all actions from the current transaction.
         """
-        logging.getLogger('roundup.hyperdb').info('rollback %s transactions'%(
+        logging.getLogger('roundup.hyperdb.backend').info('rollback %s transactions'%(
             len(self.transactions)))
 
         for method, args in self.transactions:
@@ -997,6 +1012,12 @@ class Class(hyperdb.Class):
                     float(value)
                 except ValueError:
                     raise TypeError('new property "%s" not numeric'%key)
+
+            elif value is not None and isinstance(prop, hyperdb.Integer):
+                try:
+                    int(value)
+                except ValueError:
+                    raise TypeError('new property "%s" not an integer'%key)
 
             elif value is not None and isinstance(prop, hyperdb.Boolean):
                 try:
@@ -1180,6 +1201,9 @@ class Class(hyperdb.Class):
         # if the journal value is to be different, store it in here
         journalvalues = {}
 
+        # omit quiet properties from history/changelog
+        quiet_props = []
+
         # list() propvalues 'cos it might be modified by the loop
         for propname, value in list(propvalues.items()):
             # check to make sure we're not duplicating an existing key
@@ -1339,6 +1363,13 @@ class Class(hyperdb.Class):
                     raise TypeError('new property "%s" not '
                         'numeric'%propname)
 
+            elif value is not None and isinstance(prop, hyperdb.Integer):
+                try:
+                    int(value)
+                except ValueError:
+                    raise TypeError('new property "%s" not '
+                        'numeric'%propname)
+
             elif value is not None and isinstance(prop, hyperdb.Boolean):
                 try:
                     int(value)
@@ -1347,6 +1378,10 @@ class Class(hyperdb.Class):
                         'boolean'%propname)
 
             node[propname] = value
+
+            # record quiet properties to omit from history/changelog
+            if prop.quiet:
+                quiet_props.append(propname)
 
         # nothing to do?
         if not propvalues:
@@ -1361,6 +1396,11 @@ class Class(hyperdb.Class):
 
         if self.do_journal:
             self.db.addjournal(self.classname, nodeid, 'set', journalvalues)
+
+        # remove quiet properties from output
+        for propname in quiet_props:
+            if propname in propvalues:
+                del propvalues[propname]
 
         return propvalues
 
@@ -1390,7 +1430,7 @@ class Class(hyperdb.Class):
         self.fireReactors('retire', nodeid, None)
 
     def restore(self, nodeid):
-        """Restpre a retired node.
+        """Restore a retired node.
 
         Make node available for all operations like it was before retirement.
         """
@@ -1625,7 +1665,7 @@ class Class(hyperdb.Class):
             # remove the uncommitted, destroyed nodes
             if self.classname in self.db.destroyednodes:
                 for nodeid in self.db.destroyednodes[self.classname]:
-                    if key_in(db, nodeid):
+                    if nodeid in db:
                         res.remove(nodeid)
 
             # check retired flag
@@ -1744,6 +1784,14 @@ class Class(hyperdb.Class):
                     except AttributeError :
                         v = [v]
                 l.append((OTHER, k, [float(val) for val in v]))
+
+            elif isinstance(propclass, hyperdb.Integer):
+                if type(v) != type([]):
+                    try :
+                        v = v.split(',')
+                    except AttributeError :
+                        v = [v]
+                l.append((OTHER, k, [int(val) for val in v]))
 
         filterspec = l
 
@@ -2052,7 +2100,8 @@ class Class(hyperdb.Class):
         properties = self.getprops()
         r = []
         for nodeid in self.getnodeids():
-            for nodeid, date, user, action, params in self.history(nodeid):
+            for nodeid, date, user, action, params in self.history(nodeid,
+                            enforceperm=False, skipquiet=False):
                 date = date.get_tuple()
                 if action == 'set':
                     export_data = {}
@@ -2134,7 +2183,7 @@ class FileClass(hyperdb.FileClass, Class):
         if propname == 'content':
             try:
                 return self.db.getfile(self.classname, nodeid, None)
-            except IOError, strerror:
+            except IOError as strerror:
                 # XXX by catching this we don't see an error in the log.
                 return 'ERROR reading file: %s%s\n%s\n%s'%(
                         self.classname, nodeid, poss_msg, strerror)

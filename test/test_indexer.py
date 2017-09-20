@@ -20,14 +20,36 @@
 
 import os, unittest, shutil
 
+import pytest
 from roundup.backends import get_backend, have_backend
 from roundup.backends.indexer_rdbms import Indexer
 
 # borrow from other tests
 from db_test_base import setupSchema, config
-from test_postgresql import postgresqlOpener
-from test_mysql import mysqlOpener
+from .test_postgresql import postgresqlOpener, skip_postgresql
+from .test_mysql import mysqlOpener, skip_mysql
 from test_sqlite import sqliteOpener
+
+try:
+    import xapian
+    skip_xapian = lambda func, *args, **kwargs: func
+except ImportError:
+    # FIX: workaround for a bug in pytest.mark.skip():
+    #   https://github.com/pytest-dev/pytest/issues/568
+    from .pytest_patcher import mark_class
+    skip_xapian = mark_class(pytest.mark.skip(
+        "Skipping Xapian indexer tests: 'xapian' not installed"))
+
+try:
+    import whoosh
+    skip_whoosh = lambda func, *args, **kwargs: func
+except ImportError:
+    # FIX: workaround for a bug in pytest.mark.skip():
+    #   https://github.com/pytest-dev/pytest/issues/568
+    from .pytest_patcher import mark_class
+    skip_whoosh = mark_class(pytest.mark.skip(
+        "Skipping Whoosh indexer tests: 'whoosh' not installed"))
+
 
 class db:
     class config(dict):
@@ -139,6 +161,18 @@ class IndexerTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree('test-index')
 
+@skip_whoosh
+class WhooshIndexerTest(IndexerTest):
+    def setUp(self):
+        if os.path.exists('test-index'):
+            shutil.rmtree('test-index')
+        os.mkdir('test-index')
+        from roundup.backends.indexer_whoosh import Indexer
+        self.dex = Indexer(db)
+    def tearDown(self):
+        shutil.rmtree('test-index')
+
+@skip_xapian
 class XapianIndexerTest(IndexerTest):
     def setUp(self):
         if os.path.exists('test-index'):
@@ -149,7 +183,8 @@ class XapianIndexerTest(IndexerTest):
     def tearDown(self):
         shutil.rmtree('test-index')
 
-class RDBMSIndexerTest(IndexerTest):
+
+class RDBMSIndexerTest(object):
     def setUp(self):
         # remove previous test, ignore errors
         if os.path.exists(config.DATABASE):
@@ -162,7 +197,9 @@ class RDBMSIndexerTest(IndexerTest):
         if os.path.exists(config.DATABASE):
             shutil.rmtree(config.DATABASE)
 
-class postgresqlIndexerTest(postgresqlOpener, RDBMSIndexerTest):
+
+@skip_postgresql
+class postgresqlIndexerTest(postgresqlOpener, RDBMSIndexerTest, IndexerTest):
     def setUp(self):
         postgresqlOpener.setUp(self)
         RDBMSIndexerTest.setUp(self)
@@ -170,7 +207,9 @@ class postgresqlIndexerTest(postgresqlOpener, RDBMSIndexerTest):
         RDBMSIndexerTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
-class mysqlIndexerTest(mysqlOpener, RDBMSIndexerTest):
+
+@skip_mysql
+class mysqlIndexerTest(mysqlOpener, RDBMSIndexerTest, IndexerTest):
     def setUp(self):
         mysqlOpener.setUp(self)
         RDBMSIndexerTest.setUp(self)
@@ -178,49 +217,8 @@ class mysqlIndexerTest(mysqlOpener, RDBMSIndexerTest):
         RDBMSIndexerTest.tearDown(self)
         mysqlOpener.tearDown(self)
 
-class sqliteIndexerTest(sqliteOpener, RDBMSIndexerTest):
+
+class sqliteIndexerTest(sqliteOpener, RDBMSIndexerTest, IndexerTest):
     pass
-
-def test_suite():
-    suite = unittest.TestSuite()
-
-    suite.addTest(unittest.makeSuite(IndexerTest))
-
-    try:
-        import xapian
-        suite.addTest(unittest.makeSuite(XapianIndexerTest))
-    except ImportError:
-        print "Skipping Xapian indexer tests"
-        pass
-
-    if have_backend('postgresql'):
-        # make sure we start with a clean slate
-        if postgresqlOpener.module.db_exists(config):
-            postgresqlOpener.module.db_nuke(config, 1)
-        suite.addTest(unittest.makeSuite(postgresqlIndexerTest))
-    else:
-        print "Skipping postgresql indexer tests"
-
-    if have_backend('mysql'):
-        # make sure we start with a clean slate
-        if mysqlOpener.module.db_exists(config):
-            mysqlOpener.module.db_nuke(config)
-        suite.addTest(unittest.makeSuite(mysqlIndexerTest))
-    else:
-        print "Skipping mysql indexer tests"
-
-    if have_backend('sqlite'):
-        # make sure we start with a clean slate
-        if sqliteOpener.module.db_exists(config):
-            sqliteOpener.module.db_nuke(config)
-        suite.addTest(unittest.makeSuite(sqliteIndexerTest))
-    else:
-        print "Skipping sqlite indexer tests"
-
-    return suite
-
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
 
 # vim: set filetype=python ts=4 sw=4 et si

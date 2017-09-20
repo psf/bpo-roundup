@@ -8,6 +8,23 @@ class MockDatabase(MockNull):
     def getclass(self, name):
         return self.classes[name]
 
+    # setup for csrf testing of otks database api
+    storage = {}
+    def set(self, key, **props):
+        MockDatabase.storage[key] = {}
+        MockDatabase.storage[key].update(props)
+
+    def get(self, key, field, default=None):
+        if key not in MockDatabase.storage:
+            return default
+        return MockDatabase.storage[key][field]
+
+    def exists(self,key):
+        return key in MockDatabase.storage
+
+    def getOTKManager(self):
+        return MockDatabase()
+
 class TemplatingTestCase(unittest.TestCase):
     def setUp(self):
         self.form = FieldStorage()
@@ -15,6 +32,11 @@ class TemplatingTestCase(unittest.TestCase):
         self.client.db = db = MockDatabase()
         db.security.hasPermission = lambda *args, **kw: True
         self.client.form = self.form
+
+        # add client props for testing anti_csrf_nonce
+        self.client.session_api = MockNull(_sid="1234567890")
+        self.client.db.getuid = lambda : 10
+        self.client.db.config = {'WEB_CSRF_TOKEN_LIFETIME': 10 }
 
 class HTMLDatabaseTestCase(TemplatingTestCase):
     def test_HTMLDatabase___getitem__(self):
@@ -104,6 +126,98 @@ class HTMLClassTestCase(TemplatingTestCase) :
         cls = HTMLClass(self.client, "issue")
         cls["nosy"]
 
+    def test_anti_csrf_nonce(self):
+        '''call the csrf creation function and do basic length test
+
+           Store the data in a mock db with the same api as the otk
+           db. Make sure nonce is 64 chars long. Lookup the nonce in
+           db and retrieve data. Verify that the nonce lifetime is
+           correct (within 1 second of 1 week - lifetime), the uid is
+           correct (1), the dummy sid is correct.
+
+           Consider three cases:
+             * create nonce via module function setting lifetime
+             * create nonce via TemplatingUtils method setting lifetime
+             * create nonce via module function with default lifetime
+
+        '''
+
+        # the value below is number of seconds in a week.
+        week_seconds = 604800
+
+        otks=self.client.db.getOTKManager()
+
+        for test in [ 'module', 'template', 'default_time' ]:
+            print "Testing:", test
+            
+            if test == 'module':
+                # test the module function
+                nonce1 = anti_csrf_nonce(self, self.client, lifetime=1)
+                # lifetime * 60 is the offset
+                greater_than = week_seconds - 1 * 60
+            elif test == 'template':
+                # call the function through the TemplatingUtils class
+                cls = TemplatingUtils(self.client)
+                nonce1 = cls.anti_csrf_nonce(lifetime=5)
+                greater_than = week_seconds - 5 * 60
+            elif test == 'default_time':
+                # use the module function but with no lifetime
+                nonce1 = anti_csrf_nonce(self, self.client)
+                # see above for web nonce lifetime.
+                greater_than = week_seconds - 10 * 60
+
+            self.assertEqual(len(nonce1), 64)
+
+            uid = otks.get(nonce1, 'uid', default=None)
+            sid = otks.get(nonce1, 'sid', default=None)
+            timestamp = otks.get(nonce1, '__timestamp', default=None)
+
+            self.assertEqual(uid, 10) 
+            self.assertEqual(sid, self.client.session_api._sid)
+
+            now = time.time()
+
+            print "now, timestamp, greater, difference", \
+                     now, timestamp, greater_than, now - timestamp
+
+        
+            # lower bound of the difference is above. Upper bound
+            # of difference is run time between time.time() in
+            # the call to anti_csrf_nonce and the time.time() call
+            # that assigns ts above. I declare that difference
+            # to be less than 1 second for this to pass.
+            self.assertEqual(True,
+                       greater_than <= now - timestamp < (greater_than + 1) )
+
+    def test_string_url_quote(self):
+        ''' test that urlquote quotes the string '''
+        p = StringHTMLProperty(self.client, 'test', '1', None, 'test', 'test string< foo@bar')
+        self.assertEqual(p.url_quote(), 'test%20string%3C%20foo%40bar')
+
+    def test_string_email(self):
+        ''' test that email obscures the email '''
+        p = StringHTMLProperty(self.client, 'test', '1', None, 'test', 'rouilj@foo.example.com')
+        self.assertEqual(p.email(), 'rouilj at foo example ...')
+
+    def test_string_plain_or_hyperlinked(self):
+        ''' test that email obscures the email '''
+        p = StringHTMLProperty(self.client, 'test', '1', None, 'test', 'A string <b> with rouilj@example.com embedded &lt; html</b>')
+        self.assertEqual(p.plain(), 'A string <b> with rouilj@example.com embedded &lt; html</b>')
+        self.assertEqual(p.plain(escape=1), 'A string &lt;b&gt; with rouilj@example.com embedded &amp;lt; html&lt;/b&gt;')
+        self.assertEqual(p.plain(hyperlink=1), 'A string &lt;b&gt; with <a href="mailto:rouilj@example.com">rouilj@example.com</a> embedded &amp;lt; html&lt;/b&gt;')
+        self.assertEqual(p.plain(escape=1, hyperlink=1), 'A string &lt;b&gt; with <a href="mailto:rouilj@example.com">rouilj@example.com</a> embedded &amp;lt; html&lt;/b&gt;')
+
+        self.assertEqual(p.hyperlinked(), 'A string &lt;b&gt; with <a href="mailto:rouilj@example.com">rouilj@example.com</a> embedded &amp;lt; html&lt;/b&gt;')
+
+    def test_string_field(self):
+        p = StringHTMLProperty(self.client, 'test', '1', None, 'test', 'A string <b> with rouilj@example.com embedded &lt; html</b>')
+        self.assertEqual(p.field(), '<input type="text" name="test1@test" value="A string &lt;b&gt; with rouilj@example.com embedded &amp;lt; html&lt;/b&gt;" size="30">')
+
+    def test_string_multiline(self):
+        p = StringHTMLProperty(self.client, 'test', '1', None, 'test', 'A string <b> with rouilj@example.com embedded &lt; html</b>')
+        self.assertEqual(p.multiline(), '<textarea  name="test1@test" id="test1@test" rows="5" cols="40">A string &lt;b&gt; with rouilj@example.com embedded &amp;lt; html&lt;/b&gt;</textarea>')
+        self.assertEqual(p.multiline(rows=300, cols=100, **{'class':'css_class'}), '<textarea class="css_class" name="test1@test" id="test1@test" rows="300" cols="100">A string &lt;b&gt; with rouilj@example.com embedded &amp;lt; html&lt;/b&gt;</textarea>')
+
     def test_url_match(self):
         '''Test the URL regular expression in StringHTMLProperty.
         '''
@@ -149,37 +263,37 @@ class HTMLClassTestCase(TemplatingTestCase) :
         ae = self.assertEqual
         ae(t('item123123123123'), 'item123123123123')
         ae(t('http://roundup.net/'),
-           '<a href="http://roundup.net/">http://roundup.net/</a>')
+           '<a href="http://roundup.net/" rel="nofollow">http://roundup.net/</a>')
         ae(t('&lt;HTTP://roundup.net/&gt;'),
-           '&lt;<a href="HTTP://roundup.net/">HTTP://roundup.net/</a>&gt;')
+           '&lt;<a href="HTTP://roundup.net/" rel="nofollow">HTTP://roundup.net/</a>&gt;')
         ae(t('&lt;http://roundup.net/&gt;.'),
-            '&lt;<a href="http://roundup.net/">http://roundup.net/</a>&gt;.')
+            '&lt;<a href="http://roundup.net/" rel="nofollow">http://roundup.net/</a>&gt;.')
         ae(t('&lt;www.roundup.net&gt;'),
-           '&lt;<a href="http://www.roundup.net">www.roundup.net</a>&gt;')
+           '&lt;<a href="http://www.roundup.net" rel="nofollow">www.roundup.net</a>&gt;')
         ae(t('(www.roundup.net)'),
-           '(<a href="http://www.roundup.net">www.roundup.net</a>)')
+           '(<a href="http://www.roundup.net" rel="nofollow">www.roundup.net</a>)')
         ae(t('foo http://msdn.microsoft.com/en-us/library/ms741540(VS.85).aspx bar'),
-           'foo <a href="http://msdn.microsoft.com/en-us/library/ms741540(VS.85).aspx">'
+           'foo <a href="http://msdn.microsoft.com/en-us/library/ms741540(VS.85).aspx" rel="nofollow">'
            'http://msdn.microsoft.com/en-us/library/ms741540(VS.85).aspx</a> bar')
         ae(t('(e.g. http://en.wikipedia.org/wiki/Python_(programming_language))'),
-           '(e.g. <a href="http://en.wikipedia.org/wiki/Python_(programming_language)">'
+           '(e.g. <a href="http://en.wikipedia.org/wiki/Python_(programming_language)" rel="nofollow">'
            'http://en.wikipedia.org/wiki/Python_(programming_language)</a>)')
         ae(t('(e.g. http://en.wikipedia.org/wiki/Python_(programming_language)).'),
-           '(e.g. <a href="http://en.wikipedia.org/wiki/Python_(programming_language)">'
+           '(e.g. <a href="http://en.wikipedia.org/wiki/Python_(programming_language)" rel="nofollow">'
            'http://en.wikipedia.org/wiki/Python_(programming_language)</a>).')
         ae(t('(e.g. http://en.wikipedia.org/wiki/Python_(programming_language))&gt;.'),
-           '(e.g. <a href="http://en.wikipedia.org/wiki/Python_(programming_language)">'
+           '(e.g. <a href="http://en.wikipedia.org/wiki/Python_(programming_language)" rel="nofollow">'
            'http://en.wikipedia.org/wiki/Python_(programming_language)</a>)&gt;.')
         ae(t('(e.g. http://en.wikipedia.org/wiki/Python_(programming_language&gt;)).'),
-           '(e.g. <a href="http://en.wikipedia.org/wiki/Python_(programming_language">'
+           '(e.g. <a href="http://en.wikipedia.org/wiki/Python_(programming_language" rel="nofollow">'
            'http://en.wikipedia.org/wiki/Python_(programming_language</a>&gt;)).')
         for c in '.,;:!':
             # trailing punctuation is not included
             ae(t('http://roundup.net/%c ' % c),
-               '<a href="http://roundup.net/">http://roundup.net/</a>%c ' % c)
+               '<a href="http://roundup.net/" rel="nofollow">http://roundup.net/</a>%c ' % c)
             # but it's included if it's part of the URL
             ae(t('http://roundup.net/%c/' % c),
-               '<a href="http://roundup.net/%c/">http://roundup.net/%c/</a>' % (c, c))
+               '<a href="http://roundup.net/%c/" rel="nofollow">http://roundup.net/%c/</a>' % (c, c))
 
 '''
 class HTMLPermissions:
@@ -202,7 +316,7 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
     def __getattr__(self, attr):
     def designator(self):
     def getItem(self, itemid, num_re=re.compile('-?\d+')):
-    def properties(self, sort=1):
+    def properties(self, sort=1, cansearch=True):
     def list(self, sort_on=None):
     def csv(self):
     def propnames(self):
@@ -262,6 +376,11 @@ class NumberHTMLProperty(HTMLProperty):
     def field(self, size = 30):
     def __int__(self):
     def __float__(self):
+
+class IntegerHTMLProperty(HTMLProperty):
+    def plain(self):
+    def field(self, size = 30):
+    def __int__(self):
 
 class BooleanHTMLProperty(HTMLProperty):
     def plain(self):
@@ -328,9 +447,9 @@ class Batch(ZTUtils.Batch):
     def previous(self):
     def next(self):
 
-class TemplatingUtils:
-    def __init__(self, client):
-    def Batch(self, sequence, size, start, end=0, orphan=0, overlap=0):
+#class TemplatingUtils:
+#    def __init__(self, client):
+#    def Batch(self, sequence, size, start, end=0, orphan=0, overlap=0):
 
 class NoTemplate(Exception):
 class Unauthorised(Exception):
@@ -348,17 +467,5 @@ class RoundupPageTemplate(PageTemplate.PageTemplate):
     def render(self, client, classname, request, **options):
     def __repr__(self):
 '''
-
-
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(HTMLDatabaseTestCase))
-    suite.addTest(unittest.makeSuite(FunctionsTestCase))
-    suite.addTest(unittest.makeSuite(HTMLClassTestCase))
-    return suite
-
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
 
 # vim: set et sts=4 sw=4 :

@@ -126,7 +126,7 @@ file = FileClass(db, "file",
                 description=String(indexme='yes'))
 
 # Patch
-patch = FileClass(db, "patch",
+patches = FileClass(db, "patches",
                   name=String(),
                   description=String(indexme='yes'),
                   repository=String(),
@@ -157,7 +157,8 @@ bug = IssueClass(db, "bug",
                  status=Link('status'),
                  resolution=Link('resolution'),
                  superseder=Link('bug'),
-                 keywords=Multilink('keyword'))
+                 keywords=Multilink('keyword'),
+                 patches=Multilink('patches'))
 
 # Task Type
 task_type = Class(db, 'task_type',
@@ -375,6 +376,14 @@ db.security.addPermissionToRole('Anonymous', 'Create', 'user')
 
 for cl in 'bug', 'severity', 'status', 'resolution', 'msg', 'file':
     db.security.addPermissionToRole('Anonymous', 'View', cl)
+
+# Allow the anonymous user to use the "Show Unassigned" search.
+# It acts like "Show Open" if this permission is not available.
+# If you are running a tracker that does not allow read access for
+# anonymous, you should remove this entry as it can be used to perform
+# a username guessing attack against a roundup install.
+p = db.security.addPermission(name='Search', klass='user')
+db.security.addPermissionToRole ('Anonymous', p)
 
 # [OPTIONAL]
 # Allow anonymous users access to create or edit "issue" items (and the

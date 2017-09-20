@@ -5,7 +5,7 @@ WINDOW_CONTENT = '''\
 <h3>Keyword Expression Editor:</h3>
 <hr/>
 <div id="content"></div>
-<script type="text/javascript">
+<script nonce="%(nonce)s" type="text/javascript">
 <!--
 
 var NOT_OP = "-2";
@@ -245,7 +245,7 @@ def list_nodes(request):
     prop = request.form.getfirst("property")
     cls = request.client.db.getclass(prop)
     items = []
-    for nodeid in cls.getnodeids():
+    for nodeid in cls.getnodeids(retired=0):
         l = cls.getnode(nodeid).items()
         l = dict([x for x in l if len(x) == 2])
         try:
@@ -265,7 +265,8 @@ def render_keywords_expression_editor(request):
     window_content = WINDOW_CONTENT % {
         'prop'    : prop,
         'keywords': items_to_keywords(list_nodes(request)),
-        'original': ''
+        'original': '',
+        'nonce': request.client.client_nonce
     }
 
     return window_content

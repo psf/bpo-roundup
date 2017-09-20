@@ -34,14 +34,32 @@ def db_nuke(config):
     shutil.rmtree(config.DATABASE)
 
 class Database(rdbms_common.Database):
+    """Sqlite DB backend implementation
+
+    attributes:
+      dbtype:
+        holds the value for the type of db. It is used by indexer to
+        identify the database type so it can import the correct indexer
+        module when using native text search mode.
+    """
+
     # char to use for positional arguments
     if sqlite_version in (2,3):
         arg = '?'
     else:
         arg = '%s'
 
+    dbtype = "sqlite"
+
     # used by some code to switch styles of query
     implements_intersect = 1
+
+    # used in generic backend to determine if db supports
+    # 'DOUBLE PRECISION' for floating point numbers. Note that sqlite
+    # already has double precision as its standard 'REAL' type. So this
+    # is set to False here.
+
+    implements_double_precision = False
 
     hyperdb_to_sql_datatypes = {
         hyperdb.String : 'VARCHAR(255)',
@@ -51,6 +69,7 @@ class Database(rdbms_common.Database):
         hyperdb.Password  : 'VARCHAR(255)',
         hyperdb.Boolean   : 'BOOLEAN',
         hyperdb.Number    : 'REAL',
+        hyperdb.Integer   : 'INTEGER',
     }
     hyperdb_to_sql_value = {
         hyperdb.String : str,
@@ -59,6 +78,7 @@ class Database(rdbms_common.Database):
         hyperdb.Interval  : str,
         hyperdb.Password  : str,
         hyperdb.Boolean   : int,
+        hyperdb.Integer   : int,
         hyperdb.Number    : lambda x: x,
         hyperdb.Multilink : lambda x: x,    # used in journal marshalling
     }
@@ -69,6 +89,7 @@ class Database(rdbms_common.Database):
         hyperdb.Interval  : date.Interval,
         hyperdb.Password  : lambda x: password.Password(encrypted=x),
         hyperdb.Boolean   : int,
+        hyperdb.Integer   : int,
         hyperdb.Number    : rdbms_common._num_cvt,
         hyperdb.Multilink : lambda x: x,    # used in journal marshalling
     }
@@ -126,7 +147,7 @@ class Database(rdbms_common.Database):
 
         try:
             self.load_dbschema()
-        except sqlite.DatabaseError, error:
+        except sqlite.DatabaseError as error:
             if str(error) != 'no such table: schema':
                 raise
             self.init_dbschema()
@@ -311,7 +332,7 @@ class Database(rdbms_common.Database):
         """
         try:
             self.conn.close()
-        except sqlite.ProgrammingError, value:
+        except sqlite.ProgrammingError as value:
             if str(value) != 'close failed - Connection is closed.':
                 raise
 
@@ -321,7 +342,7 @@ class Database(rdbms_common.Database):
         """
         try:
             self.conn.rollback()
-        except sqlite.ProgrammingError, value:
+        except sqlite.ProgrammingError as value:
             if str(value) != 'rollback failed - Connection is closed.':
                 raise
 
@@ -335,7 +356,7 @@ class Database(rdbms_common.Database):
         """
         try:
             self.conn.commit()
-        except sqlite.DatabaseError, error:
+        except sqlite.DatabaseError as error:
             if str(error) != 'cannot commit - no transaction is active':
                 raise
         # open a new cursor for subsequent work
@@ -352,15 +373,36 @@ class Database(rdbms_common.Database):
     def newid(self, classname):
         """ Generate a new id for the given class
         """
+
+        # Prevent other processes from reading while we increment.
+        # Otherwise multiple processes can end up with the same
+        # new id and hilarity results.
+        #
+        # Defeat pysqlite's attempts to do locking by setting
+        # isolation_level to None. Pysqlite can commit
+        # on it's own even if we don't want it to end the transaction.
+        # If we rewrite to use another sqlite library like apsw we
+        # don't have to deal with this autocommit/autotransact foolishness.
+        self.conn.isolation_level = None;
+        # Manage the transaction locks manually.
+        self.sql("BEGIN IMMEDIATE");
+
         # get the next ID
         sql = 'select num from ids where name=%s'%self.arg
         self.sql(sql, (classname, ))
         newid = int(self.cursor.fetchone()[0])
 
-        # update the counter
-        sql = 'update ids set num=%s where name=%s'%(self.arg, self.arg)
-        vals = (int(newid)+1, classname)
+        # leave the next larger number as the next newid
+        sql = 'update ids set num=num+1 where name=%s'%self.arg
+        vals = (classname,)
         self.sql(sql, vals)
+
+        # reset pysqlite's auto transact stuff to default since the
+        # rest of the code expects it.
+        self.conn.isolation_level = '';
+        # commit writing the data, clearing locks for other processes
+        # and create a new cursor to the database.
+        self.sql_commit();
 
         # return as string
         return str(newid)

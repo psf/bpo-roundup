@@ -1,6 +1,8 @@
 
 try:
-    from urllib.parse import quote, urlparse
+    # Python 3+
+    from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
 except:
-    from urllib import quote
-    from urlparse import urlparse
+    # Python 2.5-2.7
+    from urllib import quote, urlencode
+    from urlparse import urlparse, parse_qs, urlunparse

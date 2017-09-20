@@ -15,10 +15,17 @@ import email
 import gpgmelib
 import unittest, tempfile, os, shutil, errno, imp, sys, difflib, time
 
+import pytest
+
 try:
     import pyme, pyme.core
+    skip_pgp = lambda func, *args, **kwargs: func
 except ImportError:
-    pyme = None
+    # FIX: workaround for a bug in pytest.mark.skip():
+    #   https://github.com/pytest-dev/pytest/issues/568
+    from .pytest_patcher import mark_class
+    skip_pgp = mark_class(pytest.mark.skip(
+        reason="Skipping PGP tests: 'pyme' not installed"))
 
 
 from cStringIO import StringIO
@@ -31,7 +38,6 @@ from roundup import mailgw, i18n, roundupdb
 from roundup.mailgw import MailGW, Unauthorized, uidFromAddress, \
     parseContent, IgnoreLoop, IgnoreBulk, MailUsageError, MailUsageHelp
 from roundup import init, instance, password, __version__
-from roundup.anypy.sets_ import set
 
 #import db_test_base
 import memorydb
@@ -58,6 +64,8 @@ class DiffHelper:
     def compareMessages(self, new, old):
         """Compare messages for semantic equivalence.
 
+        Only use this for full rfc 2822/822/whatever messages with headers.
+
         Will raise an AssertionError with a diff for inequality.
 
         Note that header fieldnames are case-insensitive.
@@ -79,6 +87,28 @@ class DiffHelper:
             res = []
 
             replace = {}
+
+            # make sure that all headers are the same between the new
+            # and old (reference) messages. Once we have done this we
+            # can iterate over all the headers in the new message and
+            # compare contents. If we don't do this, we don't know
+            # when the new message has dropped a header that should be
+            # present.
+            # Headers are case insensitive, so smash to lower case
+            new_headers=[x.lower() for x in new.keys()]
+            old_headers=[x.lower() for x in old.keys()]
+
+            if "x-roundup-version" not in old_headers:
+                # add it. it is skipped in most cases and missing from
+                # the test cases in old.
+                old_headers.append("x-roundup-version")
+                
+            new_headers.sort() # sort, make comparison easier in error message.
+            old_headers.sort()
+
+            if new_headers != old_headers:
+                res.append('headers differ new vs. reference: %r != %r'%(new_headers, old_headers))
+                
             for key in new.keys():
                 if key.startswith('from '):
                     # skip the unix from line
@@ -90,10 +120,16 @@ class DiffHelper:
                             new[key]))
                 elif key.lower() == 'content-type' and 'boundary=' in new[key]:
                     # handle mime messages
-                    newmime = new[key].split('=',1)[-1].strip('"')
-                    oldmime = old.get(key, '').split('=',1)[-1].strip('"')
-                    replace ['--' + newmime] = '--' + oldmime
-                    replace ['--' + newmime + '--'] = '--' + oldmime + '--'
+                    newmimeboundary = new[key].split('=',1)[-1].strip('"')
+                    oldmimeboundary = old.get(key, '').split('=',1)[-1].strip('"')
+                    # mime types are not case sensitive rfc 2045
+                    newmimetype = new[key].split(';',1)[0].strip('"').lower()
+                    oldmimetype = old.get(key, '').split(';',1)[0].strip('"').lower()
+                    # throw an error if we have differeing content types
+                    if not newmimetype == oldmimetype:
+                        res.append('content-type mime type headers differ new vs. reference: %r != %r'%(newmimetype, oldmimetype))
+                    replace ['--' + newmimeboundary] = '--' + oldmimeboundary
+                    replace ['--' + newmimeboundary + '--'] = '--' + oldmimeboundary + '--'
                 elif new.get_all(key, '') != old.get_all(key, ''):
                     # check that all other headers are identical, including
                     # headers that appear more than once.
@@ -142,7 +178,8 @@ class DiffHelper:
 
 from roundup.hyperdb import String
 
-class MailgwTestAbstractBase(unittest.TestCase, DiffHelper):
+
+class MailgwTestAbstractBase(DiffHelper):
     count = 0
     schema = 'classic'
     def setUp(self):
@@ -216,6 +253,24 @@ class MailgwTestAbstractBase(unittest.TestCase, DiffHelper):
         finally:
             f.close()
 
+    def testHelpMessage(self):
+        help_message='''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Cc: richard@test.test
+Reply-To: chef@bork.bork.bork
+Message-Id: <dummy_test_message_id>
+Subject: help
+
+'''
+        assert not os.path.exists(SENDMAILDEBUG)
+        self.assertRaises(MailUsageHelp, self._handle_mail, help_message)
+        # FIXME I think help sends email. but using _get_mail() doesn't
+        # work. The file mail-test.log is missing.
+        # self.compareMessages(self._get_mail(), 1)
+
+
     # Normal test-case used for both non-pgp test and a test while pgp
     # is enabled, so this test is run in both test suites.
     def testEmptyMessage(self):
@@ -234,7 +289,7 @@ Subject: [issue] Testing...
         self.assertEqual(self.db.issue.get(nodeid, 'tx_Source'), 'email')
 
 
-class MailgwTestCase(MailgwTestAbstractBase):
+class MailgwTestCase(MailgwTestAbstractBase, unittest.TestCase):
 
     def testMessageWithFromInIt(self):
         nodeid = self._handle_mail('''Content-Type: text/plain;
@@ -904,7 +959,6 @@ X-Roundup-Name: Roundup issue tracker
 X-Roundup-Loop: hello
 X-Roundup-Issue-Status: chatting
 X-Roundup-Issue-Files: unnamed
-Content-Transfer-Encoding: quoted-printable
 
 
 --utf-8
@@ -968,7 +1022,6 @@ X-Roundup-Name: Roundup issue tracker
 X-Roundup-Loop: hello
 X-Roundup-Issue-Status: chatting
 X-Roundup-Issue-Files: unnamed
-Content-Transfer-Encoding: quoted-printable
 
 
 --utf-8
@@ -1015,7 +1068,7 @@ PGh0bWw+dW1sYXV0IMOkw7bDvMOEw5bDnMOfPC9odG1sPgo=
         self.compareMessages(self._get_mail(),
 '''FROM: roundup-admin@your.tracker.email.domain.example
 TO: chef@bork.bork.bork, richard@test.test
-Content-Type: text/plain; charset="utf-8"
+Content-Type: multipart/mixed; charset="utf-8"
 Subject: [issue1] Testing...
 To: chef@bork.bork.bork, richard@test.test
 From: "Contrary, Mary" <issue_tracker@your.tracker.email.domain.example>
@@ -1028,7 +1081,6 @@ X-Roundup-Name: Roundup issue tracker
 X-Roundup-Loop: hello
 X-Roundup-Issue-Status: chatting
 X-Roundup-Issue-Files: Fwd: Original email subject.eml
-Content-Transfer-Encoding: quoted-printable
 
 
 --utf-8
@@ -1401,6 +1453,57 @@ Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
 _______________________________________________________________________
 """)
 
+
+    def testNosyMessageSettingSubject(self):
+        self.doNewIssue()
+        oldvalues = self.db.getnode('issue', '1').copy()
+        oldvalues['assignedto'] = None
+        # reconstruct old behaviour: This would reuse the
+        # database-handle from the doNewIssue above which has committed
+        # as user "Chef". So we close and reopen the db as that user.
+        #self.db.close() actually don't close 'cos this empties memorydb
+        self.db = self.instance.open('Chef')
+        self.db.issue.set('1', assignedto=self.chef_id)
+        self.db.commit()
+        self.db.issue.nosymessage('1', None, oldvalues, subject="test")
+
+        new_mail = ""
+        for line in self._get_mail().split("\n"):
+            if "Message-Id: " in line:
+                continue
+            if "Date: " in line:
+                continue
+            new_mail += line+"\n"
+
+        self.compareMessages(new_mail, """
+FROM: roundup-admin@your.tracker.email.domain.example
+TO: chef@bork.bork.bork, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: test
+To: chef@bork.bork.bork, richard@test.test
+From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: unread
+X-Roundup-Version: 1.3.3
+In-Reply-To: <dummy_test_message_id>
+MIME-Version: 1.0
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+Content-Transfer-Encoding: quoted-printable
+
+
+Change by Bork, Chef <chef@bork.bork.bork>:
+
+
+----------
+assignedto:  -> Chef
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+""")
 
     #
     # FOLLOWUP TITLE MATCH
@@ -1907,6 +2010,142 @@ Subject: [issue1] Testing... [nosy=-richard]
         # NO NOSY MESSAGE SHOULD BE SENT!
         assert not os.path.exists(SENDMAILDEBUG)
 
+    def testNosyReplytoTracker(self):
+        self.db.config.TRACKER_REPLYTO_ADDRESS = ''
+        self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Testing... [nosy=mary; assignedto=richard]
+
+This is a test submission of a new issue.
+''')
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: mary@test.test, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: mary@test.test, richard@test.test
+From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: unread
+Content-Transfer-Encoding: quoted-printable
+
+
+New submission from Bork, Chef <chef@bork.bork.bork>:
+
+This is a test submission of a new issue.
+
+----------
+assignedto: richard
+messages: 1
+nosy: Chef, mary, richard
+status: unread
+title: Testing...
+tx_Source: email
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+
+    def testNosyReplytoSomeaddress(self):
+        self.db.config.TRACKER_REPLYTO_ADDRESS = 'replyto@me.example.com'
+        self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Testing... [nosy=mary; assignedto=richard]
+
+This is a test submission of a new issue.
+''')
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: mary@test.test, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: mary@test.test, richard@test.test
+From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: replyto@me.example.com
+MIME-Version: 1.0
+Message-Id: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: unread
+Content-Transfer-Encoding: quoted-printable
+
+
+New submission from Bork, Chef <chef@bork.bork.bork>:
+
+This is a test submission of a new issue.
+
+----------
+assignedto: richard
+messages: 1
+nosy: Chef, mary, richard
+status: unread
+title: Testing...
+tx_Source: email
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+
+    def testNosyReplytoAuthor(self):
+        self.db.config.TRACKER_REPLYTO_ADDRESS = 'AUTHOR'
+        self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Testing... [nosy=mary; assignedto=richard]
+
+This is a test submission of a new issue.
+''')
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: mary@test.test, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] Testing...
+To: mary@test.test, richard@test.test
+From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: "Bork, Chef" <chef@bork.bork.bork>
+MIME-Version: 1.0
+Message-Id: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: unread
+Content-Transfer-Encoding: quoted-printable
+
+
+New submission from Bork, Chef <chef@bork.bork.bork>:
+
+This is a test submission of a new issue.
+
+----------
+assignedto: richard
+messages: 1
+nosy: Chef, mary, richard
+status: unread
+title: Testing...
+tx_Source: email
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+
     def testNewUserAuthor(self):
         self.db.commit()
         l = self.db.user.list()
@@ -1925,15 +2164,15 @@ This is a test submission of a new issue.
         self.db.user.set(anonid, roles='Anonymous')
         try:
             self._handle_mail(message)
-        except Unauthorized, value:
-            body_diff = self.compareMessages(str(value), """
+        except Unauthorized as value:
+            body_diff = self.assertEqual(str(value), """
 You are not a registered user.
 
 Unknown address: fubar@bork.bork.bork
 """)
             assert not body_diff, body_diff
         else:
-            raise AssertionError, "Unathorized not raised when handling mail"
+            raise AssertionError, "Unauthorized not raised when handling mail"
 
         # Add Web Access role to anonymous, and try again to make sure
         # we get a "please register at:" message this time.
@@ -1944,8 +2183,8 @@ Unknown address: fubar@bork.bork.bork
         self.db.security.role['anonymous'].permissions=p
         try:
             self._handle_mail(message)
-        except Unauthorized, value:
-            body_diff = self.compareMessages(str(value), """
+        except Unauthorized as value:
+            body_diff = self.assertEqual(str(value), """
 You are not a registered user. Please register at:
 
 http://tracker.example/cgi-bin/roundup.cgi/bugs/user?@template=register
@@ -2350,18 +2589,138 @@ This is a followup
 
     def testEmailQuoting(self):
         self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'no'
-        self.innerTestQuoting(self.firstquotingtest, '''This is a followup
-''', 'This is a followup')
+        # FIXME possible bug. Messages retreived from content are missing
+        # trailing newlines. Probably due to signature stripping.
+        # so nuke all trailing newlines.
+        self.innerTestQuoting(self.firstquotingtest, '''This is a followup''', 'This is a followup')
+
+    def testEmailQuotingNewIsNew(self):
+        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'new'
+        # create the message, remove the prefix from subject
+        testmessage=self.firstquotingtest.replace(" Re: [issue1]", "")
+        nodeid = self._handle_mail(testmessage)
+
+        msgs = self.db.issue.get(nodeid, 'messages')
+        # validate content and summary
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertEqual(content, '''Blah blah wrote:
+> Blah bklaskdfj sdf asdf jlaskdf skj sdkfjl asdf
+>  skdjlkjsdfalsdkfjasdlfkj dlfksdfalksd fj
+>
+
+This is a followup''')
+
+        summary = self.db.msg.get(msgs[0], 'summary')
+        self.assertEqual(summary,  '''This is a followup''')
+
+    def testEmailQuotingNewIsFollowup(self):
+        self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'new'
+        # create issue1 that we can followup on
+        self.doNewIssue()
+        # add the second message to the issue
+        nodeid = self._handle_mail(self.firstquotingtest)
+        msgs = self.db.issue.get(nodeid, 'messages')
+        # check second message for accuracy
+        content = self.db.msg.get(msgs[1], 'content')
+        summary = self.db.msg.get(msgs[1], 'summary')
+        self.assertEqual(content,  '''This is a followup''')
+        self.assertEqual(summary,  '''This is a followup''')
+
+    def testEmailBodyUnchangedNewIsYes(self):
+        mysig = "--\nmy sig\n\n"
+        self.instance.config.EMAIL_LEAVE_BODY_UNCHANGED = 'yes'
+        # create the message, remove the prefix from subject
+        testmessage=self.firstquotingtest.replace(" Re: [issue1]", "") + mysig
+        nodeid = self._handle_mail(testmessage)
+
+        msgs = self.db.issue.get(nodeid, 'messages')
+        # validate content and summary
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertEqual(content, '''Blah blah wrote:
+> Blah bklaskdfj sdf asdf jlaskdf skj sdkfjl asdf
+>  skdjlkjsdfalsdkfjasdlfkj dlfksdfalksd fj
+>
+
+This is a followup\n''' + mysig[:-2])
+        # the :-2 requrement to strip the trailing newlines is probably a bug
+        # somewhere mailgw has right content maybe trailing \n are stripped by
+        # msg or something.
+
+        summary = self.db.msg.get(msgs[0], 'summary')
+        self.assertEqual(summary,  '''This is a followup''')
+
+    def testEmailBodyUnchangedFollowupIsYes(self):
+        mysig = "--\nmy sig\n\n"
+        self.instance.config.EMAIL_LEAVE_BODY_UNCHANGED = 'yes'
+
+        # create issue1 that we can followup on
+        self.doNewIssue()
+        testmessage=self.firstquotingtest + mysig
+        nodeid = self._handle_mail(testmessage)
+        msgs = self.db.issue.get(nodeid, 'messages')
+        # validate content and summary
+        content = self.db.msg.get(msgs[1], 'content')
+        self.assertEqual(content, '''Blah blah wrote:
+> Blah bklaskdfj sdf asdf jlaskdf skj sdkfjl asdf
+>  skdjlkjsdfalsdkfjasdlfkj dlfksdfalksd fj
+>
+
+This is a followup\n''' + mysig[:-2])
+        # the :-2 requrement to strip the trailing newlines is probably a bug
+        # somewhere mailgw has right content maybe trailing \n are stripped by
+        # msg or something.
+
+        summary = self.db.msg.get(msgs[1], 'summary')
+        self.assertEqual(summary,  '''This is a followup''')
+
+    def testEmailReplaceBodyNewIsNew(self):
+        mysig = "--\nmy sig\n\n"
+        self.instance.config.EMAIL_LEAVE_BODY_UNCHANGED = 'new'
+        # create the message, remove the prefix from subject
+        testmessage=self.firstquotingtest.replace(" Re: [issue1]", "") + mysig
+        nodeid = self._handle_mail(testmessage)
+
+        msgs = self.db.issue.get(nodeid, 'messages')
+        # validate content and summary
+        content = self.db.msg.get(msgs[0], 'content')
+        self.assertEqual(content, '''Blah blah wrote:
+> Blah bklaskdfj sdf asdf jlaskdf skj sdkfjl asdf
+>  skdjlkjsdfalsdkfjasdlfkj dlfksdfalksd fj
+>
+
+This is a followup\n''' + mysig[:-2])
+        # the :-2 requrement to strip the trailing newlines is probably a bug
+        # somewhere mailgw has right content maybe trailing \n are stripped by
+        # msg or something.
+
+        summary = self.db.msg.get(msgs[0], 'summary')
+        self.assertEqual(summary,  '''This is a followup''')
+
+    def testEmailReplaceBodyNewIsFollowup(self):
+        mysig = "\n--\nmy sig\n"
+        self.instance.config.EMAIL_LEAVE_BODY_UNCHANGED = 'new'
+        # create issue1 that we can followup on
+        self.doNewIssue()
+        # add the second message to the issue
+        nodeid = self._handle_mail(self.firstquotingtest + mysig)
+        msgs = self.db.issue.get(nodeid, 'messages')
+        # check second message for accuracy
+        content = self.db.msg.get(msgs[1], 'content')
+        summary = self.db.msg.get(msgs[1], 'summary')
+        self.assertEqual(content,  '''Blah blah wrote:\n> Blah bklaskdfj sdf asdf jlaskdf skj sdkfjl asdf\n>  skdjlkjsdfalsdkfjasdlfkj dlfksdfalksd fj\n>\n\nThis is a followup''')
+        self.assertEqual(summary,  '''This is a followup''')
 
     def testEmailQuotingRemove(self):
         self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'yes'
+        # FIXME possible bug. Messages retreived from content are missing
+        # trailing newlines. Probably due to signature stripping.
+        # so nuke all trailing newlines.
         self.innerTestQuoting(self.firstquotingtest, '''Blah blah wrote:
 > Blah bklaskdfj sdf asdf jlaskdf skj sdkfjl asdf
 >  skdjlkjsdfalsdkfjasdlfkj dlfksdfalksd fj
 >
 
-This is a followup
-''', 'This is a followup')
+This is a followup''', 'This is a followup')
 
     secondquotingtest = '''Content-Type: text/plain;
   charset="iso-8859-1"
@@ -2411,6 +2770,9 @@ added signature
 '''
     def testEmailQuoting2(self):
         self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'no'
+        # FIXME possible bug. Messages retreived from content are missing
+        # trailing newlines. Probably due to signature stripping.
+        # so nuke all trailing newlines.
         self.innerTestQuoting(self.secondquotingtest, '''AA:
 
  AA
@@ -2426,13 +2788,16 @@ BB
 BB
 BB
 
-CC
-''', 'AA:')
+CC''', 'AA:')
 
     def testEmailQuotingRemove2(self):
         self.instance.config.EMAIL_KEEP_QUOTED_TEXT = 'yes'
+        # FIXME possible bug. Messages retreived from content are missing
+        # trailing newlines. Probably due to signature stripping.
+        # so nuke all trailing newlines. That's what the trailing
+        # [:-1] is doing on the '\n'.join(....)[8:-3]
         self.innerTestQuoting(self.secondquotingtest,
-            '\n'.join(self.secondquotingtest.split('\n')[8:-3]), 'AA:')
+            '\n'.join(self.secondquotingtest.split('\n')[8:-3][:-1]), 'AA:')
 
     thirdquotingtest = '''Content-Type: text/plain;
   charset="iso-8859-1"
@@ -2506,7 +2871,7 @@ sig
             newmessages.remove(msg)
         messageid = newmessages[0]
 
-        self.compareMessages(self.db.msg.get(messageid, 'content'), expect)
+        self.assertEqual(self.db.msg.get(messageid, 'content'), expect)
         if summary:
             self.assertEqual (summary, self.db.msg.get(messageid, 'summary'))
 
@@ -2579,6 +2944,25 @@ This is a test submission of a new issue.
         l = self.db.issue.get(nodeid, 'nosy')
         l.sort()
         self.assertEqual(l, [self.richard_id, self.mary_id])
+        return nodeid
+
+    def testResentFromSwitchedOff(self):
+        self.instance.config.EMAIL_KEEP_REAL_FROM = 'yes'
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+Resent-From: mary <mary@test.test>
+To: issue_tracker@your.tracker.email.domain.example
+Cc: richard@test.test
+Message-Id: <dummy_test_message_id>
+Subject: [issue] Testing...
+
+This is a test submission of a new issue.
+''')
+        assert not os.path.exists(SENDMAILDEBUG)
+        l = self.db.issue.get(nodeid, 'nosy')
+        l.sort()
+        self.assertEqual(l, [self.chef_id, self.richard_id])
         return nodeid
 
     def testDejaVu(self):
@@ -2693,6 +3077,24 @@ Message-Id: <dummy_test_message_id>
         self.assertEqual(self.db.issue.get(nodeid, 'title'),
             '[frobulated] testing')
 
+    def testInvalidClassLooseReplyQuoted(self):
+        self.instance.config.MAILGW_SUBJECT_PREFIX_PARSING = 'loose'
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Subject: Re: "[frobulated] testing"
+Cc: richard@test.test
+Reply-To: chef@bork.bork.bork
+Message-Id: <dummy_test_message_id>
+
+Dumb mailers may put quotes around the subject after the reply prefix,
+e.g. Re: "[issue1] bla bla"
+''')
+        assert not os.path.exists(SENDMAILDEBUG)
+        self.assertEqual(self.db.issue.get(nodeid, 'title'),
+            '[frobulated] testing')
+
     def testInvalidClassLoose(self):
         self.instance.config.MAILGW_SUBJECT_PREFIX_PARSING = 'loose'
         nodeid = self._handle_mail('''Content-Type: text/plain;
@@ -2724,6 +3126,23 @@ Message-Id: <dummy_test_message_id>
 ''')
         assert not os.path.exists(SENDMAILDEBUG)
         self.assertEqual(self.db.keyword.get('1', 'name'), 'Bar')
+
+    def testDoublePrefixLoose(self):
+        self.instance.config.MAILGW_SUBJECT_PREFIX_PARSING = 'loose'
+        self.instance.config.MAILGW_SUBJECT_SUFFIX_PARSING = 'loose'
+        nodeid = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: Chef <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Subject: [frobulated] [frobulatedagain] testing stuff after double prefix
+Cc: richard@test.test
+Reply-To: chef@bork.bork.bork
+Message-Id: <dummy_test_message_id>
+
+''')
+        assert not os.path.exists(SENDMAILDEBUG)
+        self.assertEqual(self.db.issue.get(nodeid, 'title'),
+            '[frobulated] [frobulatedagain] testing stuff after double prefix')
 
     def testClassStrictInvalid(self):
         self.instance.config.MAILGW_SUBJECT_PREFIX_PARSING = 'strict'
@@ -3028,6 +3447,164 @@ Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
 _______________________________________________________________________
 ''')
 
+    def testSpacesAroundMultilinkPropertyValue(self):
+        self.db.keyword.create(name='Foo')
+        self.db.keyword.create(name='Bar')
+        self.db.keyword.create(name='Baz This')
+        nodeid1 = self.doNewIssue()
+        nodeid2 = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: "Bork, Chef" <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: [issue1] set keyword [ keyword =+ Foo,Baz This ; nosy =+ mary ]
+
+Set the Foo and Baz This keywords along with mary for nosy.
+''')
+        assert os.path.exists(SENDMAILDEBUG)
+        self.compareMessages(self._get_mail(),
+'''FROM: roundup-admin@your.tracker.email.domain.example
+TO: mary@test.test, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] set keyword
+To: mary@test.test, richard@test.test
+From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+X-Roundup-Issue-keyword: Foo, Baz This
+Content-Transfer-Encoding: quoted-printable
+
+Bork, Chef <chef@bork.bork.bork> added the comment:
+
+Set the Foo and Baz This keywords along with mary for nosy.
+
+----------
+keyword: +Baz This, Foo
+nosy: +mary
+status: unread -> chatting
+title: Testing... -> set keyword
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+''')
+
+    def testmsgHeaderPropertyAssignedto(self):
+        ''' Test that setting the msg_header_property to an empty string
+        suppresses the X-Roundup-issue-prop header in generated email.
+        '''
+        reference_email = '''FROM: roundup-admin@your.tracker.email.domain.example
+TO: mary@test.test, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] set assignedto
+To: mary@test.test, richard@test.test
+From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+X-Roundup-Issue-Assignedto: mary
+Content-Transfer-Encoding: quoted-printable
+
+Bork, Chef <chef@bork.bork.bork> added the comment:
+
+Check that assignedto makes it into an X-Header
+
+----------
+assignedto:  -> mary
+nosy: +mary
+status: unread -> chatting
+title: Testing... -> set assignedto
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+'''        
+        self.db.issue.properties['assignedto'].msg_header_property='username'
+
+        nodeid1 = self.doNewIssue()
+        nodeid2 = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: "Bork, Chef" <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: [issue1] set assignedto [assignedto=mary]
+
+Check that assignedto makes it into an X-Header
+''')
+        assert os.path.exists(SENDMAILDEBUG)
+        self.compareMessages(self._get_mail(), reference_email)
+
+    def testmsgHeaderPropertyEmptyString(self):
+        ''' Test that setting the msg_header_property to an empty string
+        suppresses the X-Roundup-issue-prop header in generated email.
+        '''
+        reference_email = '''FROM: roundup-admin@your.tracker.email.domain.example
+TO: mary@test.test, richard@test.test
+Content-Type: text/plain; charset="utf-8"
+Subject: [issue1] set keyword
+To: mary@test.test, richard@test.test
+From: "Bork, Chef" <issue_tracker@your.tracker.email.domain.example>
+Reply-To: Roundup issue tracker
+ <issue_tracker@your.tracker.email.domain.example>
+MIME-Version: 1.0
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+X-Roundup-Name: Roundup issue tracker
+X-Roundup-Loop: hello
+X-Roundup-Issue-Status: chatting
+Content-Transfer-Encoding: quoted-printable
+
+Bork, Chef <chef@bork.bork.bork> added the comment:
+
+Set the Foo and Baz This keywords along with mary for nosy.
+
+----------
+keyword: +Baz This, Foo
+nosy: +mary
+status: unread -> chatting
+title: Testing... -> set keyword
+
+_______________________________________________________________________
+Roundup issue tracker <issue_tracker@your.tracker.email.domain.example>
+<http://tracker.example/cgi-bin/roundup.cgi/bugs/issue1>
+_______________________________________________________________________
+'''        
+        self.db.keyword.create(name='Foo')
+        self.db.keyword.create(name='Bar')
+        self.db.keyword.create(name='Baz This')
+
+        self.db.issue.properties['keyword'].msg_header_property=''
+
+        nodeid1 = self.doNewIssue()
+        nodeid2 = self._handle_mail('''Content-Type: text/plain;
+  charset="iso-8859-1"
+From: "Bork, Chef" <chef@bork.bork.bork>
+To: issue_tracker@your.tracker.email.domain.example
+Message-Id: <followup_dummy_id>
+In-Reply-To: <dummy_test_message_id>
+Subject: [issue1] set keyword [ keyword =+ Foo,Baz This ; nosy =+ mary ]
+
+Set the Foo and Baz This keywords along with mary for nosy.
+''')
+        assert os.path.exists(SENDMAILDEBUG)
+        self.compareMessages(self._get_mail(), reference_email)
+
+
     def testOutlookAttachment(self):
         message = '''X-MimeOLE: Produced By Microsoft Exchange V6.5
 Content-class: urn:content-classes:message
@@ -3262,7 +3839,9 @@ Stack trace:
         fileid = self.db.msg.get(msgid, 'files')[0]
         self.assertEqual(self.db.file.get(fileid, 'type'), 'message/rfc822')
 
-class MailgwPGPTestCase(MailgwTestAbstractBase):
+
+@skip_pgp
+class MailgwPGPTestCase(MailgwTestAbstractBase, unittest.TestCase):
     pgphome = gpgmelib.pgphome
     def setUp(self):
         MailgwTestAbstractBase.setUp(self)
@@ -3485,18 +4064,5 @@ zGhS06FLl3V1xx6gBlpqQHjut3efrAGpXGBVpnTJMOcgYAk=
         # check that the message has the right source code
         l = self.db.msg.get(m, 'tx_Source')
         self.assertEqual(l, 'email-sig-openpgp')
-
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(MailgwTestCase))
-    if pyme is not None:
-        suite.addTest(unittest.makeSuite(MailgwPGPTestCase))
-    else:
-        print "Skipping PGP tests"
-    return suite
-
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
 
 # vim: set filetype=python sts=4 sw=4 et si :

@@ -18,6 +18,7 @@ class TestClass:
         return {
             'string': hyperdb.String(),
             'number': hyperdb.Number(),
+            'integer': hyperdb.Integer(),
             'boolean': hyperdb.Boolean(),
             'password': hyperdb.Password(),
             'date': hyperdb.Date(),
@@ -27,12 +28,15 @@ class TestClass:
             'link2': hyperdb.Link('test2'),
             'multilink': hyperdb.Multilink('test'),
             'multilink2': hyperdb.Multilink('test2'),
+            'multilink3': hyperdb.Multilink('test', try_id_parsing='no'),
         }
     def getkey(self):
         return 'string'
     def lookup(self, value):
         if value == 'valid':
             return '1'
+        if value == '2valid':
+            return '2'
         raise KeyError
     def get(self, nodeid, propname):
         assert propname.startswith('multilink')
@@ -65,6 +69,15 @@ class RawToHyperdbTest(unittest.TestCase):
         self.assertEqual(self._test('password', ''), None)
         self.assertEqual(self._test('number', '  10 '), 10)
         self.assertEqual(self._test('number', '  1.5 '), 1.5)
+        self.assertEqual(self._test('number', '  -1022.5 '), -1022.5)
+    def testInteger(self):
+        self.assertEqual(self._test('integer', '  100 '), 100)
+        self.assertEqual(self._test('integer', '  0 '), 0)
+        self.assertEqual(self._test('integer', '  -100 '), -100)
+        # make sure error raised on string
+        self.assertRaises(hyperdb.HyperdbValueError, self._test, 'integer', 'a string', 'a string')
+        # make sure error raised on real number
+        self.assertRaises(hyperdb.HyperdbValueError, self._test, 'integer', '  -100.2 ')
     def testBoolean(self):
         self.assertEqual(self._test('password', ''), None)
         for true in 'yes true on 1'.split():
@@ -129,12 +142,50 @@ class RawToHyperdbTest(unittest.TestCase):
         self.assertEqual(self._test('multilink', '+valid', None), ['1'])
         self.assertEqual(self._test('multilink', '', None), [])
 
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(RawToHyperdbTest))
-    return suite
+    def testMultilink3(self):
+        # note that all +1, -2 type references will fail with exceptions
+        # '+1' is an id and try_id_parsing is set to no for multilink3
+        # and the 'name/key' 1 or 2 doesn't exist.
 
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
+        self.assertEqual(self._test('multilink3', '', '1'), [])
+
+        with self.assertRaises(hyperdb.HyperdbValueError) as cm:
+            self._test('multilink3', '1', '1')
+        self.assertEqual(cm.exception.message,
+                         "property multilink3: '1' is not a test.")
+
+        self.assertEqual(self._test('multilink3', 'valid', '1'), ['1'])
+
+        self.assertRaises(hyperdb.HyperdbValueError, self._test, 'multilink3',
+            'invalid', '1')
+
+        with self.assertRaises(hyperdb.HyperdbValueError) as cm:
+            self._test('multilink3', '+1', '1')
+        self.assertEqual(cm.exception.message,
+                         "property multilink3: '1' is not a test.")
+
+        self.assertEqual(self._test('multilink3', '+valid', '1'),
+                         ['1', '2', '3'])
+
+        with self.assertRaises(hyperdb.HyperdbValueError) as cm:
+            self._test('multilink3', '+1,-2', '1')
+        self.assertEqual(cm.exception.message,
+                         "property multilink3: '1' is not a test.")
+
+        with self.assertRaises(hyperdb.HyperdbValueError) as cm:
+            self._test('multilink3', '+valid,-2', '1')
+        self.assertEqual(cm.exception.message,
+                         "property multilink3: '2' is not a test.")
+
+        self.assertEqual(self._test('multilink3', '+valid,-2valid', '1'), ['1', '3'])
+
+        self.assertEqual(self._test('multilink3', '+valid', None), ['1'])
+
+        self.assertEqual(self._test('multilink3', '', None), [])
+
+        with self.assertRaises(hyperdb.HyperdbValueError) as cm:
+            result = self._test('multilink3', '-valid', None)
+        self.assertEqual(cm.exception.message,
+                   "property multilink3: 'valid' is not currently an element")
+
 # vim: set filetype=python ts=4 sw=4 et si

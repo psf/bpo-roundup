@@ -20,7 +20,7 @@ from cStringIO import StringIO
 
 from roundup.mailgw import Message
 
-class TestMessage(Message):
+class ExampleMessage(Message):
     # A note on message/rfc822: The content of such an attachment is an
     # email with at least one header line. RFC2046 tells us: """   A
     # media type of "message/rfc822" indicates that the body contains an
@@ -160,7 +160,7 @@ class MultipartTestCase(unittest.TestCase):
         self.assert_(p is None)
 
     def TestExtraction(self, spec, expected):
-        self.assertEqual(TestMessage(spec).extract_content(), expected)
+        self.assertEqual(ExampleMessage(spec).extract_content(), expected)
 
     def testTextPlain(self):
         self.TestExtraction('text/plain', ('foo\n', []))
@@ -226,15 +226,5 @@ multipart/mixed
     message/rfc822""",
                   (None,
                    [('foo.eml', 'message/rfc822', 'Subject: foo\n\nfoo\n')]))
-
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(MultipartTestCase))
-    return suite
-
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
-
 
 # vim: set filetype=python ts=4 sw=4 et si

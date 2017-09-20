@@ -12,27 +12,16 @@ ISOLATION_LEVEL_READ_UNCOMMITTED = None
 ISOLATION_LEVEL_READ_COMMITTED = None
 ISOLATION_LEVEL_REPEATABLE_READ = None
 ISOLATION_LEVEL_SERIALIZABLE = None
-try:
-    import psycopg
-    from psycopg import QuotedString
-    from psycopg import ProgrammingError
-    TransactionRollbackError = ProgrammingError
-    try:
-        from psycopg.extensions import ISOLATION_LEVEL_READ_UNCOMMITTED
-        from psycopg.extensions import ISOLATION_LEVEL_READ_COMMITTED
-        from psycopg.extensions import ISOLATION_LEVEL_REPEATABLE_READ
-        from psycopg.extensions import ISOLATION_LEVEL_SERIALIZABLE
-    except ImportError:
-        pass
-except:
-    from psycopg2 import psycopg1 as psycopg
-    from psycopg2.extensions import QuotedString
-    from psycopg2.extensions import ISOLATION_LEVEL_READ_UNCOMMITTED
-    from psycopg2.extensions import ISOLATION_LEVEL_READ_COMMITTED
-    from psycopg2.extensions import ISOLATION_LEVEL_REPEATABLE_READ
-    from psycopg2.extensions import ISOLATION_LEVEL_SERIALIZABLE
-    from psycopg2.psycopg1 import ProgrammingError
-    from psycopg2.extensions import TransactionRollbackError
+
+from psycopg2 import psycopg1 as psycopg
+from psycopg2.extensions import QuotedString
+from psycopg2.extensions import ISOLATION_LEVEL_READ_UNCOMMITTED
+from psycopg2.extensions import ISOLATION_LEVEL_READ_COMMITTED
+from psycopg2.extensions import ISOLATION_LEVEL_REPEATABLE_READ
+from psycopg2.extensions import ISOLATION_LEVEL_SERIALIZABLE
+from psycopg2.psycopg1 import ProgrammingError
+from psycopg2.extensions import TransactionRollbackError
+
 import logging
 
 from roundup import hyperdb, date
@@ -85,7 +74,7 @@ def db_command(config, command, database='postgres'):
 
     try:
         conn = psycopg.connect(**template1)
-    except psycopg.OperationalError, message:
+    except psycopg.OperationalError as message:
         if str(message).find('database "postgres" does not exist') >= 0:
             return db_command(config, command, database='template1')
         raise hyperdb.DatabaseError(message)
@@ -108,23 +97,18 @@ def pg_command(cursor, command):
     '''
     try:
         cursor.execute(command)
-    except psycopg.ProgrammingError, err:
+    except psycopg.DatabaseError as err:
         response = str(err).split('\n')[0]
-        if response.find('FATAL') != -1:
-            raise RuntimeError(response)
-        else:
-            msgs = [
+        if "FATAL" not in response :
+            msgs = (
                 'is being accessed by other users',
                 'could not serialize access due to concurrent update',
-            ]
-            can_retry = 0
-            for msg in msgs:
-                if response.find(msg) == -1:
-                    can_retry = 1
-            if can_retry:
-                time.sleep(1)
-                return 0
-            raise RuntimeError(response)
+            )
+            for msg in msgs :
+                if msg in response :
+                    time.sleep(0.1)
+                    return 0
+        raise RuntimeError (response)
     return 1
 
 def db_exists(config):
@@ -141,7 +125,7 @@ class Sessions(sessions_rdbms.Sessions):
     def set(self, *args, **kwargs):
         try:
             sessions_rdbms.Sessions.set(self, *args, **kwargs)
-        except ProgrammingError, err:
+        except ProgrammingError as err:
             response = str(err).split('\n')[0]
             if -1 != response.find('ERROR') and \
                -1 != response.find('could not serialize access due to concurrent update'):
@@ -151,7 +135,18 @@ class Sessions(sessions_rdbms.Sessions):
                 self.db.rollback()
 
 class Database(rdbms_common.Database):
+    """Postgres DB backend implementation
+
+    attributes:
+      dbtype:
+        holds the value for the type of db. It is used by indexer to
+        identify the database type so it can import the correct indexer
+        module when using native text search mode.
+    """
+
     arg = '%s'
+
+    dbtype = "postgres"
 
     # used by some code to switch styles of query
     implements_intersect = 1
@@ -165,7 +160,7 @@ class Database(rdbms_common.Database):
             'open database %r'%db['database'])
         try:
             conn = psycopg.connect(**db)
-        except psycopg.OperationalError, message:
+        except psycopg.OperationalError as message:
             raise hyperdb.DatabaseError(message)
 
         cursor = conn.cursor()
@@ -183,7 +178,7 @@ class Database(rdbms_common.Database):
 
         try:
             self.load_dbschema()
-        except psycopg.ProgrammingError, message:
+        except ProgrammingError as message:
             if str(message).find('schema') == -1:
                 raise
             self.rollback()
@@ -256,7 +251,7 @@ class Database(rdbms_common.Database):
 
         try:
             self.conn.commit()
-        except psycopg.ProgrammingError, message:
+        except ProgrammingError as message:
             # we've been instructed that this commit is allowed to fail
             if fail_ok and str(message).endswith('could not serialize '
                     'access due to concurrent update'):

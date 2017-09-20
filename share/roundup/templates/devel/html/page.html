@@ -83,6 +83,8 @@
          <input type="submit" class="form-small" value="Show bug:" i18n:attributes="value"/>
          <input class="form-small" size="4" type="text" name="@number"/>
          <input type="hidden" name="@type" value="bug"/>
+	 <input name="@csrf" type="hidden"
+		tal:attributes="value python:utils.anti_csrf_nonce()">
          <input type="hidden" name="@action" value="show"/>
         </form>
        </li>
@@ -128,6 +130,8 @@
          <input type="submit" class="form-small" value="Show task:" i18n:attributes="value"/>
          <input class="form-small" size="4" type="text" name="@number"/>
          <input type="hidden" name="@type" value="task"/>
+	 <input name="@csrf" type="hidden"
+		tal:attributes="value python:utils.anti_csrf_nonce()">
          <input type="hidden" name="@action" value="show"/>
         </form>
        </li>
@@ -144,6 +148,7 @@
                                 'status': milestone_status_notclosed,
                                 '@dispname': i18n.gettext('Show Open'),
                                 '@startwith': 0,
+				'@group': 'status',
                                 })"
                 i18n:translate="">Show Open</a>
        </li>
@@ -153,17 +158,24 @@
     <ul class="user">
      <li tal:condition="python:request.user.username=='anonymous'" class="submenu">
       <b i18n:translate="">User</b>
-      <form method="post" action="#">
+      <form method="post" tal:attributes="action request/base">
        <ul>
         <li>
          <tal:span i18n:translate="">Login</tal:span><br/>
          <input size="10" name="__login_name"/><br/>
          <input size="10" type="password" name="__login_password"/><br/>
+	 <input name="@csrf" type="hidden"
+		tal:attributes="value python:utils.anti_csrf_nonce()">
          <input type="hidden" name="@action" value="Login"/>
          <input type="checkbox" name="remember" id="remember"/>
          <label for="remember" i18n:translate="">Remember me?</label><br/>
          <input class="form-small" type="submit" value="Login" i18n:attributes="value"/><br/>
-         <input type="hidden" name="__came_from" tal:attributes="value string:${request/env/PATH_INFO}"/>
+	 <input type="hidden" name="__came_from"
+		tal:condition="exists:request/env/QUERY_STRING"
+		tal:attributes="value string:${request/base}${request/env/PATH_INFO}?${request/env/QUERY_STRING}"/>
+         <input type="hidden" name="__came_from"
+    		tal:condition="not:exists:request/env/QUERY_STRING"
+		tal:attributes="value string:${request/base}${request/env/PATH_INFO}"/>
          <span tal:replace="structure request/indexargs_form" />
         </li>
         <li>
@@ -204,7 +216,7 @@
         <span i18n:translate=""><b>Your Queries</b> (<a class="nomargin" href="query?@template=edit">edit</a>)</span><br/>
         <ul tal:repeat="qs request/user/queries">
          <li>
-          <a tal:attributes="href string:${qs/klass}?${qs/url}&@dispname=${qs/name}" tal:content="qs/name">link</a>
+          <a tal:attributes="href string:${qs/klass}?${qs/url}&@dispname=${qs/name/url_quote}" tal:content="qs/name">link</a>
          </li>
         </ul>
        </li>
@@ -424,3 +436,4 @@ See user.item.html in the classic template for examples.
     <input metal:define-macro="user_confirm_input" type="password"
     tal:attributes="id name; name string:@confirm@$name; readonly not:edit_ok" value=""/>
 
+<!-- SHA: ca32e5f43efcb7c3b4940df6f7a176f6990b15f0 -->

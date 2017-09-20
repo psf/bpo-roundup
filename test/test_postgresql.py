@@ -17,14 +17,31 @@
 
 import unittest
 
+import pytest
 from roundup.hyperdb import DatabaseError
+from roundup.backends import get_backend, have_backend
 
 from db_test_base import DBTest, ROTest, config, SchemaTest, ClassicInitTest
 from db_test_base import ConcurrentDBTest, HTMLItemTest, FilterCacheTest
 from db_test_base import ClassicInitBase, setupTracker
 
-from roundup.backends import get_backend, have_backend
+if not have_backend('postgresql'):
+    # FIX: workaround for a bug in pytest.mark.skip():
+    #   https://github.com/pytest-dev/pytest/issues/568
+    from .pytest_patcher import mark_class
+    skip_postgresql = mark_class(pytest.mark.skip(
+        reason='Skipping PostgreSQL tests: backend not available'))
+else:
+    try:
+        from roundup.backends.back_postgresql import psycopg, db_command
+        db_command(config, 'select 1')
+        skip_postgresql = lambda func, *args, **kwargs: func
+    except( DatabaseError ) as msg:
+        from .pytest_patcher import mark_class
+        skip_postgresql = mark_class(pytest.mark.skip(
+            reason='Skipping PostgreSQL tests: database not available'))
 
+@skip_postgresql
 class postgresqlOpener:
     if have_backend('postgresql'):
         module = get_backend('postgresql')
@@ -39,7 +56,9 @@ class postgresqlOpener:
         # clear out the database - easiest way is to nuke and re-create it
         self.module.db_nuke(config)
 
-class postgresqlDBTest(postgresqlOpener, DBTest):
+
+@skip_postgresql
+class postgresqlDBTest(postgresqlOpener, DBTest, unittest.TestCase):
     def setUp(self):
         postgresqlOpener.setUp(self)
         DBTest.setUp(self)
@@ -48,7 +67,9 @@ class postgresqlDBTest(postgresqlOpener, DBTest):
         DBTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
-class postgresqlROTest(postgresqlOpener, ROTest):
+
+@skip_postgresql
+class postgresqlROTest(postgresqlOpener, ROTest, unittest.TestCase):
     def setUp(self):
         postgresqlOpener.setUp(self)
         ROTest.setUp(self)
@@ -57,7 +78,10 @@ class postgresqlROTest(postgresqlOpener, ROTest):
         ROTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
-class postgresqlConcurrencyTest(postgresqlOpener, ConcurrentDBTest):
+
+@skip_postgresql
+class postgresqlConcurrencyTest(postgresqlOpener, ConcurrentDBTest,
+                                unittest.TestCase):
     backend = 'postgresql'
     def setUp(self):
         postgresqlOpener.setUp(self)
@@ -67,7 +91,10 @@ class postgresqlConcurrencyTest(postgresqlOpener, ConcurrentDBTest):
         ConcurrentDBTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
-class postgresqlJournalTest(postgresqlOpener, ClassicInitBase):
+
+@skip_postgresql
+class postgresqlJournalTest(postgresqlOpener, ClassicInitBase,
+                            unittest.TestCase):
     backend = 'postgresql'
     def setUp(self):
         postgresqlOpener.setUp(self)
@@ -79,8 +106,12 @@ class postgresqlJournalTest(postgresqlOpener, ClassicInitBase):
         db.close()
 
     def tearDown(self):
-        self.db1.close()
-        self.db2.close()
+        try:
+            self.db1.close()
+            self.db2.close()
+        except psycopg.InterfaceError as exc:
+            if 'connection already closed' in str(exc): pass
+            else: raise
         ClassicInitBase.tearDown(self)
         postgresqlOpener.tearDown(self)
 
@@ -96,9 +127,15 @@ class postgresqlJournalTest(postgresqlOpener, ClassicInitBase):
         db1.commit()
         db1.close()
 
-        db2.issue.set (id, title='t2')
-        db2.commit()
-        db2.close()
+        # Test testConcurrentRepeatableRead is expected to raise
+        # an error when the db2.issue.set() call is executed. 
+        try:
+            db2.issue.set (id, title='t2')
+            db2.commit()    
+        finally:
+            # Make sure that the db2 connection is closed, even when
+            # an error is raised.
+            db2.close()
         self.db = self.tracker.open('admin')
         journal = self.db.getjournal('issue', id)
         for n, line in enumerate(journal):
@@ -115,7 +152,10 @@ class postgresqlJournalTest(postgresqlOpener, ClassicInitBase):
         exc = self.module.TransactionRollbackError
         self.assertRaises(exc, self._test_journal, [])
 
-class postgresqlHTMLItemTest(postgresqlOpener, HTMLItemTest):
+
+@skip_postgresql
+class postgresqlHTMLItemTest(postgresqlOpener, HTMLItemTest,
+                             unittest.TestCase):
     backend = 'postgresql'
     def setUp(self):
         postgresqlOpener.setUp(self)
@@ -125,7 +165,10 @@ class postgresqlHTMLItemTest(postgresqlOpener, HTMLItemTest):
         HTMLItemTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
-class postgresqlFilterCacheTest(postgresqlOpener, FilterCacheTest):
+
+@skip_postgresql
+class postgresqlFilterCacheTest(postgresqlOpener, FilterCacheTest,
+                                unittest.TestCase):
     backend = 'postgresql'
     def setUp(self):
         postgresqlOpener.setUp(self)
@@ -135,7 +178,9 @@ class postgresqlFilterCacheTest(postgresqlOpener, FilterCacheTest):
         FilterCacheTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
-class postgresqlSchemaTest(postgresqlOpener, SchemaTest):
+
+@skip_postgresql
+class postgresqlSchemaTest(postgresqlOpener, SchemaTest, unittest.TestCase):
     def setUp(self):
         postgresqlOpener.setUp(self)
         SchemaTest.setUp(self)
@@ -144,7 +189,10 @@ class postgresqlSchemaTest(postgresqlOpener, SchemaTest):
         SchemaTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
-class postgresqlClassicInitTest(postgresqlOpener, ClassicInitTest):
+
+@skip_postgresql
+class postgresqlClassicInitTest(postgresqlOpener, ClassicInitTest,
+                                unittest.TestCase):
     backend = 'postgresql'
     def setUp(self):
         postgresqlOpener.setUp(self)
@@ -154,36 +202,15 @@ class postgresqlClassicInitTest(postgresqlOpener, ClassicInitTest):
         ClassicInitTest.tearDown(self)
         postgresqlOpener.tearDown(self)
 
+
 from session_common import RDBMSTest
-class postgresqlSessionTest(postgresqlOpener, RDBMSTest):
+@skip_postgresql
+class postgresqlSessionTest(postgresqlOpener, RDBMSTest, unittest.TestCase):
     def setUp(self):
         postgresqlOpener.setUp(self)
         RDBMSTest.setUp(self)
     def tearDown(self):
         RDBMSTest.tearDown(self)
         postgresqlOpener.tearDown(self)
-
-def test_suite():
-    suite = unittest.TestSuite()
-    if not have_backend('postgresql'):
-        print "Skipping postgresql tests"
-        return suite
-
-    # make sure we start with a clean slate
-    if postgresqlOpener.module.db_exists(config):
-        postgresqlOpener.module.db_nuke(config, 1)
-
-    # TODO: Check if we can run postgresql tests
-    print 'Including postgresql tests'
-    suite.addTest(unittest.makeSuite(postgresqlDBTest))
-    suite.addTest(unittest.makeSuite(postgresqlROTest))
-    suite.addTest(unittest.makeSuite(postgresqlSchemaTest))
-    suite.addTest(unittest.makeSuite(postgresqlClassicInitTest))
-    suite.addTest(unittest.makeSuite(postgresqlSessionTest))
-    suite.addTest(unittest.makeSuite(postgresqlConcurrencyTest))
-    suite.addTest(unittest.makeSuite(postgresqlJournalTest))
-    suite.addTest(unittest.makeSuite(postgresqlHTMLItemTest))
-    suite.addTest(unittest.makeSuite(postgresqlFilterCacheTest))
-    return suite
 
 # vim: set et sts=4 sw=4 :

@@ -3,13 +3,13 @@
 
 __docformat__ = 'restructuredtext'
 
-class LoginError(Exception):
+class LoginError(BaseException):
     pass
 
-class Unauthorised(Exception):
+class Unauthorised(BaseException):
     pass
 
-class Reject(Exception):
+class Reject(BaseException):
     """An auditor may raise this exception when the current create or set
     operation should be stopped.
 
@@ -20,6 +20,15 @@ class Reject(Exception):
     - cgi will trap and present the exception in a nice format
     """
     pass
+
+
+class RejectRaw(Reject):
+    """
+    Performs the same function as Reject, except HTML in the message is not
+    escaped when displayed to the user.
+    """
+    pass
+
 
 class UnsupportedMediaType(Exception):
     pass

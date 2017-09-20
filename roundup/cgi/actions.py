@@ -1,14 +1,16 @@
 import re, cgi, time, random, csv, codecs
+from io import BytesIO
 
 from roundup import hyperdb, token, date, password
 from roundup.actions import Action as BaseAction
 from roundup.i18n import _
-import roundup.exceptions
 from roundup.cgi import exceptions, templating
 from roundup.mailgw import uidFromAddress
-from roundup.anypy import io_, urllib_
+from roundup.exceptions import Reject, RejectRaw
+from roundup.anypy import urllib_
 
-__all__ = ['Action', 'ShowAction', 'RetireAction', 'SearchAction',
+# Also add action to client.py::Client.actions property
+__all__ = ['Action', 'ShowAction', 'RetireAction', 'RestoreAction', 'SearchAction',
            'EditCSVAction', 'EditItemAction', 'PassResetAction',
            'ConfRegoAction', 'RegisterAction', 'LoginAction', 'LogoutAction',
            'NewItemAction', 'ExportCSVAction']
@@ -37,6 +39,102 @@ class Action:
         """Execute the action specified by this object."""
         self.permission()
         return self.handle()
+
+    def examine_url(self, url):
+        '''Return URL validated to be under self.base and properly escaped
+
+        If url not properly escaped or validation fails raise ValueError.
+
+        To try to prevent XSS attacks, validate that the url that is
+        passed in is under self.base for the tracker. This is used to
+        clean up "__came_from" and "__redirect_to" form variables used
+        by the LoginAction and NewItemAction actions.
+
+        The url that is passed in must be a properly url quoted
+        argument. I.E. all characters that are not valid according to
+        RFC3986 must be % encoded. Schema should be lower case.
+
+        It parses the passed url into components.
+
+        It verifies that the scheme is http or https (so a redirect can
+        force https even if normal access to the tracker is via http).
+        Validates that the network component is the same as in self.base.
+        Validates that the path component in the base url starts the url's
+        path component. It not it raises ValueError. If everything
+        validates:
+
+        For each component, Appendix A of RFC 3986 says the following
+        are allowed:
+
+        pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
+        query         = *( pchar / "/" / "?" )
+        unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
+        pct-encoded   = "%" HEXDIG HEXDIG
+        sub-delims    = "!" / "$" / "&" / "'" / "(" / ")"
+                         / "*" / "+" / "," / ";" / "="
+
+        Checks all parts with a regexp that matches any run of 0 or
+        more allowed characters. If the component doesn't validate,
+        raise ValueError. Don't attempt to urllib_.quote it. Either
+        it's correct as it comes in or it's a ValueError.
+
+        Finally paste the whole thing together and return the new url.
+        '''
+
+        parsed_url_tuple = urllib_.urlparse(url)
+        if self.base:
+            parsed_base_url_tuple = urllib_.urlparse(self.base)
+        else:
+            raise ValueError(self._("Base url not set. Check configuration."))
+
+        info={ 'url': url,
+               'base_url': self.base,
+               'base_scheme': parsed_base_url_tuple.scheme,
+               'base_netloc': parsed_base_url_tuple.netloc,
+               'base_path': parsed_base_url_tuple.path,
+               'url_scheme': parsed_url_tuple.scheme,
+               'url_netloc': parsed_url_tuple.netloc,
+               'url_path': parsed_url_tuple.path,
+               'url_params': parsed_url_tuple.params,
+               'url_query': parsed_url_tuple.query,
+               'url_fragment': parsed_url_tuple.fragment }
+
+        if parsed_base_url_tuple.scheme == "https":
+            if parsed_url_tuple.scheme != "https":
+                raise ValueError(self._("Base url %(base_url)s requires https. Redirect url %(url)s uses http.")%info)
+        else:
+            if parsed_url_tuple.scheme not in ('http', 'https'):
+                raise ValueError(self._("Unrecognized scheme in %(url)s")%info)
+
+        if parsed_url_tuple.netloc <> parsed_base_url_tuple.netloc:
+            raise ValueError(self._("Net location in %(url)s does not match base: %(base_netloc)s")%info)
+
+        if parsed_url_tuple.path.find(parsed_base_url_tuple.path) <> 0:
+            raise ValueError(self._("Base path %(base_path)s is not a prefix for url %(url)s")%info)
+
+        # I am not sure if this has to be language sensitive.
+        # Do ranges depend on the LANG of the user??
+        # Is there a newer spec for URI's than what I am referencing?
+
+        # Also it really should be % HEXDIG HEXDIG that's allowed
+        # If %%% passes, the roundup server should be able to ignore/
+        # quote it so it doesn't do anything bad otherwise we have a
+        # different vector to handle.
+        allowed_pattern = re.compile(r'''^[A-Za-z0-9@:/?._~%!$&'()*+,;=-]*$''')
+
+        if not allowed_pattern.match(parsed_url_tuple.path):
+           raise ValueError(self._("Path component (%(url_path)s) in %(url)s is not properly escaped")%info)
+
+        if not allowed_pattern.match(parsed_url_tuple.params):
+           raise ValueError(self._("Params component (%(url_params)s) in %(url)s is not properly escaped")%info)
+
+        if not allowed_pattern.match(parsed_url_tuple.query):
+            raise ValueError(self._("Query component (%(url_query)s) in %(url)s is not properly escaped")%info)
+
+        if not allowed_pattern.match(parsed_url_tuple.fragment):
+            raise ValueError(self._("Fragment component (%(url_fragment)s) in %(url)s is not properly escaped")%info)
+
+        return(urllib_.urlunparse(parsed_url_tuple))
 
     name = ''
     permissionType = None
@@ -106,7 +204,7 @@ class RetireAction(Action):
         """Retire the context item."""
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            raise roundup.exceptions.Reject(self._('Invalid request'))
+            raise Reject(self._('Invalid request'))
 
         # if we want to view the index template now, then unset the itemid
         # context info (a special-case for retire actions on the index page)
@@ -133,6 +231,38 @@ class RetireAction(Action):
 
         self.client.add_ok_message(
             self._('%(classname)s %(itemid)s has been retired')%{
+                'classname': self.classname.capitalize(), 'itemid': itemid})
+
+
+class RestoreAction(Action):
+    name = 'restore'
+    permissionType = 'Edit'
+
+    def handle(self):
+        """Restore the context item."""
+        # ensure modification comes via POST
+        if self.client.env['REQUEST_METHOD'] != 'POST':
+            raise Reject(self._('Invalid request'))
+
+        # if we want to view the index template now, then unset the itemid
+        # context info (a special-case for retire actions on the index page)
+        itemid = self.nodeid
+        if self.template == 'index':
+            self.client.nodeid = None
+
+        # check permission
+        if not self.hasPermission('Restore', classname=self.classname,
+                itemid=itemid):
+            raise exceptions.Unauthorised(self._(
+                'You do not have permission to restore %(class)s'
+            ) % {'class': self.classname})
+
+        # do the restore
+        self.db.getclass(self.classname).restore(itemid)
+        self.db.commit()
+
+        self.client.add_ok_message(
+            self._('%(classname)s %(itemid)s has been restored')%{
                 'classname': self.classname.capitalize(), 'itemid': itemid})
 
 
@@ -169,6 +299,8 @@ class SearchAction(Action):
             key = self.db.query.getkey()
             if key:
                 # edit the old way, only one query per name
+                # Note that use of queryname as key will automatically
+                # raise an error if there are duplicate names.
                 try:
                     qid = self.db.query.lookup(old_queryname)
                     if not self.hasPermission('Edit', 'query', itemid=qid):
@@ -183,9 +315,29 @@ class SearchAction(Action):
                     qid = self.db.query.create(name=queryname,
                         klass=self.classname, url=url)
             else:
+                uid = self.db.getuid()
+
+                # if the queryname is being changed from the old
+                # (original) value, make sure new queryname is not
+                # already in use by user.
+                # if in use, return to edit/search screen and let
+                # user change it.
+
+                if old_queryname != queryname:
+                    # we have a name change
+                    qids = self.db.query.filter(None, {'name': queryname,
+                                                       'creator': uid})
+                    for qid in qids:
+                        # require an exact name match
+                        if queryname != self.db.query.get(qid, 'name'):
+                            continue
+                        # whoops we found a duplicate; report error and return
+                        message=_("You already own a query named '%s'. Please choose another name.")%(queryname)
+                        self.client.add_error_message(message)
+                        return
+
                 # edit the new way, query name not a key any more
                 # see if we match an existing private query
-                uid = self.db.getuid()
                 qids = self.db.query.filter(None, {'name': old_queryname,
                         'private_for': uid})
                 if not qids:
@@ -221,6 +373,16 @@ class SearchAction(Action):
             # commit the query change to the database
             self.db.commit()
 
+            # This redirects to the index page. Add the @dispname
+            # url param to the request so that the query name
+            # is displayed.
+            req.form.list.append(
+                cgi.MiniFieldStorage(
+                    "@dispname", queryname
+                )
+            )
+
+
     def fakeFilterVars(self):
         """Add a faked :filter form variable for each filtering prop."""
         cls = self.db.classes[self.classname]
@@ -240,6 +402,7 @@ class SearchAction(Action):
                     continue
                 if isinstance(prop, hyperdb.String):
                     v = self.form[key].value
+                    # If this ever has unbalanced quotes, hilarity will ensue
                     l = token.token_split(v)
                     if len(l) != 1 or l[0] != v:
                         self.form.value.remove(self.form[key])
@@ -251,6 +414,15 @@ class SearchAction(Action):
                         float(self.form[key].value)
                     except ValueError:
                         raise exceptions.FormError, "Invalid number: "+self.form[key].value
+                elif isinstance(prop, hyperdb.Integer):
+                    try:
+                        val=self.form[key].value
+                        if ( str(int(val)) == val ):
+                            pass
+                        else:
+                            raise ValueError
+                    except ValueError:
+                        raise exceptions.FormError, "Invalid integer: "+val
 
             self.form.value.append(cgi.MiniFieldStorage('@filter', key))
 
@@ -261,11 +433,12 @@ class SearchAction(Action):
         because the leading '?' is not part of the query string.
 
         Implementation note:
-        But maybe the template should be part of the stored query:
-        template = self.getFromForm('template')
-        if template:
-            return req.indexargs_url('', {'@template' : template})[1:]
+        We now store the template with the query if the template name is
+        different from 'index'
         """
+        template = self.getFromForm('template')
+        if template and template != 'index':
+            return req.indexargs_url('', {'@template' : template})[1:]
         return req.indexargs_url('', {})[1:]
 
     def getFromForm(self, name):
@@ -290,7 +463,7 @@ class EditCSVAction(Action):
         """
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            raise roundup.exceptions.Reject(self._('Invalid request'))
+            raise Reject(self._('Invalid request'))
 
         # figure the properties list for the class
         cl = self.db.classes[self.classname]
@@ -302,7 +475,7 @@ class EditCSVAction(Action):
         props = ['id'] + props_without_id
 
         # do the edit
-        rows = io_.BytesIO(self.form['rows'].value)
+        rows = BytesIO(self.form['rows'].value)
         reader = csv.reader(rows)
         found = {}
         line = 0
@@ -367,6 +540,8 @@ class EditCSVAction(Action):
                         value = value.lower() in ('yes', 'true', 'on', '1')
                     elif isinstance(prop, hyperdb.Number):
                         value = float(value)
+                    elif isinstance(prop, hyperdb.Integer):
+                        value = int(value)
                     d[name] = value
                 elif exists:
                     # nuke the existing value
@@ -459,8 +634,13 @@ class EditCommon(Action):
                             self._('%(class)s %(id)s %(properties)s edited ok')
                             % {'class':cn, 'id':nodeid, 'properties':info})
                     else:
-                        m.append(self._('%(class)s %(id)s - nothing changed')
-                            % {'class':cn, 'id':nodeid})
+                        # this used to produce a message like:
+                        #    issue34 - nothing changed
+                        # which is confusing if only quiet properties
+                        # changed for the class/id. So don't report
+                        # anything is the user didn't explicitly change
+                        # a visible (non-quiet) property.
+                        pass
                 else:
                     assert props
 
@@ -495,6 +675,8 @@ class EditCommon(Action):
                                 props[linkprop] = existing
                             else:
                                 props[linkprop] = nodeid
+                    elif isinstance(propdef, hyperdb.Multilink):
+                        props[linkprop].append(nodeid)
 
         return '\n'.join(m)
 
@@ -609,7 +791,7 @@ class EditItemAction(EditCommon):
         """
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            raise roundup.exceptions.Reject(self._('Invalid request'))
+            raise Reject(self._('Invalid request'))
 
         user_activity = self.lastUserActivity()
         if user_activity:
@@ -623,10 +805,10 @@ class EditItemAction(EditCommon):
         # handle the props
         try:
             message = self._editnodes(props, links)
-        except (ValueError, KeyError, IndexError,
-                roundup.exceptions.Reject), message:
+        except (ValueError, KeyError, IndexError, Reject) as message:
+            escape = not isinstance(message, RejectRaw)
             self.client.add_error_message(
-                self._('Edit Error: %s') % str(message))
+                self._('Edit Error: %s') % str(message), escape=escape)
             return
 
         # commit now that all the tricky stuff is done
@@ -655,12 +837,12 @@ class NewItemAction(EditCommon):
         '''
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            raise roundup.exceptions.Reject(self._('Invalid request'))
+            raise Reject(self._('Invalid request'))
 
         # parse the props from the form
         try:
             props, links = self.client.parsePropsFromForm(create=1)
-        except (ValueError, KeyError), message:
+        except (ValueError, KeyError) as message:
             self.client.add_error_message(self._('Error: %s')
                 % str(message))
             return
@@ -669,16 +851,23 @@ class NewItemAction(EditCommon):
         try:
             # when it hits the None element, it'll set self.nodeid
             messages = self._editnodes(props, links)
-        except (ValueError, KeyError, IndexError,
-                roundup.exceptions.Reject), message:
+        except (ValueError, KeyError, IndexError, Reject) as message:
+            escape = not isinstance(message, RejectRaw)
             # these errors might just be indicative of user dumbness
-            self.client.add_error_message(_('Error: %s') % str(message))
+            self.client.add_error_message(_('Error: %s') % str(message),
+                                          escape=escape)
             return
 
         # commit now that all the tricky stuff is done
         self.db.commit()
 
-        # redirect to the new item's page
+        # Allow an option to stay on the page to create new things
+        if '__redirect_to' in self.form:
+            raise exceptions.Redirect('%s&@ok_message=%s'%(
+                self.examine_url(self.form['__redirect_to'].value),
+                urllib_.quote(messages)))
+
+        # otherwise redirect to the new item's page
         raise exceptions.Redirect('%s%s%s?@ok_message=%s&@template=%s' % (
             self.base, self.classname, self.nodeid, urllib_.quote(messages),
             urllib_.quote(self.template)))
@@ -703,6 +892,9 @@ class PassResetAction(Action):
                         "to show up erroneously, please check your email)"))
                 return
 
+            # pull the additional email address if exist
+            uaddress = otks.get(otk, 'uaddress', default=None)
+
             # re-open the database as "admin"
             if self.user != 'admin':
                 self.client.opendb('admin')
@@ -720,13 +912,16 @@ class PassResetAction(Action):
                 # clear the props from the otk database
                 otks.destroy(otk)
                 self.db.commit()
-            except (ValueError, KeyError), message:
+            except (ValueError, KeyError) as message:
                 self.client.add_error_message(str(message))
                 return
 
             # user info
-            address = self.db.user.get(uid, 'address')
             name = self.db.user.get(uid, 'username')
+            if uaddress is None:
+                address = self.db.user.get(uid, 'address')
+            else:
+                address = uaddress
 
             # send the email
             tracker_name = self.db.config.TRACKER_NAME
@@ -769,7 +964,7 @@ Your password is now: %(password)s
         otk = ''.join([random.choice(chars) for x in range(32)])
         while otks.exists(otk):
             otk = ''.join([random.choice(chars) for x in range(32)])
-        otks.set(otk, uid=uid)
+        otks.set(otk, uid=uid, uaddress=address)
         self.db.commit()
 
         # send the email
@@ -787,7 +982,10 @@ You should then receive another email with the new password.
         if not self.client.standard_message([address], subject, body):
             return
 
-        self.client.add_ok_message(self._('Email sent to %s') % address)
+        if 'username' in self.form:
+            self.client.add_ok_message(self._('Email sent to primary notification address for %s.') % name)
+        else:
+            self.client.add_ok_message(self._('Email sent to %s.') % address)
 
 class RegoCommon(Action):
     def finishRego(self):
@@ -809,9 +1007,10 @@ class RegoCommon(Action):
         # to want to reload the page, or something)
         return '''<html><head><title>%s</title></head>
             <body><p><a href="%s">%s</a></p>
-            <script type="text/javascript">
+            <script nonce="%s" type="text/javascript">
             window.setTimeout('window.location = "%s"', 1000);
-            </script>'''%(message, url, message, url)
+            </script>'''%(message, url, message,
+                          self.client.client_nonce, url)
 
 class ConfRegoAction(RegoCommon):
     def handle(self):
@@ -819,7 +1018,7 @@ class ConfRegoAction(RegoCommon):
         try:
             # pull the rego information out of the otk database
             self.userid = self.db.confirm_registration(self.form['otk'].value)
-        except (ValueError, KeyError), message:
+        except (ValueError, KeyError) as message:
             self.client.add_error_message(str(message))
             return
         return self.finishRego()
@@ -836,12 +1035,12 @@ class RegisterAction(RegoCommon, EditCommon):
         """
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            raise roundup.exceptions.Reject(self._('Invalid request'))
+            raise Reject(self._('Invalid request'))
 
         # parse the props from the form
         try:
             props, links = self.client.parsePropsFromForm(create=1)
-        except (ValueError, KeyError), message:
+        except (ValueError, KeyError) as message:
             self.client.add_error_message(self._('Error: %s')
                 % str(message))
             return
@@ -852,10 +1051,11 @@ class RegisterAction(RegoCommon, EditCommon):
             try:
                 # when it hits the None element, it'll set self.nodeid
                 messages = self._editnodes(props, links)
-            except (ValueError, KeyError, IndexError,
-                    roundup.exceptions.Reject), message:
+            except (ValueError, KeyError, IndexError, Reject) as message:
+                escape = not isinstance(message, RejectRaw)
                 # these errors might just be indicative of user dumbness
-                self.client.add_error_message(_('Error: %s') % str(message))
+                self.client.add_error_message(_('Error: %s') % str(message),
+                                              escape=escape)
                 return
 
             # fix up the initial roles
@@ -951,6 +1151,14 @@ class LogoutAction(Action):
         self.client.nodeid = None
         self.client.template = None
 
+        # Redirect to a new page on logout. This regenerates
+        # CSRF tokens so they are associated with the
+        # anonymous user and not the user who logged out. If
+        # we don't the user gets an invalid CSRF token error
+        # As above choose the home page since everybody can
+        # see that.
+        raise exceptions.Redirect, self.base
+
 class LoginAction(Action):
     def handle(self):
         """Attempt to log a user in.
@@ -960,7 +1168,7 @@ class LoginAction(Action):
         """
         # ensure modification comes via POST
         if self.client.env['REQUEST_METHOD'] != 'POST':
-            raise roundup.exceptions.Reject(self._('Invalid request'))
+            raise Reject(self._('Invalid request'))
 
         # we need the username at a minimum
         if '__login_name' not in self.form:
@@ -974,12 +1182,65 @@ class LoginAction(Action):
         else:
             password = ''
 
+        if '__came_from' in self.form:
+            # On valid or invalid login, redirect the user back to the page
+            # the started on. Searches, issue and other pages
+            # are all preserved in __came_from. Clean out any old feedback
+            # @error_message, @ok_message from the __came_from url.
+            #
+            # 1. Split the url into components.
+            # 2. Split the query string into parts.
+            # 3. Delete @error_message and @ok_message if present.
+            # 4. Define a new redirect_url missing the @...message entries.
+            #    This will be redefined if there is a login error to include
+            #      a new error message
+
+            clean_url = self.examine_url(self.form['__came_from'].value)
+            redirect_url_tuple = urllib_.urlparse(clean_url)
+            # now I have a tuple form for the __came_from url
+            try:
+                query=urllib_.parse_qs(redirect_url_tuple.query)
+                if "@error_message" in query:
+                    del query["@error_message"]
+                if "@ok_message" in query:
+                    del query["@ok_message"]
+                if "@action" in query:
+                    # also remove the logout action from the redirect
+                    # there is only ever one @action value.
+                    if query['@action'] == ["logout"]:
+                        del query["@action"]
+            except AttributeError:
+                # no query param so nothing to remove. Just define.
+                query = {}
+                pass
+
+            redirect_url = urllib_.urlunparse( (redirect_url_tuple.scheme,
+                                                redirect_url_tuple.netloc,
+                                                redirect_url_tuple.path,
+                                                redirect_url_tuple.params,
+                                                urllib_.urlencode(query, doseq=True),
+                                                redirect_url_tuple.fragment)
+                                           )
+
         try:
             self.verifyLogin(self.client.user, password)
-        except exceptions.LoginError, err:
+        except exceptions.LoginError as err:
             self.client.make_user_anonymous()
             for arg in err.args:
                 self.client.add_error_message(arg)
+
+            if '__came_from' in self.form:
+                # set a new error
+                query['@error_message'] = err.args
+                redirect_url = urllib_.urlunparse( (redirect_url_tuple.scheme,
+                                                    redirect_url_tuple.netloc,
+                                                    redirect_url_tuple.path,
+                                                    redirect_url_tuple.params,
+                                                    urllib_.urlencode(query, doseq=True),
+                                                    redirect_url_tuple.fragment )
+                                               )
+                raise exceptions.Redirect(redirect_url)
+            # if no __came_from, send back to base url with error
             return
 
         # now we're OK, re-open the database for real, using the user
@@ -992,7 +1253,7 @@ class LoginAction(Action):
 
         # If we came from someplace, go back there
         if '__came_from' in self.form:
-            raise exceptions.Redirect(self.form['__came_from'].value)
+            raise exceptions.Redirect(redirect_url)
 
     def verifyLogin(self, username, password):
         # make sure the user exists
@@ -1041,13 +1302,17 @@ class ExportCSVAction(Action):
         columns = request.columns
         klass = self.db.getclass(request.classname)
 
-        # validate the request
-        allprops = klass.getprops()
-        for c in filterspec.keys() + columns + [x[1] for x in group + sort]:
-            if not allprops.has_key(c):
-                # Can't use FormError, since that would try to use
-                # the same bogus field specs
-                raise exceptions.SeriousError, "Property %s does not exist" % c
+        # check if all columns exist on class
+        # the exception must be raised before sending header
+        props = klass.getprops()
+        for cname in columns:
+            if cname not in props:
+                # use error code 400: Bad Request. Do not use
+                # error code 404: Not Found.
+                self.client.response_code = 400
+                raise exceptions.NotFound(
+                    self._('Column "%(column)s" not found in %(class)s')
+                    % {'column': cgi.escape(cname), 'class': request.classname})
 
         # full-text search
         if request.search_text:

@@ -21,21 +21,27 @@
 __docformat__ = 'restructuredtext'
 
 # standard python modules
-import os, re, shutil, weakref
+import os, re, shutil, sys, weakref
+import traceback
+import logging
 
 # roundup modules
 import date, password
-from support import ensureParentsExist, PrioList, sorted, reversed
+from support import ensureParentsExist, PrioList
 from roundup.i18n import _
+from roundup.cgi.exceptions import DetectorError
+
+logger = logging.getLogger('roundup.hyperdb')
 
 #
 # Types
 #
 class _Type(object):
     """A roundup property type."""
-    def __init__(self, required=False, default_value = None):
+    def __init__(self, required=False, default_value = None, quiet=False):
         self.required = required
         self.__default_value = default_value
+        self.quiet = quiet
     def __repr__(self):
         ' more useful for dumps '
         return '<%s.%s>'%(self.__class__.__module__, self.__class__.__name__)
@@ -52,8 +58,8 @@ class _Type(object):
 
 class String(_Type):
     """An object designating a String property."""
-    def __init__(self, indexme='no', required=False, default_value = ""):
-        super(String, self).__init__(required, default_value)
+    def __init__(self, indexme='no', required=False, default_value = "", quiet=False):
+        super(String, self).__init__(required, default_value, quiet)
         self.indexme = indexme == 'yes'
     def from_raw(self, value, propname='', **kw):
         """fix the CRLF/CR -> LF stuff"""
@@ -71,12 +77,16 @@ class String(_Type):
 
 class Password(_Type):
     """An object designating a Password property."""
+    def __init__(self, scheme=None, required=False, default_value = None, quiet=False):
+        super(Password, self).__init__(required, default_value, quiet)
+        self.scheme = scheme
+
     def from_raw(self, value, **kw):
         if not value:
             return None
         try:
-            return password.Password(encrypted=value, strict=True)
-        except password.PasswordValueError, message:
+            return password.Password(encrypted=value, scheme=self.scheme, strict=True)
+        except password.PasswordValueError as message:
             raise HyperdbValueError, \
                     _('property %s: %s')%(kw['propname'], message)
 
@@ -87,9 +97,10 @@ class Password(_Type):
 
 class Date(_Type):
     """An object designating a Date property."""
-    def __init__(self, offset=None, required=False, default_value = None):
+    def __init__(self, offset=None, required=False, default_value = None, quiet=False):
         super(Date, self).__init__(required = required,
-                                   default_value = default_value)
+                                   default_value = default_value,
+                                   quiet=quiet)
         self._offset = offset
     def offset(self, db):
         if self._offset is not None:
@@ -98,7 +109,7 @@ class Date(_Type):
     def from_raw(self, value, db, **kw):
         try:
             value = date.Date(value, self.offset(db))
-        except ValueError, message:
+        except ValueError as message:
             raise HyperdbValueError, _('property %s: %r is an invalid '\
                 'date (%s)')%(kw['propname'], value, message)
         return value
@@ -115,7 +126,7 @@ class Interval(_Type):
     def from_raw(self, value, **kw):
         try:
             value = date.Interval(value)
-        except ValueError, message:
+        except ValueError as message:
             raise HyperdbValueError, _('property %s: %r is an invalid '\
                 'date interval (%s)')%(kw['propname'], value, message)
         return value
@@ -128,18 +139,31 @@ class _Pointer(_Type):
     """An object designating a Pointer property that links or multilinks
     to a node in a specified class."""
     def __init__(self, classname, do_journal='yes', try_id_parsing='yes',
-                 required=False, default_value=None):
+                 required=False, default_value=None,
+                 msg_header_property = None, quiet=False):
         """ Default is to journal link and unlink events.
             When try_id_parsing is false, we don't allow IDs in input
             fields (the key of the Link or Multilink property must be
             given instead). This is useful when the name of a property
             can be numeric. It will only work if the linked item has a
             key property and is a questionable feature for multilinks.
+            The msg_header_property is used in the mail gateway when
+            sending out messages: By default roundup creates headers of
+            the form: 'X-Roundup-issue-prop: value' for all properties
+            prop of issue that have a 'name' property. This definition
+            allows to override the 'name' property. A common use-case is
+            adding a mail-header with the assigned_to property to allow
+            user mail-filtering of issue-emails for which they're
+            responsible. In that case setting
+            'msg_header_property="username"' for the assigned_to
+            property will generated message headers of the form:
+            'X-Roundup-issue-assigned_to: joe_user'.
         """
-        super(_Pointer, self).__init__(required, default_value)
+        super(_Pointer, self).__init__(required, default_value, quiet)
         self.classname = classname
         self.do_journal = do_journal == 'yes'
-        self.try_id_parsing = try_id_parsing == 'yes'
+        self.try_id_parsing      = try_id_parsing == 'yes'
+        self.msg_header_property = msg_header_property
     def __repr__(self):
         """more useful for dumps. But beware: This is also used in schema
         storage in SQL backends!
@@ -177,12 +201,13 @@ class Multilink(_Pointer):
                     'link' and 'unlink' events placed in their journal
     """
 
-    def __init__(self, classname, do_journal = 'yes', required = False):
+    def __init__(self, classname, do_journal = 'yes', required = False, quiet=False, try_id_parsing='yes'):
 
         super(Multilink, self).__init__(classname,
                                         do_journal,
                                         required = required,
-                                        default_value = [])        
+                                        default_value = [], quiet=quiet,
+                                        try_id_parsing=try_id_parsing)
 
     def from_raw(self, value, db, klass, propname, itemid, **kw):
         if not value:
@@ -215,10 +240,10 @@ class Multilink(_Pointer):
             remove = 0
             if item.startswith('-'):
                 remove = 1
-                item = item[1:]
+                item = item[1:].strip()
                 do_set = 0
             elif item.startswith('+'):
-                item = item[1:]
+                item = item[1:].strip()
                 do_set = 0
 
             # look up the value
@@ -271,12 +296,34 @@ class Boolean(_Type):
 
 class Number(_Type):
     """An object designating a numeric property"""
+    def __init__(self, use_double = False, **kw):
+        """ The value use_double tells the database backend to use a
+            floating-point format with more precision than the default.
+            Usually implemented by type 'double precision' in the sql
+            backend. The default is to use single-precision float (aka
+            'real') in the db. Note that sqlite already uses 8-byte for
+            floating point numbers.
+        """
+        self.use_double = use_double
+        _Type.__init__ (self, **kw)
+        super(Number, self).__init__(**kw)
     def from_raw(self, value, **kw):
         value = value.strip()
         try:
             value = float(value)
         except ValueError:
             raise HyperdbValueError, _('property %s: %r is not a number')%(
+                kw['propname'], value)
+        return value
+
+class Integer(_Type):
+    """An object designating an integer property"""
+    def from_raw(self, value, **kw):
+        value = value.strip()
+        try:
+            value = int(value)
+        except ValueError:
+            raise HyperdbValueError, _('property %s: %r is not an integer')%(
                 kw['propname'], value)
         return value
 #
@@ -737,9 +784,11 @@ All methods except __repr__ must be implemented by a concrete backend Database.
         """ Journal the Action
         'action' may be:
 
-            'create' or 'set' -- 'params' is a dictionary of property values
+            'set' -- 'params' is a dictionary of property values
+            'create' -- 'params' is an empty dictionary as of
+                      Wed Nov 06 11:38:43 2002 +0000
             'link' or 'unlink' -- 'params' is (classname, nodeid, propname)
-            'retire' -- 'params' is None
+            'retired' or 'restored'-- 'params' is None
         """
         raise NotImplementedError
 
@@ -947,7 +996,7 @@ class Class:
         if there are any references to the node.
         """
 
-    def history(self, nodeid):
+    def history(self, nodeid, enforceperm=True, skipquiet=True):
         """Retrieve the journal of edits on a particular node.
 
         'nodeid' must be the id of an existing node of this class or an
@@ -959,10 +1008,119 @@ class Class:
 
         'date' is a Timestamp object specifying the time of the change and
         'tag' is the journaltag specified when the database was opened.
+
+        If the property to be displayed is a quiet property, it will
+        not be shown. This can be disabled by setting skipquiet=False.
+
+        If the user requesting the history does not have View access
+        to the property, the journal entry will not be shown. This can
+        be disabled by setting enforceperm=False.
         """
         if not self.do_journal:
             raise ValueError('Journalling is disabled for this class')
-        return self.db.getjournal(self.classname, nodeid)
+
+        perm = self.db.security.hasPermission
+        journal = []
+
+        uid=self.db.getuid() # id of the person requesting the history
+
+        for j in self.db.getjournal(self.classname, nodeid):
+            # hide/remove journal entry if:
+            #   property is quiet
+            #   property is not (viewable or editable)
+            id, evt_date, user, action, args = j
+            if logger.isEnabledFor(logging.DEBUG):
+                j_repr = "%s"%(j,)
+            else:
+                j_repr=''
+            if args and type(args) == type({}):
+                for key in args.keys():
+                    if skipquiet and self.properties[key].quiet:
+                        logger.debug("skipping quiet property"
+                                     " %s::%s in %s",
+                                     self.classname, key, j_repr)
+                        del j[4][key]
+                        continue
+                    if enforceperm and not ( perm("View",
+                                uid,
+                                self.classname,
+                                property=key ) or perm("Edit",
+                                uid,
+                                self.classname,
+                                property=key )):
+                        logger.debug("skipping unaccessible property %s::%s seen by user%s in %s",
+                                self.classname, key, uid, j_repr)
+                        del j[4][key]
+                        continue
+                if not args:
+                    logger.debug("Omitting journal entry for  %s%s"
+                                 " all props removed in: %s",
+                                 self.classname, nodeid, j_repr)
+                    continue
+                journal.append(j)
+            elif action in ['link', 'unlink' ] and type(args) == type(()):
+                # definitions:
+                # myself - object whose history is being filtered
+                # linkee - object/class whose property is changing to
+                #          include/remove myself
+                # link property - property of the linkee class that is changing
+                #
+                # Remove the history item if
+                #   linkee.link property (key) is quiet
+                #   linkee class.link property is not (viewable or editable)
+                #       to user
+                #   [ should linkee object.link property is not
+                #      (viewable or editable) to user be included?? ]
+                #   linkee object (linkcl, linkid) is not
+                #       (viewable or editable) to user
+                if len(args) == 3:
+                    # e.g. for issue3 blockedby adds link to issue5 with:
+                    # j = id, evt_date, user, action, args
+                    # 3|20170528045201.484|5|link|('issue', '5', 'blockedby')
+                    linkcl, linkid, key = args
+                    cls = self.db.getclass(linkcl)
+                    # is the updated property quiet?
+                    if skipquiet and cls.properties[key].quiet:
+                        logger.debug("skipping quiet property: "
+                                     "%s %sed %s%s",
+                                     j_repr, action, self.classname, nodeid)
+                        continue
+                    # can user view the property in linkee class
+                    if enforceperm and not (perm("View",
+                            uid,
+                            linkcl,
+                            property=key) or perm("Edit",
+                            uid,
+                            linkcl,
+                            property=key)):
+                        logger.debug("skipping unaccessible property: "
+                                     "%s with uid %s %sed %s%s",
+                                     j_repr, uid, action,
+                                     self.classname, nodeid)
+                        continue
+                    # check access to linkee object
+                    if enforceperm and not (perm("View",
+                            uid,
+                            cls.classname,
+                            itemid=linkid) or perm("Edit",
+                            uid,
+                            cls.classname,
+                            itemid=linkid)):
+                        logger.debug("skipping unaccessible object: "
+                                     "%s uid %s %sed %s%s",
+                                     j_repr, uid, action,
+                                     self.classname, nodeid)
+                        continue
+                    journal.append(j)
+                else:
+                    logger.error("Invalid %s journal entry for %s%s: %s",
+                                 action, self.classname, nodeid, j)
+            elif action in ['create', 'retired', 'restored']:
+                journal.append(j)
+            else:
+                logger.warning("Possibly malformed journal for %s%s %s",
+                               self.classname, nodeid, j)
+        return journal
 
     # Locating nodes:
     def hasnode(self, nodeid):
@@ -1262,7 +1420,16 @@ class Class:
     def fireAuditors(self, event, nodeid, newvalues):
         """Fire all registered auditors"""
         for prio, name, audit in self.auditors[event]:
-            audit(self.db, self, nodeid, newvalues)
+            try:
+                audit(self.db, self, nodeid, newvalues)
+            except (EnvironmentError, ArithmeticError) as e:
+                tb = traceback.format_exc()
+                html = ("<h1>Traceback</h1>" + str(tb).replace('\n', '<br>').
+                        replace(' ', '&nbsp;'))
+                txt = 'Caught exception %s: %s\n%s' % (str(type(e)), e, tb)
+                exc_info = sys.exc_info()
+                subject = "Error: %s" % exc_info[1]
+                raise DetectorError(subject, html, txt)
 
     def react(self, event, detector, priority = 100):
         """Register a reactor detector"""
@@ -1271,7 +1438,16 @@ class Class:
     def fireReactors(self, event, nodeid, oldvalues):
         """Fire all registered reactors"""
         for prio, name, react in self.reactors[event]:
-            react(self.db, self, nodeid, oldvalues)
+            try:
+                react(self.db, self, nodeid, oldvalues)
+            except (EnvironmentError, ArithmeticError) as e:
+                tb = traceback.format_exc()
+                html = ("<h1>Traceback</h1>" + str(tb).replace('\n', '<br>').
+                        replace(' ', '&nbsp;'))
+                txt = 'Caught exception %s: %s\n%s' % (str(type(e)), e, tb)
+                exc_info = sys.exc_info()
+                subject = "Error: %s" % exc_info[1]
+                raise DetectorError(subject, html, txt)
 
     #
     # import / export support
@@ -1371,7 +1547,7 @@ def convertLinkValue(db, propname, prop, value, idre=re.compile('^\d+$')):
         if linkcl.getkey():
             try:
                 value = linkcl.lookup(value)
-            except KeyError, message:
+            except KeyError as message:
                 raise HyperdbValueError, _('property %s: %r is not a %s.')%(
                     propname, value, prop.classname)
         else:
@@ -1440,6 +1616,11 @@ class FileClass:
         return propnames
 
     def exportFilename(self, dirname, nodeid):
+        """ Returns destination filename for a exported file
+
+            Called by export function in roundup admin to generate
+            the <class>-files subdirectory
+        """
         subdir_filename = self.db.subdirFilename(self.classname, nodeid)
         return os.path.join(dirname, self.classname+'-files', subdir_filename)
 
@@ -1501,7 +1682,7 @@ class Node:
             return self.__dict__[name]
         try:
             return self.cl.get(self.nodeid, name)
-        except KeyError, value:
+        except KeyError as value:
             # we trap this but re-raise it as AttributeError - all other
             # exceptions should pass through untrapped
             pass
@@ -1512,12 +1693,14 @@ class Node:
     def __setattr__(self, name, value):
         try:
             return self.cl.set(self.nodeid, **{name: value})
-        except KeyError, value:
+        except KeyError as value:
             raise AttributeError, str(value)
     def __setitem__(self, name, value):
         self.cl.set(self.nodeid, **{name: value})
-    def history(self):
-        return self.cl.history(self.nodeid)
+    def history(self, enforceperm=True, skipquiet=True):
+        return self.cl.history(self.nodeid,
+                               enforceperm=enforceperm,
+                               skipquiet=skipquiet )
     def retire(self):
         return self.cl.retire(self.nodeid)
 

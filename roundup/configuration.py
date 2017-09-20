@@ -2,7 +2,11 @@
 #
 __docformat__ = "restructuredtext"
 
-import ConfigParser
+try:
+    import configparser			# Python 3
+except ImportError:
+    import ConfigParser as configparser	# Python 2
+
 import getopt
 import imp
 import logging, logging.config
@@ -18,7 +22,7 @@ import roundup.date
 
 ### Exceptions
 
-class ConfigurationError(Exception):
+class ConfigurationError(BaseException):
     pass
 
 class NoConfigError(ConfigurationError):
@@ -293,6 +297,46 @@ class RunDetectorOption(Option):
         else:
             raise OptionValueError(self, value, self.class_description)
 
+class CsrfSettingOption(Option):
+
+    """How should a csrf measure be enforced: required, yes, logfailure, no"""
+
+    class_description = "Allowed values: required, yes, logfailure, no"
+
+    def str2value(self, value):
+        _val = value.lower()
+        if _val in ("required", "yes", "logfailure", "no"):
+            return _val
+        else:
+            raise OptionValueError(self, value, self.class_description)
+
+class SameSiteSettingOption(Option):
+
+    """How should the SameSite cookie setting be set: strict, lax
+or should it not be added (none)"""
+
+    class_description = "Allowed values: Strict, Lax, None"
+
+    def str2value(self, value):
+        _val = value.lower()
+        if _val in ("strict", "lax", "none"):
+            return _val.capitalize()
+        else:
+            raise OptionValueError(self, value, self.class_description)
+        
+class EmailBodyOption(Option):
+
+    """When to replace message body or strip quoting: always, never or for new items only"""
+
+    class_description = "Allowed values: yes, no, new"
+
+    def str2value(self, value):
+        _val = value.lower()
+        if _val in ("yes", "no", "new"):
+            return _val
+        else:
+            raise OptionValueError(self, value, self.class_description)
+
 class IsolationOption(Option):
     """Database isolation levels"""
 
@@ -331,13 +375,38 @@ class FilePathOption(Option):
     """
 
     class_description = "The path may be either absolute or relative\n" \
-        "to the directory containig this config file."
+        "to the directory containing this config file."
 
     def get(self):
         _val = Option.get(self)
         if _val and not os.path.isabs(_val):
             _val = os.path.join(self.config["HOME"], _val)
         return _val
+
+class MultiFilePathOption(Option):
+
+    """List of space seperated File or directory path name
+
+    Paths may be either absolute or relative to the HOME. None
+    is returned if there are no elements.
+
+    """
+
+    class_description = "The space separated paths may be either absolute or\n" \
+        "relative to the directory containing this config file."
+
+    def get(self):
+        pathlist = []
+        _val = Option.get(self)
+        for elem in _val.split():
+            if elem and not os.path.isabs(elem):
+                pathlist.append(os.path.join(self.config["HOME"], elem))
+            else:
+                pathlist.append(elem)
+        if pathlist:
+            return pathlist
+        else:
+            return None
 
 class FloatNumberOption(Option):
 
@@ -486,13 +555,15 @@ SETTINGS = (
             "ported from Zope, or 'chameleon' for Chameleon."),
         (FilePathOption, "templates", "html",
             "Path to the HTML templates directory."),
-        (NullableFilePathOption, "static_files", "",
-            "Path to directory holding additional static files\n"
-            "available via Web UI.  This directory may contain\n"
-            "sitewide images, CSS stylesheets etc. and is searched\n"
-            "for these files prior to the TEMPLATES directory\n"
-            "specified above.  If this option is not set, all static\n"
-            "files are taken from the TEMPLATES directory"),
+        (MultiFilePathOption, "static_files", "",
+            "A list of space separated directory paths (or a single\n"
+            "directory).  These directories hold additional static\n"
+            "files available via Web UI.  These directories may\n"
+            "contain sitewide images, CSS stylesheets etc. If a '-'\n"
+            "is included, the list processing ends and the TEMPLATES\n"
+            "directory is not searched after the specified\n"
+            "directories.  If this option is not set, all static\n"
+            "files are taken from the TEMPLATES directory."),
         (MailAddressOption, "admin_email", "roundup-admin",
             "Email address that roundup will complain to if it runs\n"
             "into trouble.\n"
@@ -540,6 +611,11 @@ SETTINGS = (
             "email?"),
         (BooleanOption, "email_registration_confirmation", "yes",
             "Offer registration confirmation by email or only through the web?"),
+        (Option, "indexer", "",
+            "Force Roundup to use a particular text indexer.\n"
+            "If no indexer is supplied, the first available indexer\n"
+            "will be used in the following order:\n"
+            "Possible values: xapian, whoosh, native (internal)."),
         (WordListOption, "indexer_stopwords", "",
             "Additional stop-words for the full-text indexer specific to\n"
             "your tracker. See the indexer source for the default list of\n"
@@ -583,6 +659,20 @@ SETTINGS = (
         (MailAddressOption, "email", "issue_tracker",
             "Email address that mail to roundup should go to.\n"
             "If no domain is specified then mail_domain is added."),
+        (Option, "replyto_address", "",
+            "Controls the reply-to header address used when sending\n"
+            "nosy messages.\n"
+            "If the value is unset (default) the roundup tracker's\n"
+            "email address (above) is used.\n"
+            "If set to \"AUTHOR\" then the primary email address of the\n"
+            "author of the change will be used as the reply-to\n"
+            "address. This allows email exchanges to occur outside of\n"
+            "the view of roundup and exposes the address of the person\n"
+            "who updated the issue, but it could be useful in some\n"
+            "unusual circumstances.\n"
+            "If set to some other value, the value is used as the reply-to\n"
+            "address. It must be a valid RFC2822 address or people will not be\n"
+            "able to reply."),
         (NullableOption, "language", "",
             "Default locale name for this tracker.\n"
             "If this option is not set, the language is determined\n"
@@ -601,6 +691,107 @@ SETTINGS = (
             "variables supplied by your web server (in that order).\n"
             "Set this option to 'no' if you do not wish to use HTTP Basic\n"
             "Authentication in your web interface."),
+        (SameSiteSettingOption, 'samesite_cookie_setting', "Lax",
+            """Set the mode of the SameSite cookie option for
+the session cookie. Choices are 'Lax' or
+'Strict'. 'None' can be used to suppress the
+option. Strict mode provides additional security
+against CSRF attacks, but may confuse users who
+are logged into roundup and open a roundup link
+from a source other than roundup (e.g. link in
+email)."""),
+        (CsrfSettingOption, 'csrf_enforce_token', "yes",
+            """How do we deal with @csrf fields in posted forms.
+Set this to 'required' to block the post and notify
+    the user if the field is missing or invalid.
+Set this to 'yes' to block the post and notify the user
+    if the token is invalid, but accept the form if
+    the field is missing.
+Set this to 'logfailure' to log a notice to the roundup
+    log if the field is invalid or missing, but accept
+    the post.
+Set this to 'no' to ignore the field and accept the post.
+            """),
+        (IntegerNumberOption, 'csrf_token_lifetime', "20160",
+            """csrf_tokens have a limited lifetime. If they are not
+used they are purged from the database after this
+number of minutes. Default (20160) is 2 weeks."""),
+        (CsrfSettingOption, 'csrf_enforce_token', "yes",
+            """How do we deal with @csrf fields in posted forms.
+Set this to 'required' to block the post and notify
+    the user if the field is missing or invalid.
+Set this to 'yes' to block the post and notify the user
+    if the token is invalid, but accept the form if
+    the field is missing.
+Set this to 'logfailure' to log a notice to the roundup
+    log if the field is invalid or missing, but accept
+    the post.
+Set this to 'no' to ignore the field and accept the post.
+            """),
+        (CsrfSettingOption, 'csrf_enforce_header_X-REQUESTED-WITH', "yes",
+            """This is only used for xmlrpc requests. This test is
+done after Origin and Referer headers are checked. It only
+verifies that the X-Requested-With header exists. The value
+is ignored.
+Set this to 'required' to block the post and notify
+    the user if the header is missing or invalid.
+Set this to 'yes' is the same as required.
+Set this to 'logfailure' is the same as 'no'.
+Set this to 'no' to ignore the header and accept the post."""),
+        (CsrfSettingOption, 'csrf_enforce_header_referer', "yes",
+            """Verify that the Referer http header matches the
+tracker.web setting in config.ini.
+Set this to 'required' to block the post and notify
+    the user if the header is missing or invalid.
+Set this to 'yes' to block the post and notify the user
+    if the header is invalid, but accept the form if
+    the field is missing.
+Set this to 'logfailure' to log a notice to the roundup
+    log if the header is invalid or missing, but accept
+    the post.
+Set this to 'no' to ignore the header and accept the post."""),
+        (CsrfSettingOption, 'csrf_enforce_header_origin', "yes",
+            """Verify that the Origin http header matches the
+tracker.web setting in config.ini.
+Set this to 'required' to block the post and notify
+    the user if the header is missing or invalid.
+Set this to 'yes' to block the post and notify the user
+    if the header is invalid, but accept the form if
+    the field is missing.
+Set this to 'logfailure' to log a notice to the roundup
+    log if the header is invalid or missing, but accept
+    the post.
+Set this to 'no' to ignore the header and accept the post."""),
+        (CsrfSettingOption, 'csrf_enforce_header_x-forwarded-host', "yes",
+            """Verify that the X-Forwarded-Host http header matches
+the host part of the tracker.web setting in config.ini.
+Set this to 'required' to block the post and notify
+    the user if the header is missing or invalid.
+Set this to 'yes' to block the post and notify the user
+    if the header is invalid, but accept the form if
+    the field is missing.
+Set this to 'logfailure' to log a notice to the roundup
+    log if the header is invalid or missing, but accept
+    the post.
+Set this to 'no' to ignore the header and accept the post."""),
+        (CsrfSettingOption, 'csrf_enforce_header_host', "yes",
+            """"If there is no X-Forward-Host header, verify that
+the Host http header matches the host part of the
+tracker.web setting in config.ini.
+Set this to 'required' to block the post and notify
+    the user if the header is missing or invalid.
+Set this to 'yes' to block the post and notify the user
+    if the header is invalid, but accept the form if
+    the field is missing.
+Set this to 'logfailure' to log a notice to the roundup
+    log if the header is invalid or missing, but accept
+    the post.
+Set this to 'no' to ignore the header and accept the post."""),
+        (IntegerNumberOption, 'csrf_header_min_count', "1",
+            """Minimum number of header checks that must pass
+to accept the request. Set to 0 to accept post
+even if no header checks pass. Usually the Host header check
+always passes, so setting it less than 1 is not recommended."""),
         (BooleanOption, 'use_browser_language', "yes",
             "Whether to use HTTP Accept-Language, if present.\n"
             "Browsers send a language-region preference list.\n"
@@ -620,6 +811,8 @@ SETTINGS = (
         (Option, 'name', 'roundup',
             "Name of the database to use.",
             ['MYSQL_DBNAME']),
+        (Option, 'backend', '',
+            "Database backend."),
         (NullableOption, 'host', 'localhost',
             "Database server host.",
             ['MYSQL_DBHOST']),
@@ -724,7 +917,7 @@ SETTINGS = (
             "(eg. iso-8859-1).",
             ["EMAIL_CHARSET"]),
         (FilePathOption, "debug", "",
-            "Setting this option makes Roundup to write all outgoing email\n"
+            "Setting this option makes Roundup write all outgoing email\n"
             "messages to this file *instead* of sending them.\n"
             "This option has the same effect as environment variable"
             " SENDMAILDEBUG.\nEnvironment variable takes precedence."),
@@ -737,17 +930,20 @@ SETTINGS = (
             "If this is false but add_authorinfo is true, only the name\n"
             "of the actor is added which protects the mail address of the\n"
             "actor from being exposed at mail archives, etc."),
-    ), "Outgoing email options.\nUsed for nozy messages and approval requests"),
+    ), "Outgoing email options.\nUsed for nosy messages and approval requests"),
     ("mailgw", (
-        (BooleanOption, "keep_quoted_text", "yes",
+        (EmailBodyOption, "keep_quoted_text", "yes",
             "Keep email citations when accepting messages.\n"
-            "Setting this to \"no\" strips out \"quoted\" text"
-            " from the message.\n"
+            "Setting this to \"no\" strips out \"quoted\" text\n"
+            "from the message. Setting this to \"new\" keeps quoted\n"
+            "text only if a new issue is being created.\n"
             "Signatures are also stripped.",
             ["EMAIL_KEEP_QUOTED_TEXT"]),
-        (BooleanOption, "leave_body_unchanged", "no",
-            "Preserve the email body as is - that is,\n"
-            "keep the citations _and_ signatures.",
+        (EmailBodyOption, "leave_body_unchanged", "no",
+            "Setting this to \"yes\" preserves the email body\n"
+            "as is - that is, keep the citations _and_ signatures.\n"
+            "Setting this to \"new\" keeps the body only if we are\n"
+            "creating a new issue.",
             ["EMAIL_LEAVE_BODY_UNCHANGED"]),
         (Option, "default_class", "issue",
             "Default class to use in the mailgw\n"
@@ -816,7 +1012,13 @@ SETTINGS = (
             "multipart/alternative, and this option is set, all other\n"
             "parts of the multipart/alternative are ignored. The default\n"
             "is to keep all parts and attach them to the issue."),
-    ), "Roundup Mail Gateway options"),
+        (BooleanOption, "keep_real_from", "no",
+            "When handling emails ignore the Resent-From:-header\n"
+            "and use the original senders From:-header instead.\n"
+            "(This might be desirable in some situations where a moderator\n"
+            "reads incoming messages first before bouncing them to Roundup)",
+            ["EMAIL_KEEP_REAL_FROM"]),
+     ), "Roundup Mail Gateway options"),
     ("pgp", (
         (BooleanOption, "enable", "no",
             "Enable PGP processing. Requires pyme. If you're planning\n"
@@ -965,7 +1167,7 @@ class Config:
         *not* have aliases!
 
         """
-        if description or not self.section_descriptions.has_key(section):
+        if description or not (section in self.section_descriptions):
             self.section_descriptions[section] = description
         for option_def in options:
             klass = option_def[0]
@@ -1175,7 +1377,7 @@ class Config:
         config_defaults = {"HOME": home_dir}
         if defaults:
             config_defaults.update(defaults)
-        config = ConfigParser.ConfigParser(config_defaults)
+        config = configparser.ConfigParser(config_defaults)
         config.read([config_path])
         # .ini file loaded ok.
         self.HOME = home_dir
@@ -1284,7 +1486,7 @@ class Config:
     # attribute emulation
 
     def __setattr__(self, name, value):
-        if self.__dict__.has_key(name) or hasattr(self.__class__, name):
+        if (name in self.__dict__) or hasattr(self.__class__, name):
             self.__dict__[name] = value
         else:
             self._get_option(name).set(value)

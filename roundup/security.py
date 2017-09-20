@@ -6,6 +6,9 @@ import weakref
 
 from roundup import hyperdb, support
 
+import logging
+logger = logging.getLogger('roundup.security')
+
 class Permission:
     ''' Defines a Permission with the attributes
         - name
@@ -13,6 +16,7 @@ class Permission:
         - klass (optional)
         - properties (optional)
         - check function (optional)
+        - props_only (optional, internal field is limit_perm_to_props_only)
 
         The klass may be unset, indicating that this permission is not
         locked to a particular class. That means there may be multiple
@@ -24,17 +28,77 @@ class Permission:
         If check function is set, permission is granted only when
         the function returns value interpreted as boolean true.
         The function is called with arguments db, userid, itemid.
+
+        When the system checks klass permission rather than the klass
+        property permission (i.e. properties=None and item=None), it
+        will apply any permission that matches on permission name and
+        class. If the permission has a check function, the check
+        function will be run. By making the permission valid only for
+        properties using props_only=True the permission will be
+        skipped. You can set the default value for props_only for all
+        properties by calling:
+
+           db.security.set_props_only_default()
+
+        with a True or False value.
     '''
+
+    limit_perm_to_props_only=False
+
     def __init__(self, name='', description='', klass=None,
-            properties=None, check=None):
+            properties=None, check=None, props_only=None):
+        import inspect
         self.name = name
         self.description = description
         self.klass = klass
         self.properties = properties
         self._properties_dict = support.TruthDict(properties)
         self.check = check
+        if properties is not None:
+            # Set to None unless properties are defined.
+            # This means that:
+            # a=Property(name="Edit", klass="issue", check=dummy,
+            #     props_only=True)
+            # b=Property(name="Edit", klass="issue", check=dummy,
+            #     props_only=False)
+            # a == b will be true.
+            if props_only is None:
+                self.limit_perm_to_props_only = \
+                                Permission.limit_perm_to_props_only
+            else:
+                # see note on use of bool() in set_props_only_default()
+                self.limit_perm_to_props_only = bool(props_only)
+        else:
+            self.limit_perm_to_props_only = None
+
+
+        if check is None:
+            self.check_version = 0
+        else:
+            args=inspect.getargspec(check)
+            # FIXME change args[2] to args.keywords since python
+            # 2.6 made getargspec a named tuple once roundup 1.6 released.
+            # If there is a **parameter defined in the function spec, the
+            #  value of the 3rd argument in the tuple is not None.
+            if args[2] is None:
+                # function definition is function(db, userid, itemid)
+                self.check_version = 1
+            else:
+                # function definition is function(db, userid, itemid, **other)
+                self.check_version = 2
 
     def test(self, db, permission, classname, property, userid, itemid):
+        ''' Test permissions 5 args:
+            permission - string like Edit, Register etc. Required, no wildcard.
+            classname - string like issue, msg etc. Can be None to match any
+                        class.
+            property - array of strings that are property names. Optional.
+                   if None this is an item or klass access check.
+            userid - number that is id for user.
+            itemid - id for classname. e.g. 3 in issue3. If missing this is
+                 a class access check, otherwies it's a object access check.
+        '''
+
         if permission != self.name:
             return 0
 
@@ -46,10 +110,20 @@ class Permission:
         if property is not None and not self._properties_dict[property]:
             return 0
 
+        # is this a props_only permission and permissions are set
+        if property is None and self.properties is not None and \
+                self.limit_perm_to_props_only:
+            return 0
+
         # check code
         if itemid is not None and self.check is not None:
-            if not self.check(db, userid, itemid):
-                return 0
+            if self.check_version == 1:
+                if not self.check(db, userid, itemid):
+                    return 0
+            elif self.check_version == 2:
+                if not self.check(db, userid, itemid, property=property, \
+                            permission=permission, classname=classname):
+                    return 0
 
         # we have a winner
         return 1
@@ -77,8 +151,9 @@ class Permission:
 
 
     def __repr__(self):
-        return '<Permission 0x%x %r,%r,%r,%r>'%(id(self), self.name,
-            self.klass, self.properties, self.check)
+        return '<Permission 0x%x %r,%r,%r,%r,%r>'%(id(self), self.name,
+            self.klass, self.properties, self.check,
+            self.limit_perm_to_props_only)
 
     def __cmp__(self, other):
         if self.name != other.name:
@@ -87,9 +162,15 @@ class Permission:
         if self.klass != other.klass: return 1
         if self.properties != other.properties: return 1
         if self.check != other.check: return 1
+        if self.limit_perm_to_props_only != \
+             other.limit_perm_to_props_only: return 1
 
         # match
         return 0
+
+    def __getitem__(self,index):
+        return (self.name, self.klass, self.properties, self.check,
+         self.limit_perm_to_props_only)[index]
 
 class Role:
     ''' Defines a Role with the attributes
@@ -126,9 +207,9 @@ class Security:
         self.addRole(name="Anonymous", description="An anonymous user")
 
         # default permissions - Admin may do anything
-        for p in 'create edit retire view'.split():
+        for p in 'create edit restore retire view'.split():
             p = self.addPermission(name=p.title(),
-                description="User may %s everthing"%p)
+                description="User may %s everything"%p)
             self.addPermissionToRole('Admin', p)
 
         # initialise the permissions and roles needed for the UIs
@@ -138,13 +219,13 @@ class Security:
         mailgw.initialiseSecurity(self)
 
     def getPermission(self, permission, classname=None, properties=None,
-            check=None):
+            check=None, props_only=None):
         ''' Find the Permission matching the name and for the class, if the
             classname is specified.
 
             Raise ValueError if there is no exact match.
         '''
-        if not self.permission.has_key(permission):
+        if permission not in self.permission:
             raise ValueError, 'No permission "%s" defined'%permission
 
         if classname:
@@ -155,7 +236,8 @@ class Security:
 
         # look through all the permissions of the given name
         tester = Permission(permission, klass=classname, properties=properties,
-            check=check)
+                            check=check,
+                            props_only=props_only)
         for perm in self.permission[permission]:
             if perm == tester:
                 return perm
@@ -166,12 +248,19 @@ class Security:
             property=None, itemid=None):
         '''Look through all the Roles, and hence Permissions, and
            see if "permission" exists given the constraints of
-           classname, property and itemid.
+           classname, property, itemid, and props_only.
 
-           If classname is specified (and only classname) then the
-           search will match if there is *any* Permission for that
-           classname, even if the Permission has additional
-           constraints.
+           If classname is specified (and only classname) the
+           search will match:
+
+              if there is *any* Permission for that classname, and
+              that Permission was not created with props_only = True
+
+           *NOTE* the Permission will match even if there are
+           additional constraints like a check or properties and
+           props_only is False. This can be unexpected. Using
+           props_only = True or setting the default value to True can
+           help prevent surprises.
 
            If property is specified, the Permission matched must have
            either no properties listed or the property must appear in
@@ -183,11 +272,12 @@ class Security:
 
            Note that this functionality is actually implemented by the
            Permission.test() method.
+
         '''
         if itemid and classname is None:
             raise ValueError, 'classname must accompany itemid'
         for rolename in self.db.user.get_roles(userid):
-            if not rolename or not self.role.has_key(rolename):
+            if not rolename or (rolename not in self.role):
                 continue
             # for each of the user's Roles, check the permissions
             for perm in self.role[rolename].permissions:
@@ -269,7 +359,7 @@ class Security:
            the list.
         '''
         roles = [r for r in self.db.user.get_roles(userid)
-                 if r and self.role.has_key(r)]
+                 if r and (r in self.role)]
         return self.roleHasSearchPermission (classname, property, *roles)
 
     def addPermission(self, **propspec):
@@ -288,8 +378,20 @@ class Security:
         self.role[role.name] = role
         return role
 
+    def set_props_only_default(self, props_only=None):
+        if props_only is not None:
+            # NOTE: only valid values are True and False because these
+            # will be compared as part of tuple == tuple and
+            # (3,) == (True,) is False even though 3 is a True value
+            # in a boolean context. So use bool() to coerce value.
+            Permission.limit_perm_to_props_only = \
+                                    bool(props_only)
+
+    def get_props_only_default(self):
+        return Permission.limit_perm_to_props_only
+
     def addPermissionToRole(self, rolename, permission, classname=None,
-            properties=None, check=None):
+            properties=None, check=None, props_only=None):
         ''' Add the permission to the role's permission list.
 
             'rolename' is the name of the role to add the permission to.
@@ -301,7 +403,7 @@ class Security:
         '''
         if not isinstance(permission, Permission):
             permission = self.getPermission(permission, classname,
-                properties, check)
+                properties, check, props_only)
         role = self.role[rolename.lower()]
         role.permissions.append(permission)
 

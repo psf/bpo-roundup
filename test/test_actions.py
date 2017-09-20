@@ -5,7 +5,7 @@ from roundup import hyperdb
 from roundup.date import Date, Interval
 from roundup.cgi.actions import *
 from roundup.cgi.client import add_message
-from roundup.cgi.exceptions import Redirect, Unauthorised, SeriousError
+from roundup.cgi.exceptions import Redirect, Unauthorised, SeriousError, FormError
 
 from mocknull import MockNull
 
@@ -14,7 +14,7 @@ def true(*args, **kwargs):
 
 class ActionTestCase(unittest.TestCase):
     def setUp(self):
-        self.form = FieldStorage()
+        self.form = FieldStorage(environ={'QUERY_STRING': ''})
         self.client = MockNull()
         self.client._ok_message = []
         self.client._error_message = []
@@ -23,6 +23,7 @@ class ActionTestCase(unittest.TestCase):
         self.client.add_ok_message = lambda x : add_message(
             self.client._ok_message, x)
         self.client.form = self.form
+        self.client.base = "http://whoami.com/path/"
         class TemplatingUtils:
             pass
         self.client.instance.interfaces.TemplatingUtils = TemplatingUtils
@@ -36,7 +37,7 @@ class ShowActionTestCase(ActionTestCase):
         """
         try:
             callable(*args, **kwargs)
-        except exception, msg:
+        except exception as msg:
             self.assertEqual(str(msg), message)
         else:
             if hasattr(exception, '__name__'):
@@ -84,6 +85,20 @@ class RetireActionTestCase(ActionTestCase):
         # .. or anonymous
         self.client.db.user.get = lambda a,b: 'anonymous'
         self.assertRaises(ValueError, RetireAction(self.client).handle)
+
+class RestoreActionTestCase(ActionTestCase):
+    # This is a copy of the RetireActionTestCase. But what do these
+    # actually test? I see no actual db or retire call or
+    # class id. Testing db level restore is covered in the
+    # db_test_base as part of retire.
+    def testRestoreAction(self):
+        self.client.db.security.hasPermission = true
+        self.client._ok_message = []
+        RestoreAction(self.client).handle()
+        self.assert_(len(self.client._ok_message) == 1)
+
+    def testNoPermission(self):
+        self.assertRaises(Unauthorised, RestoreAction(self.client).execute)
 
 class SearchActionTestCase(ActionTestCase):
     def setUp(self):
@@ -134,6 +149,34 @@ class FakeFilterVarsTestCase(SearchActionTestCase):
         self.client.db.classes.getprops = lambda: {'foo': hyperdb.String()}
         self.form.value.append(MiniFieldStorage('foo', 'hello'))
         self.assertFilterEquals('foo')
+
+    def testNumKey(self): # testing patch: http://hg.python.org/tracker/roundup/rev/98508a47c126
+        for val in [ "-1000a", "test", "o0.9999", "o0", "1.00/10" ]:
+            print "testing ", val
+            self.client.db.classes.get_transitive_prop = lambda x: hyperdb.Number()
+            self.form.value.append(MiniFieldStorage('foo', val)) # invalid numbers
+            self.assertRaises(FormError, self.action.fakeFilterVars)
+            del self.form.value[:]
+
+        for val in [ "-1000.7738", "-556", "-0.9999", "-.456", "-5E-5", "0.00", "0",
+                     "1.00", "0556", "7.56E2", "1000.7738"]:
+            self.form.value.append(MiniFieldStorage('foo', val))
+            self.action.fakeFilterVars() # this should run and return. No errors, nothing to check.
+            del self.form.value[:]
+
+    def testIntKey(self): # testing patch: http://hg.python.org/tracker/roundup/rev/98508a47c126
+        for val in [ "-1000a", "test", "-5E-5", "0.9999", "0.0", "1.000", "0456", "1E4" ]:
+            print "testing ", val
+            self.client.db.classes.get_transitive_prop = lambda x: hyperdb.Integer()
+            self.form.value.append(MiniFieldStorage('foo', val))
+            self.assertRaises(FormError, self.action.fakeFilterVars)
+            del self.form.value[:]
+
+        for val in [ "-1000", "-512", "0", "1", "100", "248" ]: # no scientific notation apparently
+            self.client.db.classes.get_transitive_prop = lambda x: hyperdb.Integer()
+            self.form.value.append(MiniFieldStorage('foo', val))
+            self.action.fakeFilterVars() # this should run and return. No errors, nothing to check.
+            del self.form.value[:]
 
     def testTokenizedStringKey(self):
         self.client.db.classes.get_transitive_prop = lambda x: hyperdb.String()
@@ -195,6 +238,23 @@ class LoginTestCase(ActionTestCase):
         self.client.opendb = lambda a: self.fail(
             "Logged in, but we shouldn't be.")
 
+    def assertRaisesMessage(self, exception, callable, message, *args,
+                            **kwargs):
+        """An extension of assertRaises, which also checks the exception
+        message. We need this because we rely on exception messages when
+        redirecting.
+        """
+        try:
+            callable(*args, **kwargs)
+        except exception as msg:
+            self.assertEqual(str(msg), message)
+        else:
+            if hasattr(exception, '__name__'):
+                excName = exception.__name__
+            else:
+                excName = str(exception)
+            raise self.failureException, excName
+
     def assertLoginLeavesMessages(self, messages, username=None, password=None):
         if username is not None:
             self.form.value.append(MiniFieldStorage('__login_name', username))
@@ -204,6 +264,18 @@ class LoginTestCase(ActionTestCase):
 
         LoginAction(self.client).handle()
         self.assertEqual(self.client._error_message, messages)
+
+    def assertLoginRaisesRedirect(self, message, username=None, password=None, came_from=None):
+        if username is not None:
+            self.form.value.append(MiniFieldStorage('__login_name', username))
+        if password is not None:
+            self.form.value.append(
+                MiniFieldStorage('__login_password', password))
+        if came_from is not None:
+            self.form.value.append(
+                MiniFieldStorage('__came_from', came_from))
+
+        self.assertRaisesMessage(Redirect, LoginAction(self.client).handle, message)
 
     def testNoUsername(self):
         self.assertLoginLeavesMessages(['Username required'])
@@ -230,10 +302,63 @@ class LoginTestCase(ActionTestCase):
 
         self.assertLoginLeavesMessages([], 'foo', 'right')
 
+    def testCorrectLoginRedirect(self):
+        self.client.db.security.hasPermission = lambda *args, **kwargs: True
+        def opendb(username):
+            self.assertEqual(username, 'foo')
+        self.client.opendb = opendb
+
+        # basic test with query
+        self.assertLoginRaisesRedirect("http://whoami.com/path/issue?%40action=search",
+                                 'foo', 'right', "http://whoami.com/path/issue?@action=search")
+
+        # test that old messages are removed
+        self.form.value[:] = []         # clear out last test's setup values
+        self.assertLoginRaisesRedirect("http://whoami.com/path/issue?%40action=search",
+                                 'foo', 'right', "http://whoami.com/path/issue?@action=search&@ok_messagehurrah+we+win&@error_message=blam")
+
+        # test when there is no query
+        self.form.value[:] = []         # clear out last test's setup values
+        self.assertLoginRaisesRedirect("http://whoami.com/path/issue255",
+                                 'foo', 'right', "http://whoami.com/path/issue255")
+
+        # test if we are logged out; should kill the @action=logout
+        self.form.value[:] = []         # clear out last test's setup values
+        self.assertLoginRaisesRedirect("http://whoami.com/path/issue39?%40startwith=0&%40pagesize=50",
+                                 'foo', 'right', "http://whoami.com/path/issue39?@action=logout&@pagesize=50&@startwith=0")
+
+    def testInvalidLoginRedirect(self):
+        self.client.db.security.hasPermission = lambda *args, **kwargs: True
+
+        def opendb(username):
+            self.assertEqual(username, 'foo')
+        self.client.opendb = opendb
+
+        # basic test with query
+        self.assertLoginRaisesRedirect("http://whoami.com/path/issue?%40error_message=Invalid+login&%40action=search",
+                                 'foo', 'wrong', "http://whoami.com/path/issue?@action=search")
+
+        # test that old messages are removed
+        self.form.value[:] = []         # clear out last test's setup values
+        self.assertLoginRaisesRedirect("http://whoami.com/path/issue?%40error_message=Invalid+login&%40action=search",
+                                 'foo', 'wrong', "http://whoami.com/path/issue?@action=search&@ok_messagehurrah+we+win&@error_message=blam")
+
+        # test when there is no __came_from specified
+        self.form.value[:] = []         # clear out last test's setup values
+        # I am not sure why this produces three copies of the same error.
+        # only one copy of the error is displayed to the user in the web interface.
+        self.assertLoginLeavesMessages(['Invalid login', 'Invalid login', 'Invalid login'], 'foo', 'wrong')
+
+        # test when there is no query
+        self.form.value[:] = []         # clear out last test's setup values
+        self.assertLoginRaisesRedirect("http://whoami.com/path/issue255?%40error_message=Invalid+login",
+                                 'foo', 'wrong', "http://whoami.com/path/issue255")
+
 class EditItemActionTestCase(ActionTestCase):
     def setUp(self):
         ActionTestCase.setUp(self)
         self.result = []
+        self.new_id = 16
         class AppendResult:
             def __init__(inner_self, name):
                 inner_self.name = name
@@ -241,7 +366,8 @@ class EditItemActionTestCase(ActionTestCase):
                 self.result.append((inner_self.name, args, kw))
                 if inner_self.name == 'set':
                     return kw
-                return '17'
+                self.new_id+=1
+                return str(self.new_id)
 
         self.client.db.security.hasPermission = true
         self.client.classname = 'issue'
@@ -270,7 +396,25 @@ class EditItemActionTestCase(ActionTestCase):
             )
         try :
             self.action.handle()
-        except Redirect, msg:
+        except Redirect as msg:
+            pass
+        self.assertEqual(expect, self.result)
+
+    def testMessageMultiAttach(self):
+        expect = \
+            [ ('create',(),{'content':'t2'})
+            , ('create',(),{'content':'t'})
+            , ('set',('4711',), {'messages':['23','42','17','18']})
+            ]
+        self.client.db.classes.get = lambda a, b:['23','42']
+        self.client.parsePropsFromForm = lambda: \
+            ( {('msg','-1'):{'content':'t'},('msg','-2'):{'content':'t2'}
+              , ('issue','4711'):{}}
+            , [('issue','4711','messages',[('msg','-1'),('msg','-2')])]
+            )
+        try :
+            self.action.handle()
+        except Redirect as msg:
             pass
         self.assertEqual(expect, self.result)
 
@@ -291,7 +435,7 @@ class EditItemActionTestCase(ActionTestCase):
             )
         try :
             self.action.handle()
-        except Redirect, msg:
+        except Redirect as msg:
             pass
         self.assertEqual(expect, self.result)
 
@@ -304,7 +448,7 @@ class EditItemActionTestCase(ActionTestCase):
             )
         try :
             self.action.handle()
-        except Redirect, msg:
+        except Redirect as msg:
             pass
         self.assertEqual(expect, self.result)
 
@@ -317,23 +461,8 @@ class EditItemActionTestCase(ActionTestCase):
             )
         try :
             self.action.handle()
-        except Redirect, msg:
+        except Redirect as msg:
             pass
         self.assertEqual(expect, self.result)
-
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(RetireActionTestCase))
-    suite.addTest(unittest.makeSuite(StandardSearchActionTestCase))
-    suite.addTest(unittest.makeSuite(FakeFilterVarsTestCase))
-    suite.addTest(unittest.makeSuite(ShowActionTestCase))
-    suite.addTest(unittest.makeSuite(CollisionDetectionTestCase))
-    suite.addTest(unittest.makeSuite(LoginTestCase))
-    suite.addTest(unittest.makeSuite(EditItemActionTestCase))
-    return suite
-
-if __name__ == '__main__':
-    runner = unittest.TextTestRunner()
-    unittest.main(testRunner=runner)
 
 # vim: set et sts=4 sw=4 :
