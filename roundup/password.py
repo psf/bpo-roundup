@@ -89,7 +89,7 @@ def ssha(password, salt):
     '''
     shaval = sha1(password)
     shaval.update( salt )
-    ssha_digest = b64encode( '{}{}'.format(shaval.digest(), salt) ).strip()
+    ssha_digest = b64encode( '{0}{1}'.format(shaval.digest(), salt) ).strip()
     return ssha_digest
 
 def pbkdf2(password, salt, rounds, keylen):
