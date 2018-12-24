@@ -89,9 +89,9 @@ class GitHubHandler:
         payload. The value of SECRET_KEY should be exactly the same as the one
         configured in GitHub webhook secret field.
         """
-        key = os.environ.get('SECRET_KEY')
-        if key is None:
-            logging.error('Missing SECRET_KEY environment variable set!')
+        key = self.db.config["GITHUB_SECRET"]
+        if key is None or key == "":
+            logging.error('GitHub Webhook Secret not configured!')
             raise Reject()
         data = str(self.form.value)
         signature = 'sha1=' + hmac.new(key, data,

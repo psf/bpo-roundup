@@ -1088,6 +1088,10 @@ always passes, so setting it less than 1 is not recommended."""),
             "won't be attached to nosy mails. They will be replaced by\n"
             "a link to the tracker's download page for the file.")
     ), "Nosy messages sending"),
+    ("github", (
+        (NullableOption, "secret", "",
+            "Shared Secret to Authenticate GitHub webhooks."),
+    ), "GitHub integration"),
 )
 
 ### Configuration classes
