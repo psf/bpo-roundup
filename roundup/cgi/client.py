@@ -29,7 +29,8 @@ from roundup import roundupdb, date, hyperdb, password
 from roundup.cgi import templating, cgitb, TranslationService
 from roundup.cgi import actions
 from roundup.exceptions import LoginError, Reject, RejectRaw, \
-                               Unauthorised, UsageError
+                               Unauthorised, UsageError, UnsupportedMediaType,\
+                               MethodNotAllowed
 from roundup.cgi.exceptions import (
     FormError, NotFound, NotModified, Redirect, SendFile, SendStaticFile,
     DetectorError, SeriousError)
