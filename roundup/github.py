@@ -96,7 +96,7 @@ class GitHubHandler:
         data = str(self.form.value)
         signature = 'sha1=' + hmac.new(key, data,
                                        hashlib.sha1).hexdigest()
-        header_signature = self.env.get('HTTP_X-Hub-Signature', '')
+        header_signature = self.env.get('HTTP_X_HUB_SIGNATURE', '')
         if not compare_digest(signature, header_signature):
             raise Unauthorised()
 
@@ -119,13 +119,13 @@ class GitHubHandler:
         """
         Extracts GitHub event from header field.
         """
-        return self.env.get('HTTP_X-GitHub-Event', None)
+        return self.env.get('HTTP_X_GITHUB_EVENT', None)
 
     def get_delivery(self):
         """
         Extracts GitHub delivery id.
         """
-        return self.env.get('HTTP_X-GitHub-Delivery', None)
+        return self.env.get('HTTP_X_GITHUB_DELIVERY', None)
 
 
 class Event(object):
