@@ -166,7 +166,7 @@ class Event(object):
         issue_ids = self.get_issue_ids()
         if not issue_ids:
             # no issue id found
-            create_issue = os.environ.get('CREATE_ISSUE', False)
+            create_issue = self.db.config["GITHUB_CREATE_ISSUE"]
             if create_issue:
                 # TODO we should fill in the issue with more details
                 title = self.data.get('pull_request', {}).get('title', '')

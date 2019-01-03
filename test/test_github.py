@@ -41,14 +41,14 @@ class GitHubTest:
             'REQUEST_METHOD': 'POST',
             'CONTENT_TYPE': 'application/json'
         }
-        os.environ['SECRET_KEY'] = "abcd"
-        os.environ['CREATE_ISSUE'] = 'yes'
 
     def _make_client(self, filename):
         request = HTTPRequest(filename)
-        form = cgi.FieldStorage(fp=request.rfile, environ=self.env,
+        env = self.env.copy()
+        env.update({'HTTP_' + k.upper().replace('-', '_'): v for k, v in request.headers.items()})
+        form = cgi.FieldStorage(fp=request.rfile, environ=env,
                                 headers=request.headers)
-        dummy_client = client.Client(self.instance, request, self.env, form)
+        dummy_client = client.Client(self.instance, request, env, form)
         dummy_client.opendb("anonymous")
         self.db = dummy_client.db
         self.db.issue.create(title="Issue 1")
@@ -67,11 +67,12 @@ class GitHubTest:
                 self.assertTrue(data.get('verb'))
 
     def testMissingSecretKey(self):
-        os.environ.pop('SECRET_KEY')
         dummy_client = self._make_client("pingevent.txt")
+        self.db.config.GITHUB_SECRET = None
         with self.assertRaises(Reject) as context:
             handler = GitHubHandler(dummy_client)
             handler.dispatch()
+        self.db.config.GITHUB_SECRET = 'abcd'
 
     def testMissingGitHubEventHeader(self):
         dummy_client = self._make_client("no-github-event-header.txt")
@@ -86,11 +87,12 @@ class GitHubTest:
             handler.dispatch()
 
     def testSecretKey(self):
-        os.environ['SECRET_KEY'] = "1234"
         dummy_client = self._make_client("pingevent.txt")
+        self.db.config.GITHUB_SECRET = "1234"
         with self.assertRaises(Unauthorised) as context:
             handler = GitHubHandler(dummy_client)
             handler.dispatch()
+        self.db.config.GITHUB_SECRET = "abcd"
 
     def testUnsupportedMediaType(self):
         dummy_client = self._make_client("pingevent.txt")
@@ -375,12 +377,13 @@ class GitHubTest:
 
     def testPullRequestEventWithoutIssueReferenceAndEnvVariable(self):
         # When no issue is referenced in PR and no environment variable is set
-        os.environ.pop('CREATE_ISSUE')
         dummy_client = self._make_client("pullrequestevent2.txt")
+        self.db.config.GITHUB_CREATE_ISSUE = False
         self.assertEqual(self.db.issue.count(), 1)
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
         self.assertEqual(self.db.issue.count(), 1)
+        self.db.config.GITHUB_CREATE_ISSUE = True
 
     def testMergedPullRequest(self):
         # When pull request is merged

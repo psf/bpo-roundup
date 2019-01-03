@@ -66,6 +66,8 @@ def setupTracker(dirname, backend="anydbm"):
                                        'templates',
                                        'classic'))
     config.RDBMS_BACKEND = backend
+    config.GITHUB_SECRET = 'abcd'
+    config.GITHUB_CREATE_ISSUE = 'yes'
     config.save(os.path.join(dirname, 'config.ini'))
     tracker = instance.open(dirname)
     if tracker.exists():

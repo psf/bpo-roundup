@@ -1091,6 +1091,8 @@ always passes, so setting it less than 1 is not recommended."""),
     ("github", (
         (NullableOption, "secret", "",
             "Shared Secret to Authenticate GitHub webhooks."),
+        (BooleanOption, "create_issue", "no",
+            "Create Issue."),
     ), "GitHub integration"),
 )
 
