@@ -85,6 +85,7 @@ pull_request = Class(db, "pull_request",
                      title=String(),
                      status=String(),
                      )
+pull_request.setkey('number')
 pull_request.setlabelprop('id')
 
 # IssueClass automatically gets these properties in addition to the Class ones:

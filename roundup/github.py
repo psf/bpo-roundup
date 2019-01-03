@@ -197,9 +197,15 @@ class Event(object):
                 title = ""
             if not status:
                 status = ""
-            newpr = self.db.pull_request.create(number=prid,
-                title=title.encode('utf-8'), status=status.encode('utf-8'))
-            prs.append(newpr)
+            try:
+                newpr = self.db.pull_request.create(number=prid,
+                    title=title.encode('utf-8'), status=status.encode('utf-8'))
+                prs.append(newpr)
+            except ValueError:
+                pr = self.db.pull_request.filter(None, {'number': prid})[0]
+                self.db.pull_request.set(pr, title=title.encode('utf-8'),
+                                         status=status.encode('utf-8'))
+                prs.append(pr)
             self.db.issue.set(id, pull_requests=prs)
             self.db.commit()
 

@@ -351,7 +351,6 @@ class GitHubTest:
         pr = self.db.pull_request.create(number='1', title='Some title')
         self.db.issue.set('1', pull_requests=[pr])
         self.db.issue.create(title="Issue 2")
-        pr = self.db.pull_request.create(number='1', title='Some title')
         self.db.issue.set('2', pull_requests=[pr])
         handler = GitHubHandler(dummy_client)
         handler.dispatch()
