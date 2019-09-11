@@ -66,15 +66,18 @@ schema`_.  Some configuration is also performed using permissions - see the
 automatically register through the email interface, you must grant the
 "Anonymous" Role the "Email Access" Permission.
 
-The following is taken from the `Python Library Reference`__ (May 20, 2004)
+The following is taken from the `Python Library Reference`__ (July 18, 2018)
 section "ConfigParser -- Configuration file parser":
 
- The configuration file consists of sections, led by a "[section]" header
- and followed by "name = value" entries, with line continuations on a
- newline with leading whitespace. Note that leading whitespace is removed
- from values. The optional values can contain format strings which
- refer to other values in the same section. Lines beginning with "#" or ";"
- are ignored and may be used to provide comments. 
+ The configuration file consists of sections, led by a [section] header
+ and followed by name: value entries, with continuations in the style
+ of RFC 822 (see section 3.1.1, “LONG HEADER FIELDS”); name=value is
+ also accepted. Note that leading whitespace is removed from
+ values. The optional values can contain format strings which refer to
+ other values in the same section, or values in a special DEFAULT
+ section. Additional defaults can be provided on initialization and
+ retrieval. Lines beginning with '#' or ';' are ignored and may be
+ used to provide comments.
 
  For example::
 
@@ -85,7 +88,7 @@ section "ConfigParser -- Configuration file parser":
  would resolve the "%(dir)s" to the value of "dir" ("frob" in this case)
  resulting in "foodir" being "frob/whatever".
 
-__ http://docs.python.org/lib/module-ConfigParser.html
+__ https://docs.python.org/2/library/configparser.html
 
 Example configuration settings are below.
  
@@ -1698,7 +1701,7 @@ Also a per form token (also called a nonce) can be enabled for
 the tracker using the ``csrf_enforce_token`` option in
 config.ini.  When enabled, roundup will validate a hidden form
 field called ``@csrf``. If the validation fails (or the token
-is used more than one) the request is rejected.  The ``@csrf``
+is used more than once) the request is rejected.  The ``@csrf``
 input field is added automatically by calling the ``submit``
 function/path. It can also be added manually by calling
 anti_csrf_nonce() directly. For example:
@@ -1722,7 +1725,7 @@ on a valid header check against the roundup url and the presence
 of the ``X-REQUESTED-WITH`` header. Work to improve this is a
 future project after the 1.6 release.
 
-The enforcement levels an be modified in ``config.ini``. Refer to
+The enforcement levels can be modified in ``config.ini``. Refer to
 that file for details.
 
 Special form variables
@@ -2021,13 +2024,13 @@ future release.
 recommended for production use.
 
 .. _Chameleon:
-   http://chameleon.repoze.org/
+   https://pypi.org/project/Chameleon/
 .. _z3c.pt:
-   http://pypi.python.org/pypi/z3c.pt
-__ http://chameleon.repoze.org/docs/latest/reference.html#incompatibilities-and-differences
+   https://pypi.org/project/z3c.pt/
+__ https://chameleon.readthedocs.io/en/latest/reference.html?highlight=differences#incompatibilities-and-differences
 .. _TAL:
 .. _Template Attribute Language:
-   http://dev.zope.org/Wikis/DevSite/Projects/ZPT/TAL%20Specification%201.4
+   https://pagetemplates.readthedocs.io/en/latest/history/TALSpecification14.html
 
 
 Basic Templating Actions
@@ -2196,7 +2199,7 @@ Modifiers:
 
 .. _TALES:
 .. _Template Attribute Language Expression Syntax:
-   http://dev.zope.org/Wikis/DevSite/Projects/ZPT/TALES%20Specification%201.3
+   https://pagetemplates.readthedocs.io/en/latest/history/TALESSpecification13.html
 
 
 Template Macros
@@ -2261,7 +2264,7 @@ TAL commands may be used freely inside METAL-using tags (so your
 
 .. _METAL:
 .. _Macro Expansion Template Attribute Language:
-   http://dev.zope.org/Wikis/DevSite/Projects/ZPT/METAL%20Specification%201.0
+   https://pagetemplates.readthedocs.io/en/latest/history/TALESSpecification13.html
 
 Information available to templates
 ----------------------------------
@@ -2694,7 +2697,7 @@ reverse     only on Multilink properties - produce a list of the linked
 isset       returns True if the property has been set to a value
 =========== ================================================================
 
-__ http://docs.python.org/lib/module-time.html
+__ https://docs.python.org/2/library/time.html
 
 All of the above functions perform checks for permissions required to
 display or edit the data they are manipulating. The simplest case is
@@ -4325,7 +4328,7 @@ Using an LDAP database for user information
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A script that reads users from an LDAP store using
-http://python-ldap.sf.net/ and then compares the list to the users in the
+https://pypi.org/project/python-ldap/ and then compares the list to the users in the
 roundup user database would be pretty easy to write. You'd then have it run
 once an hour / day (or on demand if you can work that into your LDAP store
 workflow). See the example `Using a UN*X passwd file as the user database`_
@@ -4374,12 +4377,12 @@ the following into ``detectors/anti_spam.py`` in your tracker::
 
     def reject_html(db, cl, nodeid, newvalues):
         if newvalues['type'] == 'text/html':
-        raise Reject, 'not allowed'
+        raise Reject('not allowed')
 
     def reject_manylinks(db, cl, nodeid, newvalues):
         content = newvalues['content']
         if content.count('http://') > 2:
-        raise Reject, 'not allowed'
+        raise Reject('not allowed')
 
     def init(db):
         db.file.audit('create', reject_html)
@@ -4389,7 +4392,7 @@ You may also wish to block image attachments if your tracker does not
 need that ability::
 
     if newvalues['type'].startswith('image/'):
-        raise Reject, 'not allowed'
+        raise Reject('not allowed')
 
 
 Stop "nosy" messages going to people on vacation
@@ -4453,7 +4456,7 @@ vacation". Not very useful, and relatively easy to stop.
                     if users.get(nosyid, 'username') == 'anonymous':
                         continue
                     # make sure they haven't seen the message already
-                    if not seen_message.has_key(nosyid):
+                    if nosyid not in seen_message:
                         # send it to them
                         sendto.append(nosyid)
                         recipients.append(nosyid)
@@ -4520,7 +4523,7 @@ move issues. You can do this by following these steps:
          ''' Check that the desired transition is valid for the "status"
              property.
          '''
-         if not newvalues.has_key('status'):
+         if 'status' not in newvalues:
              return
          current = cl.get(nodeid, 'status')
          new = newvalues['status']
@@ -4528,8 +4531,8 @@ move issues. You can do this by following these steps:
              return
          ok = db.status.get(current, 'transitions')
          if new not in ok:
-             raise ValueError, 'Status not allowed to move from "%s" to "%s"'%(
-                 db.status.get(current, 'name'), db.status.get(new, 'name'))
+             raise ValueError('Status not allowed to move from "%s" to "%s"'%(
+                 db.status.get(current, 'name'), db.status.get(new, 'name')))
 
      def init(db):
          db.issue.audit('set', checktransition)
@@ -4623,7 +4626,7 @@ resolved. To achieve this:
 
         # don't do anything if there's no blockers or the status hasn't
         # changed
-        if not blockers or not newvalues.has_key('status'):
+        if not blockers or 'status' not in newvalues:
             return
 
         # get the resolved state ID
@@ -4640,7 +4643,7 @@ resolved. To achieve this:
 
         # ok, see if we're trying to resolve
         if newvalues['status'] == resolved_id:
-            raise ValueError, "This issue can't be resolved until %s resolved."%s
+            raise ValueError("This issue can't be resolved until %s resolved."%s)
 
 
     def resolveblockers(db, cl, nodeid, oldvalues):
@@ -4826,23 +4829,23 @@ This results in the following function::
             ok = ('yes',)
             # old node, get the current values from the node if they haven't
             # changed
-            if not newvalues.has_key('nosy'):
+            if 'nosy' not in newvalues:
                 nosy = cl.get(nodeid, 'nosy')
                 for value in nosy:
-                    if not current.has_key(value):
+                    if value not in current:
                         current[value] = 1
 
         # if the nosy list changed in this transaction, init from the new value
-        if newvalues.has_key('nosy'):
+        if 'nosy' in newvalues:
             nosy = newvalues.get('nosy', [])
             for value in nosy:
                 if not db.hasnode('user', value):
                     continue
-                if not current.has_key(value):
+                if value not in current:
                     current[value] = 1
 
         # add users with keyword in nosy_keywords to the nosy list
-        if newvalues.has_key('keyword') and newvalues['keyword'] is not None:
+        if 'keyword' in newvalues and newvalues['keyword'] is not None:
             keyword_ids = newvalues['keyword']
             for keyword in keyword_ids:
                 # loop over all users,
@@ -4857,7 +4860,7 @@ This results in the following function::
                         current[user_id] = 1
 
         # that's it, save off the new nosy list
-        newvalues['nosy'] = current.keys()
+        newvalues['nosy'] = list(current.keys())
 
 These two function are the only ones needed in the file.
 
@@ -4919,7 +4922,7 @@ directory of your tracker::
    def restrict_nosy_changes(db, cl, nodeid, newvalues):
        '''Do not permit changes to nosy via email.'''
 
-       if not (newvalues.has_key('nosy')):
+       if 'nosy' not in newvalues:
            # the nosy field has not changed so no need to check.
            return
 
@@ -4999,14 +5002,14 @@ tracker ``detectors`` directory)::
       ''' Ensure the assignedto value in newvalues is used with the
           Fixer Permission
       '''
-      if not newvalues.has_key('assignedto'):
+      if 'assignedto' not in newvalues:
           # don't care
           return
   
       # get the userid
       userid = newvalues['assignedto']
       if not db.security.hasPermission('Fixer', userid, cl.classname):
-          raise ValueError, 'You do not have permission to edit %s'%cl.classname
+          raise ValueError('You do not have permission to edit %s'%cl.classname)
 
   def init(db):
       db.issue.audit('set', assignedtoMustBeFixer)
@@ -5047,6 +5050,12 @@ First up, we create the new Role and Permission structure in
     p = db.security.addPermission(name='View', klass='issue',
         check=own_issue, description='Can only view own issues')
     db.security.addPermissionToRole('Provisional User', p)
+    # This allows the interface to get the names of the properties
+    # in the issue. Used for selecting sorting and grouping
+    # on the index page.
+    p = db.security.addPermission(name='Search', klass='issue')
+    db.security.addPermissionToRole ('Provisional User', p)
+
 
     # Assign the Permissions for issue-related classes
     for cl in 'file', 'msg', 'query', 'keyword':

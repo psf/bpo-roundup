@@ -37,6 +37,7 @@ class ExampleMessage(Message):
              'multipart/mixed': '    boundary="boundary-%(indent)s";\n',
              'multipart/alternative': '    boundary="boundary-%(indent)s";\n',
              'text/plain': '    name="foo.txt"\nfoo\n',
+             'text/html': '    name="bar.html"\n<html><body>bar &gt;</body></html>\n',
              'application/pgp-signature': '    name="foo.gpg"\nfoo\n',
              'application/pdf': '    name="foo.pdf"\nfoo\n',
              'message/rfc822': '\nSubject: foo\n\nfoo\n'}
@@ -159,11 +160,18 @@ class MultipartTestCase(unittest.TestCase):
         p = m.getpart()
         self.assert_(p is None)
 
-    def TestExtraction(self, spec, expected):
-        self.assertEqual(ExampleMessage(spec).extract_content(), expected)
+    def TestExtraction(self, spec, expected, convert_html_with=False):
+        if convert_html_with:
+            from roundup.dehtml import dehtml
+            html2text=dehtml(convert_html_with).html2text
+        else:
+            html2text=None
+
+        self.assertEqual(ExampleMessage(spec).extract_content(
+            html2text=html2text), expected)
 
     def testTextPlain(self):
-        self.TestExtraction('text/plain', ('foo\n', []))
+        self.TestExtraction('text/plain', ('foo\n', [], False))
 
     def testAttachedTextPlain(self):
         self.TestExtraction("""
@@ -171,7 +179,7 @@ multipart/mixed
     text/plain
     text/plain""",
                   ('foo\n',
-                   [('foo.txt', 'text/plain', 'foo\n')]))
+                   [('foo.txt', 'text/plain', 'foo\n')], False))
 
     def testMultipartMixed(self):
         self.TestExtraction("""
@@ -179,14 +187,109 @@ multipart/mixed
     text/plain
     application/pdf""",
                   ('foo\n',
-                   [('foo.pdf', 'application/pdf', 'foo\n')]))
+                   [('foo.pdf', 'application/pdf', 'foo\n')], False))
+
+    def testMultipartMixedHtml(self):
+        # test with html conversion enabled
+        self.TestExtraction("""
+multipart/mixed
+    text/html
+    application/pdf""",
+                  ('bar >\n',
+                   [('bar.html', 'text/html',
+                      '<html><body>bar &gt;</body></html>\n'),
+                   ('foo.pdf', 'application/pdf', 'foo\n')], False),
+                            convert_html_with='dehtml')
+
+        # test with html conversion disabled
+        self.TestExtraction("""
+multipart/mixed
+    text/html
+    application/pdf""",
+                  (None,
+                   [('bar.html', 'text/html',
+                      '<html><body>bar &gt;</body></html>\n'),
+                    ('foo.pdf', 'application/pdf', 'foo\n')], False),
+                            convert_html_with=False)
 
     def testMultipartAlternative(self):
         self.TestExtraction("""
 multipart/alternative
     text/plain
     application/pdf
-""", ('foo\n', [('foo.pdf', 'application/pdf', 'foo\n')]))
+        """, ('foo\n', [('foo.pdf', 'application/pdf', 'foo\n')], False))
+
+    def testMultipartAlternativeHtml(self):
+        self.TestExtraction("""
+multipart/alternative
+    text/html
+    application/pdf""",
+                  ('bar >\n',
+                   [('bar.html', 'text/html',
+                      '<html><body>bar &gt;</body></html>\n'),
+                   ('foo.pdf', 'application/pdf', 'foo\n')], False),
+                            convert_html_with='dehtml')
+
+        self.TestExtraction("""
+multipart/alternative
+    text/html
+    application/pdf""",
+                  (None,
+                   [('bar.html', 'text/html',
+                      '<html><body>bar &gt;</body></html>\n'),
+                    ('foo.pdf', 'application/pdf', 'foo\n')], False),
+                            convert_html_with=False)
+
+    def testMultipartAlternativeHtmlText(self):
+        # text should take priority over html when html is first
+        self.TestExtraction("""
+multipart/alternative
+    text/html
+    text/plain
+    application/pdf""",
+                  ('foo\n',
+                   [('bar.html', 'text/html',
+                      '<html><body>bar &gt;</body></html>\n'),
+                    ('foo.pdf', 'application/pdf', 'foo\n')], False),
+                            convert_html_with='dehtml')
+
+        # text should take priority over html when text is first
+        self.TestExtraction("""
+multipart/alternative
+    text/plain
+    text/html
+    application/pdf""",
+                  ('foo\n',
+                   [('bar.html', 'text/html',
+                      '<html><body>bar &gt;</body></html>\n'),
+                    ('foo.pdf', 'application/pdf', 'foo\n')], False),
+                            convert_html_with='dehtml')
+
+        # text should take priority over html when text is second and
+        # html is disabled
+        self.TestExtraction("""
+multipart/alternative
+    text/html
+    text/plain
+    application/pdf""",
+                  ('foo\n',
+                   [('bar.html', 'text/html',
+                      '<html><body>bar &gt;</body></html>\n'),
+                    ('foo.pdf', 'application/pdf', 'foo\n')], False),
+                            convert_html_with=False)
+
+        # text should take priority over html when text is first and
+        # html is disabled
+        self.TestExtraction("""
+multipart/alternative
+    text/plain
+    text/html
+    application/pdf""",
+                  ('foo\n',
+                   [('bar.html', 'text/html',
+                      '<html><body>bar &gt;</body></html>\n'),
+                    ('foo.pdf', 'application/pdf', 'foo\n')], False),
+                            convert_html_with=False)
 
     def testDeepMultipartAlternative(self):
         self.TestExtraction("""
@@ -194,13 +297,13 @@ multipart/mixed
     multipart/alternative
         text/plain
         application/pdf
-""", ('foo\n', [('foo.pdf', 'application/pdf', 'foo\n')]))
+        """, ('foo\n', [('foo.pdf', 'application/pdf', 'foo\n')], False))
 
     def testSignedText(self):
         self.TestExtraction("""
 multipart/signed
     text/plain
-    application/pgp-signature""", ('foo\n', []))
+    application/pgp-signature""", ('foo\n', [], False))
 
     def testSignedAttachments(self):
         self.TestExtraction("""
@@ -210,7 +313,7 @@ multipart/signed
         application/pdf
     application/pgp-signature""",
                   ('foo\n',
-                   [('foo.pdf', 'application/pdf', 'foo\n')]))
+                   [('foo.pdf', 'application/pdf', 'foo\n')], False))
 
     def testAttachedSignature(self):
         self.TestExtraction("""
@@ -218,13 +321,13 @@ multipart/mixed
     text/plain
     application/pgp-signature""",
                   ('foo\n',
-                   [('foo.gpg', 'application/pgp-signature', 'foo\n')]))
+                   [('foo.gpg', 'application/pgp-signature', 'foo\n')], False))
 
     def testMessageRfc822(self):
         self.TestExtraction("""
 multipart/mixed
     message/rfc822""",
                   (None,
-                   [('foo.eml', 'message/rfc822', 'Subject: foo\n\nfoo\n')]))
+                   [('foo.eml', 'message/rfc822', 'Subject: foo\n\nfoo\n')], False))
 
 # vim: set filetype=python ts=4 sw=4 et si

@@ -2,9 +2,15 @@
 #
 __docformat__ = "restructuredtext"
 
-try:
+# Some systems have a backport of the Python 3 configparser module to
+# Python 2: <https://pypi.org/project/configparser/>.  That breaks
+# Roundup if used with Python 2 because it generates unicode objects
+# where not expected by the Python code.  Thus, a version check is
+# used here instead of try/except.
+import sys
+if sys.version_info[0] > 2:
     import configparser			# Python 3
-except ImportError:
+else:
     import ConfigParser as configparser	# Python 2
 
 import getopt
@@ -12,7 +18,6 @@ import imp
 import logging, logging.config
 import os
 import re
-import sys
 import time
 import smtplib
 
@@ -324,6 +329,19 @@ or should it not be added (none)"""
         else:
             raise OptionValueError(self, value, self.class_description)
         
+class HtmlToTextOption(Option):
+
+    """What module should be used to convert emails with only text/html parts into text for display in roundup. Choose from beautifulsoup 4, dehtml - the internal code or none to disable html to text conversion. If beautifulsoup chosen but not available, dehtml will be used."""
+
+    class_description = "Allowed values: beautifulsoup, dehtml, none"
+
+    def str2value(self, value):
+        _val = value.lower()
+        if _val in ("beautifulsoup", "dehtml", "none"):
+            return _val
+        else:
+            raise OptionValueError(self, value, self.class_description)
+
 class EmailBodyOption(Option):
 
     """When to replace message body or strip quoting: always, never or for new items only"""
@@ -592,6 +610,14 @@ SETTINGS = (
             " with Email Gateway.\n"
             "This is a comma-separated string of role names"
             " (e.g. 'Admin,User')."),
+        (Option, "obsolete_history_roles", "Admin",
+	    "On schema changes, properties or classes in the history may\n"
+	    "become obsolete.  Since normal access permissions do not apply\n"
+	    "(we don't know if a user should see such a property or class)\n"
+	    "a list of roles is specified here that are allowed to see\n"
+	    "these obsolete properties in the history. By default only the\n"
+	    "admin role may see these history entries, you can make them\n"
+	    "visible to all users by adding, e.g., the 'User' role here."),
         (Option, "error_messages_to", "user",
             # XXX This description needs better wording,
             #   with explicit allowed values list.
@@ -1012,6 +1038,14 @@ always passes, so setting it less than 1 is not recommended."""),
             "multipart/alternative, and this option is set, all other\n"
             "parts of the multipart/alternative are ignored. The default\n"
             "is to keep all parts and attach them to the issue."),
+        (HtmlToTextOption, "convert_htmltotext", "none",
+            "If an email has only text/html parts, use this module\n"
+            "to convert the html to text. Choose from beautifulsoup 4,\n"
+            "dehtml - (internal code), or none to disable conversion.\n"
+            "If 'none' is selected, email without a text/plain part\n"
+            "will be returned to the user with a message. If\n"
+            "beautifulsoup is selected but not installed dehtml will\n"
+            "be used instead."),
         (BooleanOption, "keep_real_from", "no",
             "When handling emails ignore the Resent-From:-header\n"
             "and use the original senders From:-header instead.\n"

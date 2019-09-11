@@ -1,7 +1,9 @@
+Note links for http://www.zope.com/Marks and  http://www.ekit.com/ are dead.
+
 Roundup Licensing
 -----------------
 
-Copyright (c) 2009-2016 Roundup-Team
+Copyright (c) 2009-2019 Roundup-Team
 Copyright (c) 2003-2009 Richard Jones (richard@mechanicalcat.net)
 Copyright (c) 2002 eKit.com Inc (http://www.ekit.com/)
 Copyright (c) 2001 Bizar Software Pty Ltd (http://www.bizarsoftware.com.au/)
@@ -84,7 +86,7 @@ following conditions are met:
 
 Disclaimer
 
-  THIS SOFTWARE IS PROVIDED BY ZOPE CORPORATION ``AS IS''
+  THIS SOFTWARE IS PROVIDED BY ZOPE CORPORATION ''AS IS''
   AND ANY EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT
   NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
   AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN

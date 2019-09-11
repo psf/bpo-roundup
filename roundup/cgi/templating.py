@@ -104,7 +104,7 @@ def anti_csrf_nonce(self, client, lifetime=None):
     otks.set(key, uid=client.db.getuid(),
              sid=client.session_api._sid,
              __timestamp=ts )
-    client.db.commit()
+    otks.commit()
     return key
 
 ### templating
@@ -706,7 +706,7 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
     def classhelp(self, properties=None, label=''"(list)", width='500',
             height='600', property='', form='itemSynopsis',
             pagesize=50, inputtype="checkbox", html_kwargs={},
-            sort=None, filter=None):
+            group='', sort=None, filter=None):
         """Pop up a javascript window with class help
 
         This generates a link to a popup window which displays the
@@ -747,6 +747,8 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
             else:
                 sort = self._klass.orderprop()
         sort = '&amp;@sort=' + sort
+        if group :
+            group = '&amp;@group=' + group
         if property:
             property = '&amp;property=%s'%property
         if form:
@@ -765,9 +767,9 @@ class HTMLClass(HTMLInputMixin, HTMLPermissions):
         else:
            filter = ''
         help_url = "%s?@startwith=0&amp;@template=help&amp;"\
-                   "properties=%s%s%s%s%s&amp;@pagesize=%s%s" % \
+                   "properties=%s%s%s%s%s%s&amp;@pagesize=%s%s" % \
                    (self.classname, properties, property, form, type,
-                   sort, pagesize, filter)
+                   group, sort, pagesize, filter)
         onclick = "javascript:help_window('%s', '%s', '%s');return false;" % \
                   (help_url, width, height)
         return '<a class="classhelp" href="%s" onclick="%s" %s>%s</a>' % \
@@ -1043,6 +1045,10 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
                                 linkids = [linkid]
                             subml = []
                             for linkid in linkids:
+                                # We're seeing things like
+                                # {'nosy':['38', '113', None, '82']} in the wild
+                                if linkid is None :
+                                    continue
                                 label = classname + linkid
                                 # if we have a label property, try to use it
                                 # TODO: test for node existence even when
@@ -1059,7 +1065,8 @@ class _HTMLItem(HTMLInputMixin, HTMLPermissions):
                                     subml.append('<strike>%s</strike>'%label)
                                 else:
                                     if hrefable:
-                                        subml.append('<a rel="nofollow" href="%s%s">%s</a>'%(
+                                        subml.append('<a rel="nofollow" '
+                                                     'href="%s%s">%s</a>'%(
                                             classname, linkid, label))
                                     elif label is None:
                                         subml.append('%s%s'%(classname,

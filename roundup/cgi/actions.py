@@ -777,7 +777,7 @@ class EditItemAction(EditCommon):
 
     def handleCollision(self, props):
         message = self._('Edit Error: someone else has edited this %s (%s). '
-            'View <a target="new" href="%s%s">their changes</a> '
+            'View <a target="_blank" href="%s%s">their changes</a> '
             'in a new window.')%(self.classname, ', '.join(props),
             self.classname, self.nodeid)
         self.client.add_error_message(message, escape=False)
@@ -911,7 +911,9 @@ class PassResetAction(Action):
                 cl.set(uid, password=password.Password(newpw, config=self.db.config))
                 # clear the props from the otk database
                 otks.destroy(otk)
-                self.db.commit()
+                otks.commit()
+                # commit the password change
+                self.db.commit ()
             except (ValueError, KeyError) as message:
                 self.client.add_error_message(str(message))
                 return
@@ -965,7 +967,7 @@ Your password is now: %(password)s
         while otks.exists(otk):
             otk = ''.join([random.choice(chars) for x in range(32)])
         otks.set(otk, uid=uid, uaddress=address)
-        self.db.commit()
+        otks.commit()
 
         # send the email
         tracker_name = self.db.config.TRACKER_NAME

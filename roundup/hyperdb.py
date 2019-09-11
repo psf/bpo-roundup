@@ -305,7 +305,6 @@ class Number(_Type):
             floating point numbers.
         """
         self.use_double = use_double
-        _Type.__init__ (self, **kw)
         super(Number, self).__init__(**kw)
     def from_raw(self, value, **kw):
         value = value.strip()
@@ -452,7 +451,7 @@ class Proptree(object):
             yield p
             p = p.parent
 
-    def search(self, search_matches=None, sort=True):
+    def search(self, search_matches=None, sort=True, retired=False):
         """ Recursively search for the given properties in a proptree.
         Once all properties are non-transitive, the search generates a
         simple _filter call which does the real work
@@ -463,7 +462,8 @@ class Proptree(object):
                 if p.children:
                     p.search(sort = False)
                 filterspec[p.name] = p.val
-        self.val = self.cls._filter(search_matches, filterspec, sort and self)
+        self.val = self.cls._filter(search_matches, filterspec, sort and self,
+                                    retired=retired)
         return self.val
 
     def sort (self, ids=None):
@@ -807,12 +807,6 @@ All methods except __repr__ must be implemented by a concrete backend Database.
 
         Save all data changed since the database was opened or since the
         last commit() or rollback().
-
-        fail_ok indicates that the commit is allowed to fail. This is used
-        in the web interface when committing cleaning of the session
-        database. We don't care if there's a concurrency issue there.
-
-        The only backend this seems to affect is postgres.
         """
         raise NotImplementedError
 
@@ -1015,6 +1009,10 @@ class Class:
         If the user requesting the history does not have View access
         to the property, the journal entry will not be shown. This can
         be disabled by setting enforceperm=False.
+
+        Note that there is a check for obsolete properties and classes
+        resulting from history changes. These are also only checked if
+        enforceperm is True.
         """
         if not self.do_journal:
             raise ValueError('Journalling is disabled for this class')
@@ -1024,10 +1022,16 @@ class Class:
 
         uid=self.db.getuid() # id of the person requesting the history
 
+        # Roles of the user and the configured obsolete_history_roles
+        hr = set(iter_roles(self.db.config.OBSOLETE_HISTORY_ROLES))
+        ur = set(self.db.user.get_roles(uid))
+        allow_obsolete = bool(hr & ur)
+
         for j in self.db.getjournal(self.classname, nodeid):
             # hide/remove journal entry if:
             #   property is quiet
             #   property is not (viewable or editable)
+            #   property is obsolete and not allow_obsolete
             id, evt_date, user, action, args = j
             if logger.isEnabledFor(logging.DEBUG):
                 j_repr = "%s"%(j,)
@@ -1035,6 +1039,10 @@ class Class:
                 j_repr=''
             if args and type(args) == type({}):
                 for key in args.keys():
+                    if key not in self.properties :
+                        if enforceperm and not allow_obsolete:
+                            del j[4][key]
+                        continue
                     if skipquiet and self.properties[key].quiet:
                         logger.debug("skipping quiet property"
                                      " %s::%s in %s",
@@ -1048,7 +1056,8 @@ class Class:
                                 uid,
                                 self.classname,
                                 property=key )):
-                        logger.debug("skipping unaccessible property %s::%s seen by user%s in %s",
+                        logger.debug("skipping unaccessible property "
+                                     "%s::%s seen by user%s in %s",
                                 self.classname, key, uid, j_repr)
                         del j[4][key]
                         continue
@@ -1078,7 +1087,16 @@ class Class:
                     # j = id, evt_date, user, action, args
                     # 3|20170528045201.484|5|link|('issue', '5', 'blockedby')
                     linkcl, linkid, key = args
-                    cls = self.db.getclass(linkcl)
+                    cls = None
+                    try:
+                        cls = self.db.getclass(linkcl)
+                    except KeyError:
+                        pass
+                    # obsolete property or class
+                    if not cls or key not in cls.properties:
+                        if not enforceperm or allow_obsolete:
+                            journal.append(j)
+                        continue
                     # is the updated property quiet?
                     if skipquiet and cls.properties[key].quiet:
                         logger.debug("skipping quiet property: "
@@ -1231,7 +1249,7 @@ class Class:
         raise NotImplementedError
 
     def _filter(self, search_matches, filterspec, sort=(None,None),
-            group=(None,None)):
+            group=(None,None), retired=False):
         """For some backends this implements the non-transitive
         search, for more information see the filter method.
         """
@@ -1322,7 +1340,8 @@ class Class:
             sortattr.append(('+', 'id'))
         return sortattr
 
-    def filter(self, search_matches, filterspec, sort=[], group=[]):
+    def filter(self, search_matches, filterspec, sort=[], group=[],
+               retired=False):
         """Return a list of the ids of the active nodes in this class that
         match the 'filter' spec, sorted by the group spec and then the
         sort spec.
@@ -1358,7 +1377,7 @@ class Class:
         """
         sortattr = self._sortattr(sort = sort, group = group)
         proptree = self._proptree(filterspec, sortattr)
-        proptree.search(search_matches)
+        proptree.search(search_matches, retired=retired)
         return proptree.sort()
 
     # non-optimized filter_iter, a backend may chose to implement a
@@ -1562,8 +1581,10 @@ def fixNewlines(text):
         other systems (eg. email) don't necessarily handle those line
         endings. Our solution is to convert all line endings to LF.
     """
-    text = text.replace('\r\n', '\n')
-    return text.replace('\r', '\n')
+    if text is not None:
+        text = text.replace('\r\n', '\n')
+        return text.replace('\r', '\n')
+    return text
 
 def rawToHyperdb(db, klass, itemid, propname, value, **kw):
     """ Convert the raw (user-input) value to a hyperdb-storable value. The

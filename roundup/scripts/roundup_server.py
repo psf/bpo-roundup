@@ -24,6 +24,8 @@ __docformat__ = 'restructuredtext'
 import sys
 import os.path as osp
 
+import logging
+
 thisdir = osp.dirname(osp.abspath(__file__))
 rootdir = osp.dirname(osp.dirname(thisdir))
 if (osp.exists(thisdir + '/__init__.py') and
@@ -389,10 +391,39 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             env['HTTP_HOST'] = self.headers ['host']
         except KeyError:
             env['HTTP_HOST'] = ''
+        # https://tools.ietf.org/html/draft-ietf-appsawg-http-forwarded-10
+        # headers.
         xfh = self.headers.getheader('X-Forwarded-Host', None)
         if xfh:
-            env['HTTP_X-FORWARDED-HOST'] = xfh
-        if os.environ.has_key('CGI_SHOW_TIMING'):
+            # If behind a proxy, this is the hostname supplied
+            # via the Host header to the proxy. Used by core code.
+            # Controlled by the CSRF settings.
+            env['HTTP_X_FORWARDED_HOST'] = xfh
+        xff = self.headers.get('X-Forwarded-For', None)
+        if xff:
+            # xff is a list of ip addresses for original client/proxies:
+            # X-Forwarded-For: clientIP, proxy1IP, proxy2IP
+            # May not be trustworthy. Do not use in core without
+            # config option to control its use.
+            # Made available for extensions if the user trusts it.
+            # E.g. you may wish to disable recaptcha validation extension
+            # if the ip of the client matches 172.16.0.0.
+            env['HTTP_X_FORWARDED_FOR'] = xff
+        xfp = self.headers.get('X-Forwarded-Proto', None)
+        if xfp:
+            # xfp is the protocol (http/https) seen by proxies in the
+            # path of the request. I am not sure if there is only
+            # one value or multiple, but I suspect multiple
+            # is possible so:
+            # X-Forwarded-Proto: https, http
+            # is expected if the path is:
+            #    client -> proxy1 -> proxy2 -> back end server
+            # an proxy1 is an SSL terminator.
+            # May not be trustworthy. Do not use in core without
+            # config option to control its use.
+            # Made available for extensions if the user trusts it.
+            env['HTTP_X_FORWARDED_PROTO'] = xfp
+        if 'CGI_SHOW_TIMING' in os.environ:
             env['CGI_SHOW_TIMING'] = os.environ['CGI_SHOW_TIMING']
         env['HTTP_ACCEPT_LANGUAGE'] = self.headers.get('accept-language')
         referer = self.headers.get('Referer')
@@ -403,8 +434,8 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             env['HTTP_ORIGIN'] = origin
         xrw = self.headers.get('x-requested-with')
         if xrw:
-            env['HTTP_X-REQUESTED-WITH'] = xrw
-        range = self.headers.getheader('range')
+            env['HTTP_X_REQUESTED_WITH'] = xrw
+        range = self.headers.get('range')
         if range:
             env['HTTP_RANGE'] = range
 
@@ -422,12 +453,20 @@ class RoundupRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         ''' Try to *safely* log to stderr.
         '''
-        try:
-            BaseHTTPServer.BaseHTTPRequestHandler.log_message(self,
-                format, *args)
-        except IOError:
-            # stderr is no longer viable
-            pass
+        if self.CONFIG['LOGHTTPVIALOGGER']:
+            logger = logging.getLogger('roundup.http')
+
+            logger.info("%s - - [%s] %s" %
+                        (self.client_address[0],
+                         self.log_date_time_string(),
+                         format%args))
+        else:
+            try:
+                BaseHTTPServer.BaseHTTPRequestHandler.log_message(self,
+                                                         format, *args)
+            except IOError:
+                # stderr is no longer viable
+                pass
 
     def start_response(self, headers, response):
         self.send_response(response)
@@ -537,6 +576,11 @@ class ServerConfig(configuration.Config):
             (configuration.BooleanOption, "log_hostnames", "no",
                 "Log client machine names instead of IP addresses "
                 "(much slower)"),
+            (configuration.BooleanOption, "loghttpvialogger", "no",
+                "Have http(s) request logging done via python logger module.\n"
+                "If set to yes the python logging module is used with "
+                "qualname\n'roundup.http'. Otherwise logging is done to "
+                "stderr or the file\nspecified using the -l/logfile option."),
             (configuration.NullableFilePathOption, "pidfile", "",
                 "File to which the server records "
                 "the process id of the daemon.\n"
@@ -575,6 +619,7 @@ class ServerConfig(configuration.Config):
         "log_hostnames": "N",
         "multiprocess": "t:",
         "template": "i:",
+        "loghttpvialogger": 'L',
         "ssl": "s",
         "pem": "e:",
     }
@@ -792,6 +837,7 @@ Options:
  -N            log client machine names instead of IP addresses (much slower)
  -i <fname>    set tracker index template
  -s            enable SSL
+ -L            http request logging uses python logging (roundup.http)
  -e <fname>    PEM file containing SSL key and certificate
  -t <mode>     multiprocess mode (default: %(mp_def)s).
                Allowed values: %(mp_types)s.

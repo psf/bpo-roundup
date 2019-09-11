@@ -81,6 +81,19 @@ default_err_msg = ''"""<html><head><title>An error has occurred</title></head>
 The tracker maintainers have been notified of the problem.</p>
 </body></html>"""
 
+def seed_pseudorandom():
+    '''A function to seed the default pseudorandom random number generator
+       which is used to (at minimum):
+          * generate part of email message-id 
+          * generate OTK for password reset
+          * generate the temp recovery password
+
+       This function limits the scope of the 'import random' call
+       as the random identifier is used throughout the code and
+       can refer to SystemRandom.
+    '''
+    import random
+    random.seed()
 
 class LiberalCookie(SimpleCookie):
     """ Python's SimpleCookie throws an exception if the cookie uses invalid
@@ -184,7 +197,7 @@ class Session:
         self.client.add_cookie(self.cookie_name, None)
         self._data = {}
         self.session_db.destroy(self._sid)
-        self.client.db.commit()
+        self.session_db.commit()
 
     def get(self, name, default=None):
         return self._data.get(name, default)
@@ -202,7 +215,7 @@ class Session:
             self.client.session = self._sid
         else:
             self.session_db.set(self._sid, **self._data)
-            self.client.db.commit()
+            self.session_db.commit()
 
     def update(self, set_cookie=False, expire=None):
         """ update timestamp in db to avoid expiration
@@ -214,7 +227,7 @@ class Session:
                 lifetime is longer
         """
         self.session_db.updateTimestamp(self._sid)
-        self.client.db.commit()
+        self.session_db.commit()
 
         if set_cookie:
             self.client.add_cookie(self.cookie_name, self._sid, expire=expire)
@@ -307,8 +320,14 @@ class Client:
     )
 
     def __init__(self, instance, request, env, form=None, translator=None):
-        # re-seed the random number generator
+        # re-seed the random number generator. Is this is an instance of
+        # random.SystemRandom it has no effect.
         random.seed()
+        # So we also seed the pseudorandom random source obtained from
+        #    import random
+        # to make sure that every forked copy of the client will return
+        # new random numbers.
+        seed_pseudorandom()
         self.start = time.time()
         self.instance = instance
         self.request = request
@@ -733,14 +752,15 @@ class Client:
 
         # XXX: hack - use OTK table to store last_clean time information
         #      'last_clean' string is used instead of otk key
-        last_clean = self.db.getOTKManager().get('last_clean', 'last_use', 0)
+        otks = self.db.getOTKManager()
+        last_clean = otks.get('last_clean', 'last_use', 0)
         if now - last_clean < hour:
             return
 
         self.session_api.clean_up()
-        self.db.getOTKManager().clean()
-        self.db.getOTKManager().set('last_clean', last_use=now)
-        self.db.commit(fail_ok=True)
+        otks.clean()
+        otks.set('last_clean', last_use=now)
+        otks.commit()
 
     def determine_charset(self):
         """Look for client charset in the form parameters or browser cookie.
@@ -1018,7 +1038,7 @@ class Client:
                         self._("csrf key used with wrong method from: %s"),
                         referer)
                     otks.destroy(key)
-                    self.db.commit()
+                    otks.commit()
             # do return here. Keys have been obsoleted.
             # we didn't do a expire cycle of session keys, 
             # but that's ok.
@@ -1042,7 +1062,7 @@ class Client:
         # If required headers are missing, raise an error
         for header in header_names:
             if (config["WEB_CSRF_ENFORCE_HEADER_%s"%header] == 'required'
-                    and "HTTP_%s"%header not in self.env):
+                    and "HTTP_%s" % header.replace('-', '_') not in self.env):
                 logger.error(self._("csrf header %s required but missing for user%s."), header, current_user)
                 raise Unauthorised, self._("Missing header: %s")%header
                 
@@ -1078,9 +1098,9 @@ class Client:
                 header_pass += 1
                 
         enforce=config['WEB_CSRF_ENFORCE_HEADER_X-FORWARDED-HOST']
-        if 'HTTP_X-FORWARDED-HOST' in self.env:
+        if 'HTTP_X_FORWARDED_HOST' in self.env:
             if enforce != "no":
-                host = self.env['HTTP_X-FORWARDED-HOST']
+                host = self.env['HTTP_X_FORWARDED_HOST']
                 foundat = self.base.find('://' + host + '/')
                 # 4 means self.base has http:/ prefix, 5 means https:/ prefix
                 if foundat not in [4, 5]:
@@ -1127,7 +1147,7 @@ class Client:
                 # Note we do not use CSRF nonces for xmlrpc requests.
                 #
                 # see: https://www.owasp.org/index.php/Cross-Site_Request_Forgery_(CSRF)_Prevention_Cheat_Sheet#Protecting_REST_Services:_Use_of_Custom_Request_Headers
-                if 'HTTP_X-REQUESTED-WITH' not in self.env:
+                if 'HTTP_X_REQUESTED_WITH' not in self.env:
                     logger.error(self._("csrf X-REQUESTED-WITH xmlrpc required header check failed for user%s."), current_user)
                     raise UsageError, self._("Required Header Missing")
 
@@ -1141,7 +1161,7 @@ class Client:
 
         if xmlrpc:
             # Save removal of expired keys from database.
-            self.db.commit()
+            otks.commit()
             # Return from here since we have done housekeeping
             # and don't use csrf tokens for xmlrpc.
             return True
@@ -1161,7 +1181,7 @@ class Client:
             otks.destroy(key)
 
         # commit the deletion/expiration of all keys
-        self.db.commit()
+        otks.commit()
 
         enforce=config['WEB_CSRF_ENFORCE_TOKEN']
         if key is None: # we do not have an @csrf token
@@ -1208,7 +1228,7 @@ class Client:
            self.form["@action"].value == "Login":
             if header_pass > 0:
                 otks.destroy(key)
-                self.db.commit()
+                otks.commit()
                 return True
             else:
                 self.add_error_message("Reload window before logging in.")

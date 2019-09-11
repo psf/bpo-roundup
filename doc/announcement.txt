@@ -1,179 +1,54 @@
-I'm proud to release version 1.5.1 of Roundup which has been possible
-due to the help of several contributors.  This release contains
-important security enhancements, so make sure to read
-`doc/upgrading.txt <http://www.roundup-tracker.org/docs/upgrading.html>`_
-to bring your tracker up to date. Other changes, as usual, include some
-new features and many bug fixes.
-
+I'm proud to release version 1.6.1 of Roundup which has been possible
+due to the help of several contributors.  This release is a
+bug fix release. If you are upgrading from a release earlier than
+1.6.0 it includes important security enhancements, so make sure to
+read `docs/upgrading.txt
+<http://www.roundup-tracker.org/docs/upgrading.html>`_ to bring your
+tracker up to date.
 
 Features:
 
-- The example local_replace.py has been updated to show how to link to
-  modern revision systems using hex revision identifiers.
-  This extension is used to expand shortcuts in msgs. (Bernhard Reiter)
-- Drop comment in user settings about numeric hour offsets instead of using
-  pytz timezone names. Due to DST these are wrong half of the year, it is
-  much better to use timezone names. (Thomas Arendsen Hein)
-- issue2550793: Wrap messages with very long lines in the web interface.
-  (Thomas Arendsen Hein)
-- New Link / Multilink option "try_id_parsing": Sometimes the key of a
-  class can be numeric -- in that case roundup will try to parse the
-  value as an ID when evaluating form values -- not as a key. Specifying
-  try_id_parsing='no' for these Link/Multilink will skip the ID step,
-  default is 'yes'. (Ralf Schlatterbeck)
-- New configuration option 'isolation_level' in rdbms section. Currently
-  supported for Postgres and mysql, sets the transaction isolation level.
-  Wrong history entries for concurrent database updates observed in
-  issue2550806 can be prevented by setting this to 'repeatable read' if
-  you want to pay the performance penalty. We test this behaviour in the
-  regression tests for Postgres but not currently for mysql.
-  See http://www.postgresql.org/docs/9.1/static/transaction-iso.html
-  (Ralf Schlatterbeck)
-- /xmlrpc endpoint now shows link to XML-RPC documentation if accessed
-  through browser, without text/xml Content-Type (anatoly techtonik)
-- docs: New dedicated chapter for extensions in ``doc/customizing.txt``
-  (anatoly techtonik)
-- Increase default height of classhelp windows from 400 to 600.
-  (Thomas Arendsen Hein)
-- Date properties now can specify (on input) an explicit timezone suffix
-  (similar to RFC 2822), e.g. +0200 for CEST or -0500 for EST. This also
-  works in the XMLRPC interface. For examples see roundup.date.Date.
-  (Ralf Schlatterbeck)
-- Add RejectRaw exception to allow unescaped HTML error messages to be
-  displayed to the user (thanks Ezio Melotti for the initial patch)
-  (John Kristensen)
+  - doc updates. Link rot fixed and some grammar changes.
+    'Provisional User' config example fixed. Issue tracker is
+    now https. (John Rouillard) 
 
 Fixed:
 
-- issue2550869 Duplicate mail headers (Reply-To, Message-ID, In-Reply-To) 
-  when sending out email. Reported with first fix by Mathias Behrle.
-  (Bernhard Reiter)
-- issue2550830 An empty LinkHTMLProperty cannot be compared successfully. 
-  Improves the query editing page. Reported and fixed by R David Murray 
-  (Bernhard Reiter).
-- Fix Release-date of 1.5.0 in this file (thanks to Bernhard for
-  discovery) (Ralf Schlatterbeck)
-- Pythons cgi form code can return a TypeError, we now guard for this
-  condition. (Ralf Schlatterbeck)
-- Small bug-fix in SQL backends: A query (e.g. in a html menu) with a
-  where-clause that always evaluates to false now will not raise a
-  traceback. (Ralf Schlatterbeck)
-- Remove Python 2.3 compatibility code for i18n (anatoly techtonik)
-- If documentation 'sphinx-build' tool is not found in system PATH,
-  'setup.py build_doc' command now tries to detect it from PYTHONPATH
-  (anatoly techtonik)
-- Read version and release for generated documentation from
-  roundup/__init__.py. (Thomas Arendsen Hein)
-- Do not throw an internal error if a .mo file can not be read
-  (Thomas Arendsen Hein)
-- issue2550673 Make the "Make a copy" link work by fixing copy_url to properly
-  handle multilink properties. (John Rouillard)
-- issue2550583, issue2550635 Do not limit results with Xapian indexer
-  (Thomas Arendsen Hein)
-- Allow using plain() on unsaved dates in HTML forms
-  (Thomas Arendsen Hein)
-- setup.py now installs static files of the HTML documentation (stylesheets,
-  images, etc.) (Thomas Arendsen Hein)
-- executable .py scripts need "#!/usr/bin/env python", add this to demo.py,
-  remove exec bits from website/wiki/wiki/data/plugin/theme/roundup.py
-  (Thomas Arendsen Hein)
-- issue2550822: Fix showing more than one additional property in class menu.
-  Report and fix by James Mack (Thomas Arendsen Hein)
-- Fix String search with special SQL wildcard characters in LIKE/ILIKE
-  clause and add testcase (Ralf Schlatterbeck)
-- Fix subtle bug when sorting by a Link that contains a Multilink from
-  which we also search for an attribute. In that case the LEFT OUTER
-  JOIN clause was missing in generated SQL. (Ralf Schlatterbeck)
-- Fix another XSS issue2550817. Note that the code that triggers that
-  particular bug is no longer in roundup core. But the change to the
-  templates we suggest is a *lot* safer as it by default escapes the
-  error and ok messages now. Thanks to Thibault Fevry for the original
-  bug-report. (Ralf Schlatterbeck)
-- issue2117897: Fixed two more places in date.py where seconds can be
-  rounded to 60.0 and causing exceptions. Change them to 59.999 as was
-  done in the fix for issue2550802. (Thomas Arendsen Hein)
-- Fix batch.propchanged for transitive id properties (would result in a
-  backtrace when trying to group by property.id) (Ralf Schlatterbeck)
-- Fix issue2550835, the test checks for date-range queries with an
-  interval that depends on the local time. Put the queried date a little
-  later to avoid a race condition where the queried interval doesn't
-  match the date because the clock has advanced. (Ralf Schlatterbeck)
-- Apply german translation fixes from Debian team in issue2550761,
-  thanks to Kai Storbeck for taking the time to report these.
-  (Ralf Schlatterbeck)
-- Fix issue2550843 Pass text of Unauthorised and Login exceptions instead
-  of the exception instance to avoid traceback with string operations.
-  (Thomas Arendsen Hein)
-- Fix issue2550841 roundup-demo templates not found in virtualenv (John
-  Kristensen)
-- Security: Default user permissions should not include all user
-  attributes. We now limit this to the username, realname and some
-  further attributes depending on the schema. Note that we no longer
-  include the email addresses, depending on your installation you may
-  want to further restrict this or add some attributes like ``address``
-  and ``alternate_addresses``. (Ralf Schlatterbeck)
-- Correctly recreate the database directory when re-initialising a tracker
-  instance. (John Kristensen)
-- In case of an error, date fields would lose the calendar help, fixed.
-  (Ralf Schlatterbeck)
-- demo.py usage message improved: explains "nuke" now. (Bernhard Reiter)
-- Fix issue2550735 Missing doc for xmlrpc schema. Thanks to Cedric Krier
-  for the patch. (anatoly techtonik)
-- Fix two line-break accidents in devel and responsive milestone.item.html
-  (Thomas Arendsen Hein)
-- Fix broken images in legacy spec.html and original_overview.html, and
-  restore web presence for "Roundup's Design Document" (anatoly techtonik)
-- Template jinja2: Updated URL to point to http://www.roundup-tracker.org/,
-  fixed a typo. (Bernhard Reiter)
-- Security: Add mime-type whitelist for attachmens that can be safely
-  rendered from Roundup without trigerring security bugs in browser
-  plugins, XSS issues and spam. The option ``allow_html_file`` didn't
-  provide protection for invalid content-type, in which case browser
-  tried to guess the best one. Thanks to Kay Hayen for reporting and
-  helping debug this. issue2550848 (Ralf Schlatterbeck, anatoly techtonik)
-- Documentation: configuration messages_to_author value "nosy" now documented
-  in chapter "customizing". (Bernhard Reiter)
-- issue2550877 Failures in test_mailgw.py because of duplicated headers
-  and more precise comparision. Writing headers with the email module will use 
-  continuation_ws = ' ' now for python 2.5 and 2.6. (Bernhard Reiter)
-- issue2550870 migrate use of 'rfc822' module to the 'email' module
-  (Bernhard Reiter/John Kristensen)
-- Doctests for roundup.date.Date are now really executable and don't
-  fail. Bug-Fixes in range properties, open intervals with 'to' didn't
-  always work. (Ralf Schlatterbeck)
-- issue2550881 demo.py: Add pointer how to access demo from remote host.
-  Suggested by Karl-Philipp Richter. (Bernhard Reiter)
-- issue2550884 roundup-mailgw --help text improved to explain the allowed 
-  parameters better. Suggested by by Karl-Philipp Richter. (Bernhard Reiter)
-- Fix form-parsing: If multiple new items are added to a multilink
-  property, the old version would create the new items but only link
-  one. (Ralf Schlatterbeck)
-- issue2550892 (translation error of priority in locale de) Thanks 
-  Martin Thomas Swaton for reporting. (Bernhard Reiter)
-- Help-Window now gets focus, this prevents the case that help doesn't
-  work because an old help-window is below the main window.
-  (Ralf Schlatterbeck)
-- issue2550811 20% fix: jinja2 template engine now has an example 
-  how to use non-ascii unicode contents with a custom filter ('| u'). 
-  See updates on http://www.roundup-tracker.org/cgi-bin/moin.cgi/Jinja2
-  (Bernhard Reiter)
-
+  - issue2550994: avoid breakage caused by use of backports of Python 3
+    configparser module to Python 2. (Joseph Myers)
+  - issue2551023: Fix CSRF headers for use with wsgi and cgi. The
+    env variable array used - separators rather than _. Compare:
+    HTTP_X-REQUESTED-WITH to HTTP_X_REQUESTED_WITH. The last is
+    correct. Also fix roundup-server to produce the latter form. (Patch
+    by Cedric Krier, reviewed/applied John Rouillard.)
+  - issue2551035 - fix XSS issue in wsgi and cgi when handing url not
+    found/404. Reported by hannob at
+    https://github.com/python/bugs.python.org/issues/34, issue opened by
+    JulienPalard.
+  - issue2551029: Jinja2 template install error. Remove config.ini
+    from templates to make sure that roundup-admin install writes a new
+    default config.ini based on configuration.py.
+  - issue2551029: Jinja2 template install error. Handle issue with
+    template's config.ini not getting updated. Provide an alternate
+    file: config_ini.ini for required config settings that are merged
+    into the default values producing an up to date config.ini on
+    install.
 
 If you're upgrading from an older version of Roundup you *must* follow
 the "Software Upgrade" guidelines given in the maintenance documentation.
 
-Roundup requires python 2.5 or later (but not 3+) for correct operation.
+Roundup requires python 2.7 or later (but not 3+) for correct operation.
 
 To give Roundup a try, just download (see below), unpack and run::
 
     python demo.py
 
 Release info and download page:
-     http://pypi.python.org/pypi/roundup
+     https://pypi.org/project/roundup
 Source and documentation is available at the website:
      http://roundup-tracker.org/
 Mailing lists - the place to ask questions:
-     http://sourceforge.net/mail/?group_id=31577
+     https://sourceforge.net/p/roundup/mailman/
 
 
 About Roundup
@@ -196,11 +71,17 @@ Roundup manages a number of issues (with flexible properties such as
 The system will facilitate communication among the participants by managing
 discussions and notifying interested parties when issues are edited. One of
 the major design goals for Roundup that it be simple to get going. Roundup
-is therefore usable "out of the box" with any python 2.5+ (but not 3+)
+is therefore usable "out of the box" with any python 2.7+ (but not 3+)
 installation. It doesn't even need to be "installed" to be operational,
 though an install script is provided.
 
-It comes with two issue tracker templates (a classic bug/feature tracker and
-a minimal skeleton) and four database back-ends (anydbm, sqlite, mysql
-and postgresql).
+It comes with five issue tracker templates
 
+* a classic bug/feature tracker
+* a minimal skeleton;
+* a more extensive devel tracker for bug/features etc.
+* a responsive version of the devel tracker
+* a jinja2 based template based on devel
+
+and can use any of four database back-ends (anydbm, sqlite, mysql and
+postgresql).

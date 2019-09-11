@@ -31,8 +31,8 @@ Roundup scripts
 Prerequisites
 =============
 
-Roundup requires Python 2.5 or newer (but not Python 3) with a functioning
-anydbm module. Download the latest version from http://www.python.org/.
+Roundup requires Python 2.7 or newer (but not Python 3) with a functioning
+anydbm module. Download the latest version from https://www.python.org/.
 It is highly recommended that users install the latest patch version
 of python as these contain many fixes to serious bugs.
 
@@ -47,7 +47,7 @@ you get the error message::
 
 you need to install a 32 bit version of python. The 64 bit versions
 use a different registry key that the installer doesn't detect. See:
-http://issues.roundup-tracker.org/issue2550718 for details.
+https://issues.roundup-tracker.org/issue2550718 for details.
 
 Optional Components
 ===================
@@ -59,7 +59,7 @@ Timezone Definitions
   which brings the `Olson tz database`_ into Python.  If pytz_ is not
   installed, timezones may be specified as numeric hour offsets only.
   This is optional but strongly suggested.
-  
+
 An RDBMS
   Sqlite, MySQL and Postgresql are all supported by Roundup and will be
   used if available. One of these is recommended if you are anticipating a
@@ -116,13 +116,13 @@ Windows Service
   You can run Roundup as a Windows service if pywin32_ is installed.
   Otherwise it must be started manually.
 
-.. _Xapian: http://xapian.org/
+.. _Xapian: https://xapian.org/
 .. _Whoosh: https://bitbucket.org/mchaput/whoosh/wiki/Home
-.. _pytz: http://www.python.org/pypi/pytz
-.. _Olson tz database: http://www.twinsun.com/tz/tz-link.htm
+.. _pytz: https://pypi.org/project/pytz/
+.. _Olson tz database: https://www.iana.org/time-zones
 .. _pyopenssl: http://pyopenssl.sourceforge.net
 .. _pyme: http://pyme.sourceforge.net
-.. _pywin32: http://pypi.python.org/pypi/pywin32
+.. _pywin32: https://pypi.org/project/pywin32/
 .. _jinja2: http://jinja.pocoo.org/
 
 
@@ -296,7 +296,7 @@ Configuring your first tracker
 
    to run the server at port 1080 and bind to all ip addresses on your system.
    Then direct your web browser to ``http://your_host_name:1080/support``.
-   
+
 Choosing Your Template
 ----------------------
 
@@ -366,7 +366,7 @@ privileges to create databases.
 Configure a Web Interface
 -------------------------
 
-There are five web interfaces to choose from:
+There are multiple web interfaces to choose from:
 
 1. `web server cgi-bin`_
 2. `cgi-bin for limited-access hosting`_
@@ -728,7 +728,7 @@ Exim4.
 
   For more Debian-specific information, see suggested addition to
   README.Debian in
-  http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=343283, which will
+  https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=343283, which will
   hopefully be merged into the Debian package eventually.
 
 This config makes a few assumptions:
@@ -880,8 +880,9 @@ Public Tracker Considerations
 If you run a public tracker, you will eventually have to think about
 dealing with spam entered through both the web and mail interfaces.
 
-The `customisation documentation`_ has a simple detector that will block
-a lot of spam attempts. Look for the example "Preventing SPAM".
+See the section on `Preventing SPAM`_ in the
+`customisation documentation`_ that has a simple detector
+that will block lot of spam attempts.
 
 
 Maintenance
@@ -1088,9 +1089,8 @@ source directory and make sure there are no errors. If there are errors,
 please let us know!
 
 If the above fails, you may be using the wrong version of python. Try
-``python2 run_tests.py`` or ``python2.X run_tests.py`` where ``X`` is in
-the set 3,4,5,6 depending on the version(s) of python installed.
-If that works, you will need to substitute ``python2`` or ``python2.X``
+``python2 run_tests.py`` or ``python2.7 run_tests.py``.
+If that works, you will need to substitute ``python2`` or ``python2.7``
 for ``python`` in all further commands you use in relation to Roundup --
 from installation and scripts.
 
@@ -1100,6 +1100,7 @@ from installation and scripts.
 .. _`roundup specification`: spec.html
 .. _`tracker configuration`: customizing.html#tracker-configuration
 .. _`customisation documentation`: customizing.html
+.. _`preventing spam`: customizing.html#preventing-spam
 .. _`Adding a new field to the classic schema`:
    customizing.html#adding-a-new-field-to-the-classic-schema
 .. _`Tracking different types of issues`:
@@ -1112,10 +1113,10 @@ from installation and scripts.
 .. _External hyperlink targets:
 
 .. _apache: http://httpd.apache.org/
-.. _flup: http://pypi.python.org/pypi/flup
-.. _mod_python: http://www.modpython.org/
-.. _MySQLdb: http://sourceforge.net/projects/mysql-python
-.. _Psycopg: http://initd.org/software/initd/psycopg
-.. _pysqlite: http://pysqlite.org/
+.. _flup: https://pypi.org/project/flup/
+.. _mod_python: http://modpython.org/
+.. _MySQLdb: https://pypi.org/project/mysqlclient/
+.. _Psycopg: http://initd.org/psycopg/
+.. _pysqlite: https://pysqlite.org/
 .. _`adding MySQL users`:
-    http://dev.mysql.com/doc/refman/5.1/en/adding-users.html
+    https://dev.mysql.com/doc/refman/8.0/en/adding-users.html

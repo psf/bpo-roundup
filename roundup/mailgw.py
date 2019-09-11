@@ -389,7 +389,7 @@ class Message(mimetools.Message):
     #   Only if configured in [mailgw] unpack_rfc822
 
     def extract_content(self, parent_type=None, ignore_alternatives=False,
-        unpack_rfc822=False):
+            unpack_rfc822=False, html2text=None):
         """Extract the body and the attachments recursively.
 
            If the content is hidden inside a multipart/alternative part,
@@ -399,24 +399,43 @@ class Message(mimetools.Message):
         content_type = self.gettype()
         content = None
         attachments = []
+        html_part = False
 
         if content_type == 'text/plain':
             content = self.getbody()
+        elif content_type == 'text/html' and html2text:
+            # if user allows html conversion run this.
+            content = html2text(self.getbody())
+            attachments.append(self.as_attachment())
+            html_part = True
         elif content_type[:10] == 'multipart/':
-            content_found = bool (content)
-            ig = ignore_alternatives and not content_found
+            content_found = False
+            ig = ignore_alternatives
+            html_part_found = False
             for part in self.getparts():
-                new_content, new_attach = part.extract_content(content_type,
-                    not content and ig, unpack_rfc822)
+                new_content, new_attach, html_part = part.extract_content(
+                     content_type, not content and ig, unpack_rfc822,
+                    html2text)
 
                 # If we haven't found a text/plain part yet, take this one,
                 # otherwise make it an attachment.
                 if not content:
                     content = new_content
                     cpart   = part
+                    if html_part:
+                        html_part_found = True
                 elif new_content:
-                    if content_found or content_type != 'multipart/alternative':
+                    if html_part:
+                        # attachment should be added elsewhere.
+                        pass
+                    elif content_found or content_type != 'multipart/alternative':
                         attachments.append(part.text_as_attachment())
+                    elif html_part_found:
+                        # text/plain part found after html
+                        # text/html already stored as attachment,
+                        # so just use the text as the content.
+                        content = new_content
+                        cpart   = part
                     else:
                         # if we have found a text/plain in the current
                         # multipart/alternative and find another one, we
@@ -432,12 +451,13 @@ class Message(mimetools.Message):
                 attachments.extend(new_attach)
             if ig and content_type == 'multipart/alternative' and content:
                 attachments = []
+            html_part = False
         elif unpack_rfc822 and content_type == 'message/rfc822':
             s = cStringIO.StringIO(self.getbody())
             m = Message(s)
             ig = ignore_alternatives and not content
-            new_content, attachments = m.extract_content(m.gettype(), ig,
-                unpack_rfc822)
+            new_content, attachments, html_part = m.extract_content(m.gettype(), ig,
+                    unpack_rfc822, html2text)
             attachments.insert(0, m.text_as_attachment())
         elif (parent_type == 'multipart/signed' and
               content_type == 'application/pgp-signature'):
@@ -445,7 +465,7 @@ class Message(mimetools.Message):
             pass
         else:
             attachments.append(self.as_attachment())
-        return content, attachments
+        return content, attachments, html_part
 
     def text_as_attachment(self):
         """Return first text/plain part as Message"""
@@ -1079,10 +1099,15 @@ encrypted.""")
     def get_content_and_attachments(self):
         ''' get the attachments and first text part from the message
         '''
+        from roundup.dehtml import dehtml
+        html2text=dehtml(self.config['MAILGW_CONVERT_HTMLTOTEXT']).html2text
+
         ig = self.config.MAILGW_IGNORE_ALTERNATIVES
-        self.content, self.attachments = self.message.extract_content(
+        self.message.instance = self.mailgw.instance
+        self.content, self.attachments, html_part = self.message.extract_content(
             ignore_alternatives=ig,
-            unpack_rfc822=self.config.MAILGW_UNPACK_RFC822)
+            unpack_rfc822=self.config.MAILGW_UNPACK_RFC822,
+            html2text=html2text )
         
 
     def create_files(self):
@@ -1434,6 +1459,15 @@ class MailGW:
         '''Read a series of messages from the specified POP server.
         '''
         import getpass, poplib, socket
+        # Monkey-patch poplib to have a large line-limit
+        # Seems that in python2.7 poplib applies a line-length limit not
+        # just to the lines that take care of the pop3 protocol but also
+        # to all email content
+        # See, e.g.,
+        # https://readlist.com/lists/python.org/python-list/69/346982.html
+        # https://stackoverflow.com/questions/30976106/python-poplib-error-proto-line-too-+long?utm_medium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
+        if 0 < getattr (poplib, '_MAXLINE', -1) < 100*1024:
+            poplib._MAXLINE = 100*1024
         try:
             if not user:
                 user = raw_input('User: ')

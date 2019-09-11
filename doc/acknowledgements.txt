@@ -6,6 +6,71 @@ We like to thank our community and all organisation and people
 that support us doing so with code, money, time, testing, reports,
 ideas and everything else that helped!
 
+`Announcement with changelog for current release.`_
+
+.. _`Announcement with changelog for current release.`: announcement.html
+
+
+1.6
+---
+
+1.6.1
+~~~~~
+Maintainer: Ralf Schlatterbeck, John Rouillard
+
+Release Manager: John Rouillard
+
+Developer activity by changesets::
+
+  rouilj at ieee.org            19 **********************************************
+  bernhard at intevation.de      1 **
+  jsm at polyomino.org.uk        1 **
+
+
+Joseph Myers
+Cédric Krier
+hannob/JulienPalard
+
+1.6.0
+~~~~~
+Maintainer: Ralf Schlatterbeck, John Rouillard
+
+Release Manager: John Rouillard
+
+Developer activity by changesets::
+
+  rouilj at ieee.org           234 **********************************************
+  rsc at runtux.com             30 ******
+  john at jerrykan.com          26 *****
+  bernhard at intevation.de     10 **
+  esr at thyrsus.com             8 **
+  techtonik at gmail.com         5 *
+  dangchau1991 at gmail.com      1 
+  pf at artcom-gmbh.de           1 
+  thomas at intevation.de        1 
+
+Frank Niessink,
+Anthony (antmail),
+Bruce Tulloch,
+kinggreedy,
+David Wolever,
+Tom Ekberg,
+Peter Funk,
+Daniel Diniz,
+W. Trevor King,
+Igor Ippolitov,
+Joseph Myers,
+r.david.murray,
+martin.v.loewis,
+Henry (henryl),
+David Wolever,
+Stuart McGraw (smcgraw),
+Philipp Gortan (mephinet),
+Ezio Melotti,
+Heiko Stegmann,
+Trent Gamblin,
+Anton Schur
+
 1.5
 ---
 
@@ -16,9 +81,10 @@ Maintainer: Ralf Schlatterbeck
 Release Manager: Anatoly Techtonik
 
 Developer activity by changesets::
-  hg churn -c --rev 1.5.0:1.5.1 
+
+  hg churn -c --rev 1.5.0:1.5.1
   techtonik@gmail.com        98 **********************************************
-  bernhard@intevation.de     44 ********************* Bernhard Reiter 
+  bernhard@intevation.de     44 ********************* Bernhard Reiter
   rsc@runtux.com             37 ***************** Ralf Schlatterbeck
   john@jerrykan.com          26 ************ John Kristensen
   thomas@intevation.de       22 ********** Thomas Arendsen Hein
@@ -29,28 +95,26 @@ Developer activity by changesets::
 Mathias Behrle,
 Ezio Melotti,
 R David Murray,
-James Mack, 
-Thibault Fevry, 
-Kai Storbeck, 
-Kay Hayen, 
+James Mack,
+Thibault Fevry,
+Kai Storbeck,
+Kay Hayen,
 Karl-Philipp Richter
 
 1.5.0
 ~~~~~
-Maintainer: Ralf Schlatterbeck
+Maintainer: Ralf Schlatterbeck::
 
-hg churn -c --rev 1.4.21:1.5.0
-techtonik@gmail.com        37 ********************************************** Anatoly Techtonik
-bernhard@intevation.de     17 ********************* Bernhard Reiter
-caulagi@gmail.com          16 ******************** Pradip Caulagi
-rouilj@ieee.org             8 ********** John P. Rouillard
-rsc@runtux.com              6 ******* Ralf Schlatterbeck
-thomas@intevation.de        5 ****** Thomas Arendsen Hein
+  hg churn -c --rev 1.4.21:1.5.0
+  techtonik@gmail.com        37 ********************************************** Anatoly Techtonik
+  bernhard@intevation.de     17 ********************* Bernhard Reiter
+  caulagi@gmail.com          16 ******************** Pradip Caulagi
+  rouilj@ieee.org             8 ********** John P. Rouillard
+  rsc@runtux.com              6 ******* Ralf Schlatterbeck
+  thomas@intevation.de        5 ****** Thomas Arendsen Hein
 
 Tom Ekberg,
 Erik Hanspers
-
-
 
 pre 1.5.0
 ---------

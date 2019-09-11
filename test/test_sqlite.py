@@ -20,6 +20,7 @@ from roundup.backends import get_backend, have_backend
 
 from db_test_base import DBTest, ROTest, SchemaTest, ClassicInitTest, config
 from db_test_base import ConcurrentDBTest, FilterCacheTest
+from db_test_base import SpecialActionTest
 
 class sqliteOpener:
     if have_backend('sqlite'):
@@ -52,7 +53,11 @@ class sqliteConcurrencyTest(ConcurrentDBTest, unittest.TestCase):
 class sqliteFilterCacheTest(sqliteOpener, FilterCacheTest, unittest.TestCase):
     backend = 'sqlite'
 
+class sqliteSpecialActionTestCase(sqliteOpener, SpecialActionTest,
+                                  unittest.TestCase):
+    backend = 'sqlite'
 
-from session_common import RDBMSTest
-class sqliteSessionTest(sqliteOpener, RDBMSTest, unittest.TestCase):
+
+from session_common import SessionTest
+class sqliteSessionTest(sqliteOpener, SessionTest, unittest.TestCase):
     pass

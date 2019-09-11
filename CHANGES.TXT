@@ -7,12 +7,40 @@ Each entry has the developer who committed the change in brackets.
 Entries without name were done by Richard Jones.
 
 **IMPORTANT** The v1.5.x releases of Roundup were the last to support
-Python v2.5. Support for Python v2.5 is dropped starting with the v1.6.x
-releases of Roundup, at which point v2.7.2 is required to run those
-releases of Roundup.
+Python v2.5 and v2.6.  Starting with the v1.6 releases of Roundup
+v2.7.2 is required to run newer releases of Roundup.
 
 
-201?-??-??: 1.6.0
+2019-??-?? 1.6.1
+
+Features:
+- doc updates. Link rot fixed and some grammar changes.
+  'Provisional User' config example fixed. Issue tracker is
+  now https. (John Rouillard) 
+
+Fixed:
+
+- issue2550994: avoid breakage caused by use of backports of Python 3
+  configparser module to Python 2. (Joseph Myers)
+- issue2551023: Fix CSRF headers for use with wsgi and cgi. The
+  env variable array used - separators rather than _. Compare:
+  HTTP_X-REQUESTED-WITH to HTTP_X_REQUESTED_WITH. The last is
+  correct. Also fix roundup-server to produce the latter form. (Patch
+  by Cédric Krier, reviewed/applied John Rouillard.)
+- issue2551035 - fix XSS issue in wsgi and cgi when handing url not
+  found/404. Reported by hannob at
+  https://github.com/python/bugs.python.org/issues/34, issue opened by
+  JulienPalard.
+- issue2551029: Jinja2 template install error. Remove config.ini
+  from templates to make sure that roundup-admin install writes a new
+  default config.ini based on configuration.py.
+- issue2551029: Jinja2 template install error. Handle issue with
+  template's config.ini not getting updated. Provide an alternate
+  file: config_ini.ini for required config settings that are merged
+  into the default values producing an up to date config.ini on
+  install.
+
+2018-07-13 1.6.0
 
 Features:
 
@@ -209,6 +237,35 @@ Features:
   from the templating class to the hyperdb. (John Rouillard)
 - Improves diagnostics for mail processing: When using logging level = DEBUG,
   bounces and bounce problems are logged. (Bernhard Reiter)
+- In roundup-server, pass X-Forwarded-For and X-Forwarded-Proto
+  headers as the environment variables: HTTP_X-FORWARDED-FOR and
+  HTTP_X_FORWARDED_PROTO. If the user is running roundup server behind
+  a proxy, these headers allow the user to write extensions that can
+  figure out the original client ip and protocol. None of the core
+  roundup code uses these headers/env vars. These headers can be
+  spoofed by bad proxies etc. so you have been warned.
+- issue2550799: provide basic support for handling html only emails
+  Emails missing text/plain parts but with text/html parts can be
+  converted into text. If this is done the email will no longer be
+  bounced back to the sender with an error. Enable by configuring the
+  convert_htmltotext option in your upgraded config.ini. (Initial
+  patch by Igor Ippolitov merged with changes by John Rouillard.)
+- Add a 'retired' parameter to Class.filter to allow searching for
+  retired, non-retired or all (retired and non-retired) items similar
+  to the argument of the same name to Class.getnodeids. This is 'False'
+  by default (finding only non-retired items for backwards
+  compatibility) and can be set to None (for finding retired and
+  non-retired items) or True (for finding only retired items).
+- Requires Python 2.7 now, indicated in version_check.py
+  and doc/installation.txt. (Bernhard Reiter)
+- New -L flag to roundup-server to send http/https request logs
+  through the python logger module (using roundup.http). This allows
+  automatic log rotation. Without it, log file rotation requires restarting
+  the server. (John Rouillard)
+- Part of issue2550960. Applied patch 0038 to upgrade documentation
+  code examples to support both python 2 and 3. (Joseph Myers)
+- Release no longer includes binary windows installer. Pypi no longer
+  accepts it for upload.
 
 Fixed:
 
@@ -463,6 +520,35 @@ Fixed:
 - issue2550953: Patch: fix for context.is_view_ok check in jinja2 template
   Form controls are displayed when anonymous views indexes but is
   denied access. (patch by Anton Schur applied by John Rouillard)
+- issue2550957: Duplicate emails (with patch).
+  Bcc and cc users passed to nosymessage are not properly recorded.
+  This results in duplicate emails. (patch by Trent Gamblin (trentgg)
+  applied by John Rouillard).
+- issue2550954: History display breaks on removed properties
+  Now changes to removed properties, and link/unlink events from
+  non-existing properties or classes no longer trigger a traceback.
+  Concerning the visibility: We have a new config-item
+  obsolete_history_roles in the main section that defines which roles
+  may see removed properties. By default only role Admin is allowed to
+  see these.
+- Fix issue2550955: Roundup commits although a Reject exception is raised
+  Fix the problem that changes are committed to the database (due to 
+  commits to otk handling) even when a Reject exception occurs. The fix 
+  implements separate database connections for otk/session handling and
+  normal database operation.
+- Allow empty content property for file and message via xmlrpc
+  interface. This used to raise a traceback in the (sql) backend.
+- Work around a limitation in python2.7 implementation of poplib (for
+  the pop3 protocol for fetching emails): It seems poplib applies a
+  line-length limit not just to the lines involving the pop3 protocol
+  but to any email content, too. This sometimes leads to tracebacks
+  whenever an email exceeding this limit is encountered. We "fix" this
+  by monkey-patching poplib with a larger line-limit. Thanks to Heiko
+  Stegmann for discovering this.
+- Fix issue2550963: After refactoring one-time keys from the main
+  database we need to commit the password change in the password reset
+  mechanism separately. This used to be committed by the otk commit.
+
 
 2016-01-11: 1.5.1
 
@@ -609,7 +695,7 @@ Fixed:
 - Documentation: configuration messages_to_author value "nosy" now documented
   in chapter "customizing". (Bernhard Reiter)
 - issue2550877 Failures in test_mailgw.py because of duplicated headers
-  and more precise comparision. Writing headers with the email module will use 
+  and more precise comparision. Writing headers with the email module will use
   continuation_ws = ' ' now for python 2.5 and 2.6. (Bernhard Reiter)
 - issue2550870 migrate use of 'rfc822' module to the 'email' module
   (Bernhard Reiter/John Kristensen)
