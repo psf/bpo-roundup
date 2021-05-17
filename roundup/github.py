@@ -18,7 +18,7 @@ else:
 URL_RE = re.compile(r'https://github.com/python/cpython/pull/(?P<number>\d+)')
 VERBS = r'(?:\b(?P<verb>close[sd]?|closing|fix(?:e[sd])?|)\s+)?'
 ISSUE_RE = re.compile(r'%sbpo-(?P<issue_id>\d+)' % VERBS, re.I|re.U)
-BRANCH_RE = re.compile(r'(2\.\d|3\.\d|master)', re.I)
+BRANCH_RE = re.compile(r'(3\.\d+|main)', re.I)
 
 # Maximum number of bpo issues linked to a PR
 ISSUE_LIMIT = 10
@@ -379,7 +379,7 @@ class Push(Event):
         """
         self.set_roundup_user()
         commits = self.data.get('commits', [])
-        ref = self.data.get('ref', 'refs/heads/master')
+        ref = self.data.get('ref', 'refs/heads/main')
         # messages dictionary maps issue number to a tuple containing
         # the message to be posted as a comment and a boolean flag informing
         # if the issue should be 'closed'
